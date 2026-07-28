@@ -25,3 +25,4 @@ whisper*/
 *.log
 .DS_Store
 tmp/
+geo.js.pre-gazetteer

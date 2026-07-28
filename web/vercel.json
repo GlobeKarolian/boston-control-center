@@ -7,7 +7,9 @@
     { "source": "/incidents.json", "destination": "/api/incidents" },
     { "source": "/transcripts.json", "destination": "/api/transcripts" },
     { "source": "/pipeline.json", "destination": "/api/pipeline" },
-    { "source": "/situations.json", "destination": "/api/situations" }
+    { "source": "/situations.json", "destination": "/api/situations" },
+    { "source": "/stops.json", "destination": "/api/stops" },
+    { "source": "/stops-count.json", "destination": "/api/stops-count" }
   ],
   "functions": {
     "api/app.js": { "maxDuration": 10, "includeFiles": "app/**" },

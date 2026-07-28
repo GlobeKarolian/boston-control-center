@@ -373,6 +373,71 @@
   .rolebadge.dispatch{background:rgba(192,124,255,.18);color:#c07cff;border:1px solid rgba(192,124,255,.42)}
   .rolebadge.field{background:rgba(77,163,255,.16);color:#6fb4ff;border:1px solid rgba(77,163,255,.42)}
 
+  /* --- stops and field contacts --- */
+  #stopsview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
+  #stopsview.show{display:flex}
+  .st-wrap{flex:1;overflow-y:auto;padding:16px 22px 34px}
+  .st-wrap::-webkit-scrollbar{width:9px}.st-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .st-note{font-size:11.5px;color:var(--text-dim);line-height:1.6;max-width:840px;margin:0 0 15px;border-left:2px solid var(--border);padding-left:11px}
+  .st-tools{display:flex;gap:10px;align-items:center;margin-bottom:15px;flex-wrap:wrap}
+  .st-find{flex:1 1 240px;max-width:380px;background:var(--panel-solid);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:12.5px;font-family:var(--mono)}
+  .st-find::placeholder{color:var(--text-faint)}
+  .st-find:focus{outline:none;border-color:var(--scanner)}
+  .st-hit{font-family:var(--mono);font-size:11px;color:var(--text-faint);letter-spacing:.4px}
+  .st-h{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text-faint);margin:20px 0 10px;display:flex;align-items:center;gap:9px}
+  .st-h:first-child{margin-top:0}
+  .st-h .n{background:var(--panel);border:1px solid var(--border);border-radius:20px;padding:1px 8px;letter-spacing:.5px;color:var(--text-dim)}
+  .st-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px}
+  .st-card{background:var(--panel);border:1px solid var(--border);border-radius:10px;padding:11px 13px}
+  .st-card .k{font-family:var(--mono);font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:var(--text-faint)}
+  .st-card .v{font-size:22px;font-weight:700;margin-top:3px;font-family:var(--mono)}
+  .st-card .v.sm{font-size:15px;padding-top:5px}
+
+  /* Out now. A car that has been with somebody for forty minutes is the one
+     thing on this page worth walking over to an editor about, so the clock is
+     the biggest thing in the row and it keeps counting between polls. */
+  .st-open{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px}
+  .st-live{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--scanner);border-radius:10px;padding:11px 13px;cursor:pointer;transition:border-color .15s}
+  .st-live:hover{border-color:#33405a;border-left-color:var(--scanner)}
+  .st-live.long{border-left-color:var(--road)}
+  .st-live.vlong{border-left-color:var(--crash)}
+  .st-live .top{display:flex;align-items:baseline;gap:9px}
+  .st-live .clk{font-family:var(--mono);font-size:21px;font-weight:700;letter-spacing:-.5px}
+  .st-live .unit{font-family:var(--mono);font-size:12.5px;color:var(--text);font-weight:600}
+  .st-live .dept{font-size:10.5px;color:var(--text-faint);margin-left:auto;white-space:nowrap}
+  .st-live .where{font-size:12px;color:var(--text-dim);margin-top:5px;line-height:1.4}
+
+  /* Tonight. A log, so a row rather than a card, and dense enough that a whole
+     shift fits on a screen without scrolling past the thing you came for. */
+  .st-row{display:flex;align-items:flex-start;gap:11px;padding:9px 12px;border-bottom:1px solid var(--border-soft);cursor:pointer;font-size:12.5px}
+  .st-row:hover{background:rgba(255,255,255,.028)}
+  .st-row .t{font-family:var(--mono);font-size:11px;color:var(--text-faint);width:52px;flex:0 0 auto;padding-top:1px}
+  .st-row .u{font-family:var(--mono);font-size:11.5px;font-weight:600;width:74px;flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .st-row .dur{font-family:var(--mono);font-size:11px;width:48px;flex:0 0 auto;text-align:right;color:var(--text-dim)}
+  .st-row .body{flex:1;min-width:0;line-height:1.45}
+  .st-row .who{color:var(--text)}
+  .st-row .sub{color:var(--text-faint);font-size:11px;margin-top:2px}
+  .st-plate{font-family:var(--mono);font-size:11px;background:rgba(255,176,32,.13);border:1px solid rgba(255,176,32,.4);color:var(--road);border-radius:4px;padding:1px 5px;letter-spacing:.5px;white-space:nowrap}
+  .st-name{font-family:var(--mono);font-size:11.5px;color:#e9edf4;border-bottom:1px dotted #46536b}
+  .st-tag{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;border-radius:3px;padding:1px 5px;white-space:nowrap;vertical-align:middle}
+  .st-tag.arrest{background:rgba(255,77,77,.16);border:1px solid rgba(255,77,77,.45);color:#ff7b7b}
+  .st-tag.tow,.st-tag.summons,.st-tag.citation{background:rgba(255,176,32,.13);border:1px solid rgba(255,176,32,.4);color:var(--road)}
+  .st-tag.warning,.st-tag.none{background:rgba(154,164,182,.11);border:1px solid #2c3547;color:var(--text-dim)}
+  .st-tag.flag{background:rgba(192,124,255,.16);border:1px solid rgba(192,124,255,.42);color:var(--alert)}
+  .st-tag.stale{background:rgba(95,106,126,.13);border:1px solid #2c3547;color:var(--text-faint)}
+  .st-empty{color:var(--text-faint);font-size:12px;padding:14px 2px;font-style:italic}
+
+  /* The tape, under a row that has been opened. A name is not going anywhere
+     near print off a machine transcript, so the words it was read out of are
+     one click away, and a line the tracker reasoned onto the stop rather than
+     heard on the callsign says so. */
+  .st-tape{background:var(--panel-solid);border:1px solid var(--border);border-radius:8px;margin:2px 0 10px;padding:9px 12px}
+  .st-tape .ln{font-size:12px;color:var(--text-dim);line-height:1.5;padding:3px 0;display:flex;gap:9px}
+  .st-tape .ln .tt{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);flex:0 0 auto;padding-top:1px}
+  .st-tape .ln.ctx{color:var(--text-faint)}
+  .st-tape .ln.ctx .tt::after{content:' ~';color:var(--road)}
+  .st-tape .meta{font-family:var(--mono);font-size:10px;color:var(--text-faint);letter-spacing:.5px;margin-top:7px;border-top:1px solid var(--border-soft);padding-top:7px}
+
   /* --- backend "under the hood" view --- */
   #backend{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
   #backend.show{display:flex}
@@ -498,6 +563,7 @@
     <span class="live-badge"><span class="dot"></span> Live</span>
     <div class="tabs" id="tabs">
       <button class="tab active" data-view="map">Map</button>
+      <button class="tab" data-view="stops">Stops<span class="n" id="tabStops" style="font-family:var(--mono);font-size:10px;margin-left:6px;opacity:.75"></span></button>
       <button class="tab" data-view="backend"><span class="tdot"></span>Under the Hood</button>
     </div>
     <span class="caveat" title="Live scanner and geodata on Boston. Calls are machine-transcribed and machine-located, so they are unverified and not for publication until the desk confirms. Click any incident for its live timeline.">Unverified &middot; not for publication</span>
@@ -552,6 +618,28 @@
   <div class="detail" id="detail"></div>
   <div class="toast-wrap" id="toastWrap"></div>
   <div class="big-alert" id="bigAlert"></div>
+
+  <!-- Stops and field contacts: the log under the map -->
+  <div id="stopsview">
+    <div class="st-wrap">
+      <p class="st-note">
+        Every car stop and field contact the tracker can hear, read off the air by machine.
+        Names, plates and dates of birth are transcribed as spoken and are frequently
+        misheard, so nothing here is confirmed and none of it is for publication until the
+        desk checks it against the department. Click a row for the transmissions it came
+        out of. A stop that turned into news is also a pin on the map.
+      </p>
+      <div class="st-tools">
+        <input class="st-find" id="stFind" type="search" placeholder="plate, name, unit, street" autocomplete="off" spellcheck="false"/>
+        <span class="st-hit" id="stHit"></span>
+      </div>
+      <div class="st-grid" id="stStats"></div>
+      <div class="st-h">Out now<span class="n" id="stOpenN">0</span></div>
+      <div class="st-open" id="stOpen"><div class="st-empty">Nobody is out with anyone right now.</div></div>
+      <div class="st-h">Tonight<span class="n" id="stLogN">0</span></div>
+      <div id="stLog"><div class="st-empty">Waiting for the first stop&hellip;</div></div>
+    </div>
+  </div>
 
   <!-- Back-end / "under the hood" tab: the live processing pipeline -->
   <div id="backend">
@@ -942,16 +1030,177 @@ async function pollConsole(){
 /* ===================== Roles + backend "under the hood" tab ===================== */
 function roleBadge(role){ return (role==='dispatch'||role==='field') ? '<span class="rolebadge '+role+'">'+role+'</span>' : ''; }
 
-// front-end / back-end tab switch
+/* Tab switch. Each non-map view is a fixed overlay that shows on .show, and
+   each one polls only while it is the visible tab, so a newsroom leaving the
+   map up all night pays for the map alone. */
+const VIEWS={ stops:{el:'stopsview',poll:()=>pollStops()}, backend:{el:'backend',poll:()=>pollPipeline()} };
 document.querySelectorAll('.tab').forEach(t=>{
   t.onclick=()=>{
     document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
     t.classList.add('active');
-    const backend=t.dataset.view==='backend';
-    document.getElementById('backend').classList.toggle('show',backend);
-    if(backend) pollPipeline();
+    const v=t.dataset.view;
+    for(const k in VIEWS) document.getElementById(VIEWS[k].el).classList.toggle('show',k===v);
+    if(VIEWS[v]) VIEWS[v].poll();
   };
 });
+const viewing=k=>{const v=VIEWS[k];return !!v&&document.getElementById(v.el).classList.contains('show');};
+
+/* ===================== Stops and field contacts =====================
+   The log under the map. Boston works hundreds of car stops a night, so these
+   do not get pins; the ones that turn into news promote themselves into
+   incidents and show up on the map that way. This is everything else. */
+let STOPS={open:[],closed:[],summary:null}, ST_SKEW=0;
+const ST_TAPE=new Set();                     // ids whose transmissions are showing
+
+/* The clock on an open stop counts against the server, not this laptop. A
+   machine a couple of minutes off would otherwise put a car out with someone
+   for two minutes before the stop began, or two minutes after it ended. */
+const stNow=()=>Date.now()-ST_SKEW;
+function stDur(s){
+  if(s==null||isNaN(s))return'--';
+  s=Math.max(0,Math.round(s));
+  const h=(s/3600)|0,m=((s%3600)/60)|0,x=s%60,p=n=>String(n).padStart(2,'0');
+  return h?h+':'+p(m)+':'+p(x):m+':'+p(x);
+}
+const stHM=t=>t?new Date(t).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'America/New_York'}):'';
+const DISPO_CLASS={arrest:'arrest',tow:'tow',summons:'summons',citation:'citation',warning:'warning','no action':'none'};
+const stDispo=r=>r.disposition?'<span class="st-tag '+(DISPO_CLASS[r.disposition]||'none')+'">'+esc(r.disposition)+'</span>'
+  :r.status==='stale'?'<span class="st-tag stale">never cleared</span>':'';
+
+// One string per stop for the filter box, so a plate, a surname, a callsign and
+// a corner all find the same row.
+const stHay=r=>[r.unitSpoken,r.unit,r.dept,r.plate,r.plateState,r.place,r.vehicle,r.dob,r.licence,r.kind,r.disposition]
+  .concat(r.names||[]).filter(Boolean).join(' ').toLowerCase();
+const stMatch=(r,q)=>!q||stHay(r).indexOf(q)>=0;
+
+function stWho(r){
+  const bits=[];
+  if(r.plate)bits.push('<span class="st-plate">'+esc((r.plateState?r.plateState+' ':'')+r.plate)+'</span>');
+  if((r.names||[]).length)bits.push(r.names.map(n=>'<span class="st-name">'+esc(n)+'</span>').join(', ')+(r.dob?' <span style="color:var(--text-faint);font-size:11px">b. '+esc(r.dob)+'</span>':''));
+  else if(r.dob)bits.push('<span style="color:var(--text-faint);font-size:11px">DOB '+esc(r.dob)+'</span>');
+  if(r.vehicle)bits.push(esc(r.vehicle));
+  if(r.occupants)bits.push(r.occupants+' up');
+  return bits.join(' &middot; ');
+}
+function stFlags(r){
+  const f=[];
+  if(r.backup)f.push('backup');
+  if(r.search)f.push('search');
+  if(r.repeat>1)f.push('plate seen '+r.repeat+'&times; tonight');
+  if(r.incidentId)f.push('on the map');
+  return f.length?'<span class="st-tag flag">'+f.join('</span> <span class="st-tag flag">')+'</span>':'';
+}
+
+/* The tape. A name read off a machine transcript is a lead and nothing more,
+   so the words it came out of are one click away. A line the tracker reasoned
+   onto this stop, rather than heard on the callsign, is marked, because that is
+   the one a desk should be most careful with. */
+function stTape(r){
+  const lines=(r.transcript||[]).map(x=>
+    '<div class="ln'+(x.via==='context'?' ctx':'')+'"><span class="tt">'+stHM(x.t)+'</span><span>'+esc(x.text)+'</span></div>').join('');
+  const meta=[esc(r.feed||'unknown feed'),r.transmissions+' transmissions',
+    r.inferred?r.inferred+' reasoned onto the stop':null,
+    r.place?(r.precision||'located'):'no location',
+    r.licence?'licence '+esc(r.licence):null,
+    (r.priorStops||[]).length?'earlier tonight: '+r.priorStops.map(id=>{
+      const p=[...STOPS.open,...STOPS.closed].find(z=>z.id===id);
+      return p?esc((p.unitSpoken||p.unit)+' at '+stHM(p.start)+(p.disposition?', '+p.disposition:'')):null;
+    }).filter(Boolean).join('; '):null,
+  ].filter(Boolean).join(' &middot; ');
+  return '<div class="st-tape">'+(lines||'<div class="ln">no transmissions kept</div>')+'<div class="meta">'+meta+'</div></div>';
+}
+
+function renderStops(){
+  const q=(document.getElementById('stFind').value||'').trim().toLowerCase();
+  const open=(STOPS.open||[]).filter(r=>stMatch(r,q));
+  const log=(STOPS.closed||[]).filter(r=>stMatch(r,q));
+  const s=STOPS.summary||{};
+
+  const card=(k,v,sm)=>'<div class="st-card"><div class="k">'+k+'</div><div class="v'+(sm?' sm':'')+'">'+v+'</div></div>';
+  const lg=s.longest;
+  document.getElementById('stStats').innerHTML=
+    card('Out now',s.openNow||0)+
+    card('Tonight',s.total||0)+
+    card('Median',s.medianSeconds!=null?stDur(s.medianSeconds):'--')+
+    card('Longest',lg?stDur(lg.seconds)+' <span style="font-size:11px;color:var(--text-faint)">'+esc(lg.unitSpoken||lg.unit||'')+'</span>':'--',!!lg)+
+    card('Plate read',s.withPlate||0)+
+    card('Arrests',(s.byDisposition&&s.byDisposition.arrest)||0)+
+    card('Searches',s.withSearch||0)+
+    card('Never cleared',s.stale||0);
+
+  document.getElementById('stOpenN').textContent=open.length;
+  document.getElementById('stLogN').textContent=log.length;
+  document.getElementById('stHit').textContent=q?(open.length+log.length)+' matching':'';
+  stBadge((STOPS.open||[]).length);
+
+  document.getElementById('stOpen').innerHTML=open.length?open.map(r=>{
+    const el=(stNow()-r.start)/1000;
+    return '<div class="st-live'+(el>1800?' vlong':el>900?' long':'')+'" data-sid="'+esc(r.id)+'">'+
+      '<div class="top"><span class="clk" data-start="'+r.start+'">'+stDur(el)+'</span>'+
+      '<span class="unit">'+esc(r.unitSpoken||r.unit)+'</span>'+
+      '<span class="dept">'+esc(r.dept||'')+'</span></div>'+
+      '<div class="where">'+esc(r.place||'location not given')+'</div>'+
+      (stWho(r)?'<div class="where">'+stWho(r)+'</div>':'')+
+      (stFlags(r)?'<div style="margin-top:6px">'+stFlags(r)+'</div>':'')+
+      '</div>'+(ST_TAPE.has(r.id)?stTape(r):'');
+  }).join(''):'<div class="st-empty">'+(q?'No open stop matches that.':'Nobody is out with anyone right now.')+'</div>';
+
+  document.getElementById('stLog').innerHTML=log.length?log.map(r=>
+    '<div class="st-row" data-sid="'+esc(r.id)+'">'+
+      '<span class="t">'+stHM(r.start)+'</span>'+
+      '<span class="u">'+esc(r.unitSpoken||r.unit)+'</span>'+
+      '<span class="dur">'+(r.seconds==null?'~'+stDur(r.heardFor):stDur(r.seconds))+'</span>'+
+      '<span class="body"><span class="who">'+(stWho(r)||'<span style="color:var(--text-faint)">nothing read out</span>')+'</span> '+stDispo(r)+
+        '<div class="sub">'+esc(r.place||'location not given')+' &middot; '+esc(r.dept||'')+
+        (stFlags(r)?' &middot; '+stFlags(r):'')+'</div></span>'+
+    '</div>'+(ST_TAPE.has(r.id)?stTape(r):'')
+  ).join(''):'<div class="st-empty">'+(q?'Nothing tonight matches that.':'No stops heard yet tonight.')+'</div>';
+
+  document.querySelectorAll('#stOpen [data-sid],#stLog [data-sid]').forEach(el=>{
+    el.onclick=()=>{const id=el.dataset.sid; ST_TAPE.has(id)?ST_TAPE.delete(id):ST_TAPE.add(id); renderStops();};
+  });
+}
+
+// The clocks tick on their own so an open stop does not sit still between
+// polls, and so a poll does not have to redraw the list to move a second.
+function stTick(){
+  if(!viewing('stops'))return;
+  document.querySelectorAll('#stOpen .clk').forEach(c=>{
+    const st=+c.dataset.start; if(st)c.textContent=stDur((stNow()-st)/1000);
+  });
+}
+
+/* The number on the tab. Blank at zero, because a grey 0 sitting next to the
+   word Stops all evening reads as a broken feature rather than a quiet night. */
+function stBadge(n){
+  const el=document.getElementById('tabStops');
+  if(el)el.textContent=n>0?String(n):'';
+}
+
+async function pollStops(){
+  try{
+    const r=await fetch('./stops.json',{cache:'no-store',headers:{Accept:'application/json'}});
+    if(!r.ok)return;
+    const d=await r.json();
+    if(!d||typeof d!=='object')return;
+    if(d.generatedAt){const g=new Date(d.generatedAt).getTime(); if(g)ST_SKEW=Date.now()-g;}
+    STOPS={open:d.open||[],closed:d.closed||[],summary:d.summary||null};
+    renderStops();
+  }catch(e){/* a missing stops key is an empty tab, never a broken map */}
+}
+
+/* Sixty bytes, so this can run while somebody is on the map and the full log
+   cannot. Skipped when the Stops tab is up, since pollStops is already
+   carrying a fresher count in the payload it is fetching anyway. */
+async function pollStopsCount(){
+  if(viewing('stops'))return;
+  try{
+    const r=await fetch('./stops-count.json',{cache:'no-store',headers:{Accept:'application/json'}});
+    if(!r.ok)return;
+    const d=await r.json();
+    if(d&&typeof d.open==='number')stBadge(d.open);
+  }catch(e){/* the badge is the least important thing on the page */}
+}
 
 async function pollPipeline(){
   let d=null;
@@ -970,14 +1219,18 @@ async function pollPipeline(){
           spoke=f.lastSegAt?ago(new Date(f.lastSegAt)):null,
           heard=f.lastAudioAt?ago(new Date(f.lastAudioAt)):null;
     let label;
-    if(s==='live')              label='live · '+(f.segs||0)+' transmissions · last '+spoke;
+    if(s==='live')              label='live · '+(f.segs||f.clips||0)+' transmissions'+(spoke?' · last '+spoke:'');
     else if(s==='connected')    label='connected · quiet, audio '+(heard||'just now');
     else if(s==='connecting')   label='connecting · waiting for audio';
     else if(s==='reconnecting') label='stream dropped · reconnecting'+(heard?' · audio '+heard:'');
     else if(s==='offline')      label='offline · '+(heard?'last audio '+heard:'never connected');
     else                        label=s;
-    return '<div class="be-feed '+esc(s)+'"><span class="fdot"></span><span>'+esc(f.src)+'</span>'+
-      '<span class="fmeta">#'+esc(String(f.feed))+' · '+esc(label)+'</span></div>';
+    /* A browser-audio source has no Broadcastify feed number, so "#undefined"
+       used to render for every one of them. Show the number only when there is
+       one, and prefer the human label the operator typed over the slug. */
+    const num=f.feed?'#'+esc(String(f.feed))+' · ':'';
+    return '<div class="be-feed '+esc(s)+'"><span class="fdot"></span><span>'+esc(f.label||f.src)+'</span>'+
+      '<span class="fmeta">'+num+esc(label)+'</span></div>';
   }).join('')||'<div class="be-idle">no feeds</div>';
   // throughput
   const s=d.stats||{}, st=document.getElementById('beStats');
@@ -1443,7 +1696,18 @@ function init(){
   refreshCivic();setInterval(refreshCivic,CONFIG.refresh.civic);
   pollScanner();setInterval(pollScanner,CONFIG.refresh.scanner);
   pollConsole();setInterval(pollConsole,CONFIG.refresh.console);
-  setInterval(()=>{ if(document.getElementById('backend').classList.contains('show')) pollPipeline(); }, CONFIG.refresh.console);
+  /* The two overlay tabs refresh only while they are the one being looked at,
+     so a map left up all night costs what the map costs. */
+  setInterval(()=>{ if(viewing('backend')) pollPipeline(); }, CONFIG.refresh.console);
+  setInterval(()=>{ if(viewing('stops')) pollStops(); }, CONFIG.refresh.console);
+  /* The badge is the exception, because a count nobody can see is useless.
+     It reads a sixty byte key, not the log. */
+  pollStopsCount();setInterval(pollStopsCount,30000);
+  /* Open stops keep their own second hand rather than waiting on a poll, so a
+     car that has been out with someone for forty minutes reads as forty
+     minutes and not as whenever the payload was last built. */
+  setInterval(stTick,1000);
+  const sf=document.getElementById('stFind'); if(sf)sf.oninput=()=>renderStops();
   pollSituations();setInterval(pollSituations,5000);
   load311();setInterval(load311,180000);
   pulseSetup();

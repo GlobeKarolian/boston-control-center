@@ -4,7 +4,7 @@
 // The agent POSTs:
 //   authorization: Bearer <token>
 //   x-bcc-machine: <name>
-//   { machine, at, items: [{src, city, text, at, seq}], health: [...] }
+//   { machine, at, items: [{src, city, scope, text, at, seq}], health: [...] }
 //
 // Order of operations matters and is the whole point of this file:
 //
@@ -18,6 +18,12 @@
 // geocode is 300-2000ms; holding a lock across that with three Macs POSTing
 // every two seconds would queue permanently. Outside the lock, the lock hold
 // is ~50-100ms and the Macs never wait on each other in practice.
+//
+// `scope` is new and load-bearing. Every town in Massachusetts has a Main
+// Street, so a street name off the radio is meaningless without knowing which
+// municipalities the transmitter covers. A feed declares that list; the
+// geocoder refuses to place a bare street name when the list has more than one
+// town in it and nobody said which.
 
 const { ingestAuth, json, harden } = require('../lib/http');
 const { extractBatch, MODEL } = require('../lib/extractor');
@@ -33,6 +39,18 @@ function parseBody(req) {
   if (typeof b === 'string') { try { return JSON.parse(b); } catch (e) { return null; } }
   if (Buffer.isBuffer(b)) { try { return JSON.parse(b.toString('utf8')); } catch (e) { return null; } }
   return b;
+}
+
+// scope arrives as "Boston, Brookline, Cambridge" from the Mac app, or as an
+// array, or not at all. An empty list means the feed did not say, and the
+// geocoder treats that as "do not guess a town" rather than "anywhere".
+function townsFrom(i) {
+  const raw = i.scope !== undefined ? i.scope : i.towns;
+  const list = Array.isArray(raw) ? raw : String(raw || '').split(',');
+  const out = list.map(s => String(s || '').trim()).filter(Boolean).slice(0, 40);
+  if (out.length) return out;
+  const city = String(i.city || '').trim();
+  return city ? [city] : [];
 }
 
 module.exports = async (req, res) => {
@@ -62,6 +80,15 @@ module.exports = async (req, res) => {
     .map(i => ({
       src: String(i.src || 'unknown').slice(0, 40),
       city: String(i.city || 'Boston').slice(0, 60),
+      // Which agency this channel belongs to, if the sender knows. No Scanner
+      // Relay build sends it today, and the store derives it from the feed
+      // label instead. It matters because the stop tracker refuses to open a
+      // stop on a fire or EMS channel, where "Engine 15 clear" is a truck
+      // going back in service rather than a car finishing with a driver, and
+      // guessing that from a label like "bostonfire" works until the day
+      // someone names a feed something else.
+      dept: i.dept ? String(i.dept).slice(0, 60) : null,
+      towns: townsFrom(i),
       text: i.text.trim().slice(0, MAX_TEXT),
       at: i.at || new Date().toISOString(),
       seq: i.seq,
@@ -94,10 +121,20 @@ module.exports = async (req, res) => {
     }
 
     // ---- outside the lock: the two slow network stages, in parallel -------
-    const { results: exs, by, errors } = await extractBatch(fresh.map(i => i.text));
+
+    // A 3-second transmission carries no context of its own. "We're on scene"
+    // means nothing alone and everything after "Engine 7, 40 Boylston". Hand
+    // the extractor the last few lines from the SAME channel so a follow-up
+    // can find its call. One cheap read of a key the dashboard already polls.
+    const prior = await store_io.recentBySource().catch(() => ({}));
+
+    const { results: exs, by, errors, skipped, hallucinated } =
+      await extractBatch(fresh.map(i => ({ text: i.text, src: i.src })), { priorBySrc: prior });
     for (const e of errors.slice(0, 2)) warnings.push('extract: ' + e);
 
-    const geos = await geocodeBatch(fresh.map((it, i) => ({ ex: exs[i], city: it.city })));
+    const geos = await geocodeBatch(fresh.map((it, i) => ({
+      ex: exs[i], city: it.city, towns: it.towns, text: it.text,
+    })));
 
     await healthWrite;
 
@@ -110,6 +147,7 @@ module.exports = async (req, res) => {
           const inc = await s.ingest({
             source: it.src,
             city: it.city,
+            dept: it.dept || undefined,   // undefined, so the store derives it
             text: it.text,
             time: it.at,
             pre: { ex: exs[i], geo: geos[i] === undefined ? null : geos[i] },
@@ -131,6 +169,9 @@ module.exports = async (req, res) => {
       machine,
       accepted: fresh.length,
       duplicates,
+      noise: skipped || 0,
+      placed: geos.filter(Boolean).length,
+      hallucinated: hallucinated || 0,
       incidentsTouched: [...new Set(applied)].length,
       extractor: labelFor(by),
       ...counts,
@@ -153,5 +194,6 @@ function labelFor(by) {
   if (by === 'cloud') return 'cloud (' + MODEL + ')';
   if (by === 'mixed') return 'mixed (' + MODEL + ' + regex fallback)';
   if (by === 'regex') return 'regex (extractor unavailable)';
+  if (by === 'noise') return 'idle (silence only)';
   return 'idle';
 }
