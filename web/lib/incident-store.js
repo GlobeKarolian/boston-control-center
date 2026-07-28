@@ -139,6 +139,20 @@ function metersBetween(a, b) {
   return Math.sqrt(x * x + y * y) * R;
 }
 
+/* The ground this newsroom covers. Deliberately generous, roughly Worcester
+   across to the ocean and Nashua down to Providence, because a Boston story
+   really does run out to Framingham and up to Lawrence and the point is to
+   catch pins that landed in another state, not to police the suburbs.
+
+   Same numbers as the geocoder's Nominatim viewbox and Overpass bounding box,
+   kept here as well because this is the last gate before a pin reaches a map
+   a reporter reads. */
+const METRO = { s: 41.85, w: -71.70, n: 42.95, e: -70.55 };
+function inMetro(lat, lon) {
+  return typeof lat === 'number' && typeof lon === 'number' &&
+    lat >= METRO.s && lat <= METRO.n && lon >= METRO.w && lon <= METRO.e;
+}
+
 /* How good is this fix? Only "exact" is allowed to merge two scenes together.
    A gazetteer hit on a highway or a town centroid is a pin, not an identity. */
 function precisionOf(geo) {
@@ -252,6 +266,22 @@ function createStore(geocode, extractFn, opt) {
     if (stopIsNews && !geo && typeof stop.lat === 'number') {
       geo = { lat: stop.lat, lon: stop.lon, matched: stop.place, src: 'stop', approx: stop.precision === 'approx' };
     }
+
+    /* A pin outside eastern Massachusetts is never right for this product, and
+       the way it gets there is not a rounding error, it is a name collision
+       resolving somewhere else entirely. Overpass took area["name"="Boston"]
+       with no bounding box and matched every administrative area on Earth with
+       that name, which put a Boston fire on the map at North Boston Avenue in
+       Tulsa and a traffic stop at New Boston, New Hampshire. That query is now
+       fenced, but the guard belongs here rather than only there: this is the
+       one place every fix passes through no matter which of the half dozen
+       geocoding paths produced it, and a wrong pin is worse than no pin
+       because nothing about it looks wrong on a map.
+
+       Dropped before precisionOf on purpose, so a bad fix cannot pull an
+       unrelated call into its scene either. */
+    if (geo && !inMetro(geo.lat, geo.lon)) geo = null;
+
     const precision = precisionOf(geo);
 
     // 2) else match an active scene at the same PLACE inside the window.
@@ -443,6 +473,23 @@ function createStore(geocode, extractFn, opt) {
     // already handed to the browser, so it must never go backwards.
     seq = Math.max(Number(state.seq) || 0, seq);
     stops.hydrate(state.stops);
+
+    /* Pins written before the fence existed are still in here, and the store
+       is rehydrated on every request, so this is what actually clears them off
+       the map rather than waiting for them to age out. Cheap: it is a bounds
+       check over a few dozen records.
+
+       The call keeps everything else it knows and simply stops claiming to
+       know where it happened, which is the honest state for a call whose only
+       location evidence resolved to Oklahoma. */
+    for (const id in incidents) {
+      const c = incidents[id];
+      if (!c || !c.located) continue;
+      if (inMetro(c.lat, c.lon)) continue;
+      c.lat = null; c.lon = null; c.located = false;
+      c.precision = null; c.geoVia = null;
+      c.location = null; c.matched = null;
+    }
   }
   function dump() {
     return { v: 1, incidents, unitToIncident, transcripts, events, stats, seq, stops: stops.dump() };
