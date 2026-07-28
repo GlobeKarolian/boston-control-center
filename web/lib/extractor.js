@@ -44,6 +44,10 @@ const KEY = () => (process.env.ANTHROPIC_API_KEY || '').trim();
 // stops, and the two never drift apart into two different ideas of what "clear"
 // means.
 const ST_ = require('./stops.js');
+// The spelled-out decoder, used here only to ask whether a line carries a
+// plate or a name at all. See carriesFact below.
+let SP_ = null;
+try { SP_ = require('./spoken.js'); } catch (e) { /* older deploy */ }
 
 const SCHEMA = {
   type: 'object',
@@ -259,6 +263,42 @@ function heardIn(name, text) {
   return words.some(w => t.includes(w));
 }
 
+/* A house number with a street type behind it. Deliberately narrower than the
+   address extractor, because this is asked of lines the model has already
+   judged unusable, where a loose pattern would be reading tea leaves. */
+const HOUSE_RE = /\b\d{1,5}\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?\s*(?:street|st\b|ave|avenue|road|rd\b|drive|dr\b|boulevard|blvd|way|place|pl\b|square|sq\b|lane|ln\b|court|ct\b|terrace|ter\b|park|highway|hwy)/i;
+
+/* Does this line carry a fact strong enough to stand up on its own, whatever
+   the model made of the rest of it?
+
+   Measured on 150 consecutive real transmissions: the model marked 66 of them
+   noise, and the cheap gate above would have kept every one. Among the 66 were
+   a welfare call naming Slag, Joseph, a plate read as five Julie Harry X-ray
+   one two, a dispatch to 202 Harvard Ave and another to 1333 Boylston. Those
+   are exactly the facts this newsroom asked to have logged, thrown away one
+   step before the code that can read them. The model is not wrong that the
+   audio is a mess; it is wrong that a mess with a plate in it is nothing.
+
+   Only facts that carry their own evidence count. A bare callsign match does
+   not, because "Hello, I'm 22. I'm 22." reads as unit M22. A bare call type
+   does not, because "Code 9, please." reads as a serious medical. The cross
+   street regex is worse than either, having offered "in the text and it went
+   to" as an intersection. So the test is a spelled plate or name, which the
+   decoder already gates hard, a numbered address, a stop opening, a records
+   answer, or a callsign and a call type together. On the same 150 that rescues
+   4 and leaves 62 as noise, and all four are real. */
+function carriesFact(src) {
+  try {
+    if (SP_ && SP_.read(src).any) return true;
+    if (HOUSE_RE.test(src)) return true;
+    if (ST_.OPEN_RE.test(src) || ST_.RECORD_RE.test(src)) return true;
+    const R = regexExtract(src);
+    if (R.address) return true;
+    if (R.units && R.units.length && R.callType) return true;
+  } catch (e) { /* never let the rescue itself break extraction */ }
+  return false;
+}
+
 function mapFields(o, by, text) {
   const src = String(text || '');
   let landmark = clean(o.landmark);
@@ -282,7 +322,9 @@ function mapFields(o, by, text) {
     isOnScene: !!o.is_on_scene,
     priority: o.priority || 'normal',
     role: o.speaker_role || 'unknown',
-    noise: !!o.noise,
+    // The model's noise call is a judgement about the audio, and it is
+    // overruled by anything in the line that speaks for itself.
+    noise: !!o.noise && !carriesFact(src),
     isStop: !!o.is_stop || ST_.OPEN_RE.test(src),
     stopKind: clean(o.stop_kind),
     vehicle: clean(o.vehicle) || ST_.vehicleOf(src),
@@ -400,4 +442,6 @@ async function extract(text) {
   return results[0];
 }
 
-module.exports = { extract, extractBatch, regexExtract, roleFor, isNoise, heardIn, MODEL };
+// mapFields and carriesFact are exported for the test harness only. Nothing in
+// the running app calls them from outside this file.
+module.exports = { extract, extractBatch, regexExtract, roleFor, isNoise, heardIn, mapFields, carriesFact, MODEL };
