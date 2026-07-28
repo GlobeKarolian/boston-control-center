@@ -1,0 +1,28 @@
+#!/bin/bash
+# Runs as root before the payload lands.
+#
+# Its only job is to stop a running agent, because replacing bcc-agent.js under
+# a live node process gives you a half-old half-new run until something restarts
+# it, and replacing bcc-audiotap under a live tap invalidates the code signature
+# that the TCC grant is keyed to. Stop first, install, start after.
+#
+# Never fails the install. An upgrade on a machine where the agent was already
+# stopped is the normal case, not an error.
+
+LABEL="com.bostonglobe.bcc-agent"
+
+# launchd jobs live in a per-user gui domain and root cannot address one without
+# knowing which user. /dev/console is owned by whoever is logged in at the
+# screen, which is exactly the session a Core Audio tap needs, so that is the
+# user we care about.
+CONSOLE_USER=$(stat -f%Su /dev/console 2>/dev/null)
+if [ -n "$CONSOLE_USER" ] && [ "$CONSOLE_USER" != "root" ]; then
+  UID_N=$(id -u "$CONSOLE_USER" 2>/dev/null)
+  if [ -n "$UID_N" ]; then
+    launchctl bootout "gui/$UID_N/$LABEL" 2>/dev/null
+    # Give node a moment to actually let go of the files.
+    sleep 1
+  fi
+fi
+
+exit 0

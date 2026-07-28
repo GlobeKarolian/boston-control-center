@@ -1,0 +1,32 @@
+{
+  "_comment": [
+    "Copy to ~/.bcc/config.json and edit. One of these per Mac.",
+    "Feed assignment is hardcoded here on purpose: with two or three machines a",
+    "lease system is more moving parts than it is worth, and a fixed list means",
+    "you can look at a Mac and know what it is doing.",
+    "",
+    "Put the ingest token in ~/.bcc/.ingest_secret (chmod 600). It never goes in",
+    "this file, so this file can be copied between machines and checked in.",
+    "",
+    "kinds:",
+    "  broadcastify  needs \"feed\" (the Broadcastify feed id)",
+    "  audiotap      needs \"app\" (an application name, matched as a family so",
+    "                Chrome's helper processes are included), or \"pid\", or",
+    "                \"system\": true for everything the Mac is playing"
+  ],
+
+  "machine": "matts-mbp",
+  "endpoint": "https://boston-control-center.vercel.app",
+
+  "sources": [
+    { "id": "bostonfire", "city": "Boston",    "kind": "broadcastify", "feed": 46343 },
+    { "id": "bostonems",  "city": "Boston",    "kind": "broadcastify", "feed": 36636 },
+    { "id": "cambridge",  "city": "Cambridge", "kind": "broadcastify", "feed": 36665 },
+    { "id": "msp",        "city": "Boston",    "kind": "broadcastify", "feed": 3969 },
+    { "id": "bpd",        "city": "Boston",    "kind": "audiotap",     "app": "Google Chrome" }
+  ],
+
+  "segmentSeconds": 15,
+  "silenceGate": 0.01,
+  "whisperModel": "small.en"
+}

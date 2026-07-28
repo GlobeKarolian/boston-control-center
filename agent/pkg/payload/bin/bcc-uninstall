@@ -1,0 +1,51 @@
+#!/bin/bash
+# Removes the agent. Run it from Terminal as yourself.
+#
+# Split in two on purpose. The launchctl bootout has to run as the logged in
+# user, because the job lives in that user's gui domain and root cannot reach
+# into it. The file removal has to run as root, because the payload is under
+# /Library. So this runs the user half first, then asks for sudo once for the
+# rest, rather than telling you to sudo the whole thing and quietly failing to
+# stop the job.
+#
+#   bcc-uninstall         removes the agent, keeps your config and logs
+#   bcc-uninstall --all   removes those too
+
+set -u
+
+LABEL="com.bostonglobe.bcc-agent"
+PLIST="/Library/LaunchAgents/$LABEL.plist"
+BCC_DIR="/Library/Application Support/BCC"
+STATE="$HOME/.bcc"
+ALL=0
+[ "${1:-}" = "--all" ] && ALL=1
+
+if [ "$(id -u)" = "0" ]; then
+  echo "Run this as yourself, not with sudo. It will ask for sudo when it needs it."
+  exit 1
+fi
+
+echo "Stopping the agent ..."
+launchctl bootout "gui/$(id -u)/$LABEL" 2>/dev/null && echo "  stopped" || echo "  was not running"
+
+echo "Removing the installed files (sudo) ..."
+sudo rm -f "$PLIST"
+sudo rm -rf "$BCC_DIR"
+sudo pkgutil --forget com.bostonglobe.bcc >/dev/null 2>&1 || true
+echo "  removed $PLIST"
+echo "  removed $BCC_DIR"
+
+if [ "$ALL" = "1" ]; then
+  rm -rf "$STATE"
+  echo "  removed $STATE (config, ingest key, logs, whisper venv)"
+  echo ""
+  echo "Left alone on purpose:"
+  echo "  ~/.boston-control-center/.login   your Broadcastify credentials"
+  echo "  ~/.cache/huggingface              the whisper model, ~500 MB"
+else
+  echo ""
+  echo "Kept: $STATE (config, ingest key, logs, whisper venv)"
+  echo "Run with --all to remove those too."
+fi
+echo ""
+echo "Done."

@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+body { font: 13px -apple-system, sans-serif; color: #1d1d1f; margin: 0; line-height: 1.5; }
+h2 { font-size: 15px; margin: 0 0 10px; }
+h3 { font-size: 13px; margin: 18px 0 6px; }
+p { margin: 0 0 10px; }
+.dim { color: #6e6e73; }
+code { font: 11.5px ui-monospace, Menlo, monospace; background: #f2f2f7; padding: 1px 4px; border-radius: 3px; }
+</style></head><body>
+
+<h2>Boston Control Center, scanner agent</h2>
+
+<p>This installs a small background service that listens to Boston area scanner
+feeds on this Mac, transcribes them here, and sends the text to the newsroom
+dashboard.</p>
+
+<p class="dim">Audio never leaves this machine. What goes over the wire is a few
+kilobytes of text per minute per feed.</p>
+
+<h3>Why it runs here and not in the cloud</h3>
+
+<p>Broadcastify refuses connections from datacenter IP addresses. A home or
+office connection works, a server does not, so the listening has to happen on a
+real Mac. Transcription rides along because the audio is already here.</p>
+
+<h3>What gets installed</h3>
+
+<p>Four small programs and a startup item, in
+<code>/Library/Application Support/BCC</code>. Nothing else on the system is
+touched.</p>
+
+<h3>After the installer finishes</h3>
+
+<p>Open Terminal and run <code>bcc-setup</code>. It asks which feeds this Mac
+should carry, installs what is missing, and starts the service. The installer
+cannot do that part itself, because it runs as root and the tools it needs
+refuse to be installed that way.</p>
+
+</body></html>

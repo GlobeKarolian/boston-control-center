@@ -1,0 +1,279 @@
+#!/bin/bash
+# Interactive first-run setup. Run this from Terminal as yourself, never as root.
+#
+# The installer deliberately does none of this. Everything below either refuses
+# to run as root (Homebrew), belongs to a specific user rather than the machine
+# (the config, the ingest secret, the whisper cache), or needs someone at the
+# keyboard to answer a question. A pkg postinstall runs as root with no tty and
+# would get all three wrong, so the pkg lays down files and this script does the
+# part that needs a human.
+#
+# Safe to re-run. Every step checks before it acts, and existing answers are
+# offered back as defaults.
+
+set -u
+
+BCC_DIR="/Library/Application Support/BCC"
+BIN="$BCC_DIR/bin"
+STATE="$HOME/.bcc"
+CFG="$STATE/config.json"
+SECRET="$STATE/.ingest_secret"
+PLIST="/Library/LaunchAgents/com.bostonglobe.bcc-agent.plist"
+LABEL="com.bostonglobe.bcc-agent"
+
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+B=$(printf '\033[1m'); D=$(printf '\033[2m'); R=$(printf '\033[0m')
+G=$(printf '\033[32m'); Y=$(printf '\033[33m'); E=$(printf '\033[31m')
+
+say()  { printf '%s\n' "$*"; }
+head1() { printf '\n%s%s%s\n' "$B" "$*" "$R"; }
+ok()   { printf '  %sok%s   %s\n' "$G" "$R" "$*"; }
+warn() { printf '  %swarn%s %s\n' "$Y" "$R" "$*"; }
+die()  { printf '\n  %serror%s %s\n\n' "$E" "$R" "$*"; exit 1; }
+
+if [ "$(id -u)" = "0" ]; then
+  die "Run this as yourself, not with sudo. Homebrew refuses to run as root and the config belongs to your account."
+fi
+
+say ""
+say "${B}Boston Control Center, agent setup${R}"
+say "${D}This machine will pull scanner audio, transcribe it locally, and send${R}"
+say "${D}only the text upstream. No audio ever leaves this Mac.${R}"
+
+mkdir -p "$STATE" || die "cannot create $STATE"
+
+# ---------------------------------------------------------------- dependencies
+
+head1 "1. Dependencies"
+
+if ! command -v brew >/dev/null 2>&1; then
+  say "  Homebrew is not installed. It is the only sane way to get ffmpeg."
+  say "  Install it with this, then run bcc-setup again:"
+  say ""
+  say '    /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"'
+  say ""
+  die "Homebrew required."
+fi
+ok "homebrew $(brew --version 2>/dev/null | head -1 | awk '{print $2}')"
+
+for pkg in node ffmpeg; do
+  if command -v "$pkg" >/dev/null 2>&1; then
+    ok "$pkg $("$pkg" --version 2>&1 | head -1 | awk '{print $1, $2, $3}' | cut -c1-40)"
+  else
+    say "  installing $pkg ..."
+    brew install "$pkg" >/dev/null 2>&1 || die "brew install $pkg failed. Run it by hand to see why."
+    command -v "$pkg" >/dev/null 2>&1 || die "$pkg still not on PATH after install."
+    ok "$pkg installed"
+  fi
+done
+
+# ------------------------------------------------------------------- python env
+
+head1 "2. Whisper"
+
+# Wheel availability for ctranslate2 lags new Python releases by months, and a
+# source build of it on a laptop is an hour of clang and usually ends in a
+# failure. So pick a version known to have wheels rather than whatever python3
+# happens to point at, which on a current Homebrew is 3.14.
+PY=""
+for c in python3.12 python3.11 python3.13 python3.10; do
+  if command -v "$c" >/dev/null 2>&1; then PY="$(command -v "$c")"; break; fi
+done
+if [ -z "$PY" ]; then
+  say "  no python 3.10-3.13 found, installing python@3.12 (3.14 has no ctranslate2 wheels yet) ..."
+  brew install python@3.12 >/dev/null 2>&1 || true
+  for c in python3.12 python3.11 python3.13 python3.10; do
+    if command -v "$c" >/dev/null 2>&1; then PY="$(command -v "$c")"; break; fi
+  done
+fi
+[ -n "$PY" ] || die "no usable python found. Try: brew install python@3.12"
+ok "python $("$PY" -V 2>&1 | awk '{print $2}') at $PY"
+
+VENV="$STATE/venv"
+if [ ! -x "$VENV/bin/python3" ]; then
+  say "  creating $VENV ..."
+  "$PY" -m venv "$VENV" || die "venv creation failed"
+fi
+
+if "$VENV/bin/python3" -c "import faster_whisper" >/dev/null 2>&1; then
+  ok "faster-whisper already installed"
+else
+  say "  installing faster-whisper, this pulls ctranslate2 and takes a minute ..."
+  "$VENV/bin/python3" -m pip install --upgrade pip >/dev/null 2>&1
+  if ! "$VENV/bin/python3" -m pip install faster-whisper >/tmp/bcc-pip.log 2>&1; then
+    say ""
+    tail -20 /tmp/bcc-pip.log
+    say ""
+    die "faster-whisper install failed, full log in /tmp/bcc-pip.log"
+  fi
+  ok "faster-whisper installed"
+fi
+
+MODEL="${BCC_WHISPER_MODEL:-small.en}"
+say "  warming the $MODEL model so the first clip is not a 90 second download ..."
+if "$VENV/bin/python3" - <<PYEOF >/tmp/bcc-model.log 2>&1
+from faster_whisper import WhisperModel
+WhisperModel("$MODEL", device="cpu", compute_type="int8")
+print("ok")
+PYEOF
+then ok "$MODEL cached under ~/.cache/huggingface"
+else warn "model warmup failed, see /tmp/bcc-model.log. The agent will retry on its first clip."
+fi
+
+# ---------------------------------------------------------------------- config
+
+head1 "3. This machine"
+
+OLD_MACHINE=""; OLD_ENDPOINT=""; OLD_ROLE=""
+if [ -f "$CFG" ] && command -v node >/dev/null 2>&1; then
+  OLD_MACHINE=$(node -e 'try{console.log(require(process.argv[1]).machine||"")}catch(e){}' "$CFG" 2>/dev/null)
+  OLD_ENDPOINT=$(node -e 'try{console.log(require(process.argv[1]).endpoint||"")}catch(e){}' "$CFG" 2>/dev/null)
+  OLD_ROLE=$(node -e 'try{console.log(require(process.argv[1]).role||"")}catch(e){}' "$CFG" 2>/dev/null)
+fi
+
+DEF_MACHINE="${OLD_MACHINE:-$(scutil --get ComputerName 2>/dev/null | tr ' ' '-' | tr -cd 'A-Za-z0-9-' | tr 'A-Z' 'a-z')}"
+DEF_MACHINE="${DEF_MACHINE:-mac-1}"
+printf '  Name for this machine [%s]: ' "$DEF_MACHINE"
+read -r MACHINE || true
+MACHINE="${MACHINE:-$DEF_MACHINE}"
+
+DEF_ENDPOINT="${OLD_ENDPOINT:-}"
+if [ -n "$DEF_ENDPOINT" ]; then
+  printf '  Dashboard URL [%s]: ' "$DEF_ENDPOINT"
+else
+  printf '  Dashboard URL (e.g. https://your-app.vercel.app): '
+fi
+read -r ENDPOINT || true
+ENDPOINT="${ENDPOINT:-$DEF_ENDPOINT}"
+[ -n "$ENDPOINT" ] || die "the dashboard URL is required, there is nowhere to send transcripts without it"
+ENDPOINT="${ENDPOINT%/}"
+case "$ENDPOINT" in https://*|http://*) : ;; *) ENDPOINT="https://$ENDPOINT" ;; esac
+
+say ""
+say "  ${B}Which feeds should this Mac carry?${R}"
+say "  ${D}Feeds are assigned by hand, so pick a different role on each machine.${R}"
+say ""
+say "    1  Boston Fire + Boston EMS"
+say "    2  Cambridge + Mass State Police"
+say "    3  Boston Police, captured from a browser tab (see note below)"
+say "    4  all four scanner feeds, no browser tap"
+say ""
+printf '  Role [%s]: ' "${OLD_ROLE:-1}"
+read -r ROLE || true
+ROLE="${ROLE:-${OLD_ROLE:-1}}"
+
+case "$ROLE" in
+  1) SOURCES='[
+      { "id": "bostonfire", "label": "Boston Fire",  "kind": "broadcastify", "feed": "46343" },
+      { "id": "bostonems",  "label": "Boston EMS",   "kind": "broadcastify", "feed": "36636" }
+    ]' ; NEEDS_LOGIN=1 ;;
+  2) SOURCES='[
+      { "id": "cambridge",  "label": "Cambridge",    "kind": "broadcastify", "feed": "36665" },
+      { "id": "msp",        "label": "State Police", "kind": "broadcastify", "feed": "3969" }
+    ]' ; NEEDS_LOGIN=1 ;;
+  3) SOURCES='[
+      { "id": "bpd", "label": "Boston Police", "kind": "audiotap", "app": "Google Chrome" }
+    ]' ; NEEDS_LOGIN=0 ;;
+  4) SOURCES='[
+      { "id": "bostonfire", "label": "Boston Fire",  "kind": "broadcastify", "feed": "46343" },
+      { "id": "bostonems",  "label": "Boston EMS",   "kind": "broadcastify", "feed": "36636" },
+      { "id": "cambridge",  "label": "Cambridge",    "kind": "broadcastify", "feed": "36665" },
+      { "id": "msp",        "label": "State Police", "kind": "broadcastify", "feed": "3969" }
+    ]' ; NEEDS_LOGIN=1 ;;
+  *) die "pick 1, 2, 3 or 4" ;;
+esac
+
+cat > "$CFG" <<CFGEOF
+{
+  "machine": "$MACHINE",
+  "role": "$ROLE",
+  "endpoint": "$ENDPOINT",
+  "python": "$VENV/bin/python3",
+  "segmentSeconds": 15,
+  "whisperModel": "$MODEL",
+  "sources": $SOURCES
+}
+CFGEOF
+chmod 644 "$CFG"
+ok "wrote $CFG"
+
+# ------------------------------------------------------------------ ingest key
+
+head1 "4. Ingest key"
+
+if [ -s "$SECRET" ]; then
+  ok "already set, leaving it alone (delete $SECRET to change it)"
+else
+  say "  ${D}Each Mac gets its own key so one laptop can be revoked without${R}"
+  say "  ${D}touching the others. Matt generates it from the dashboard.${R}"
+  printf '  Paste the ingest key for %s (input hidden): ' "$MACHINE"
+  stty -echo 2>/dev/null; read -r KEY || true; stty echo 2>/dev/null; printf '\n'
+  if [ -n "${KEY:-}" ]; then
+    printf '%s' "$KEY" > "$SECRET"
+    chmod 600 "$SECRET"
+    KEY=""
+    ok "saved to $SECRET, mode 600"
+  else
+    warn "skipped. The agent will run but every POST will be rejected until you set it."
+  fi
+fi
+
+# ------------------------------------------------------------ broadcastify login
+
+if [ "$NEEDS_LOGIN" = "1" ]; then
+  head1 "5. Broadcastify login"
+  LOGIN_DIR="$HOME/.boston-control-center"
+  LOGIN="$LOGIN_DIR/.login"
+  mkdir -p "$LOGIN_DIR"
+  if [ -s "$LOGIN" ]; then
+    ok "already set, leaving it alone (delete $LOGIN to change it)"
+  else
+    say "  ${D}Broadcastify premium credentials. Stored on this Mac only, mode 600,${R}"
+    say "  ${D}and never sent anywhere except broadcastify.com.${R}"
+    printf '  Username: '
+    read -r BUSER || true
+    printf '  Password (input hidden): '
+    stty -echo 2>/dev/null; read -r BPASS || true; stty echo 2>/dev/null; printf '\n'
+    if [ -n "${BUSER:-}" ] && [ -n "${BPASS:-}" ]; then
+      printf '%s\n%s\n' "$BUSER" "$BPASS" > "$LOGIN"
+      chmod 600 "$LOGIN"
+      BPASS=""
+      ok "saved to $LOGIN, mode 600"
+    else
+      warn "skipped. Broadcastify feeds will fail to authenticate until you set it."
+    fi
+  fi
+fi
+
+# ----------------------------------------------------------------------- launch
+
+head1 "6. Starting the agent"
+
+UID_N="$(id -u)"
+if [ -f "$PLIST" ]; then
+  launchctl bootstrap "gui/$UID_N" "$PLIST" 2>/dev/null || true
+  if launchctl kickstart -k "gui/$UID_N/$LABEL" 2>/dev/null; then
+    ok "agent started"
+  else
+    warn "could not kickstart. Try: launchctl bootstrap gui/$UID_N $PLIST"
+  fi
+else
+  warn "$PLIST is missing, so the installer did not complete. Reinstall the pkg."
+fi
+
+if [ "$ROLE" = "3" ]; then
+  say ""
+  say "  ${B}One more step for the browser tap.${R}"
+  say "  ${D}Open the BPD feed in Chrome and leave it playing. The first time the${R}"
+  say "  ${D}agent captures it, macOS will ask for permission to record audio from${R}"
+  say "  ${D}other apps. Say yes. If you miss the prompt, it is under${R}"
+  say "  ${D}System Settings > Privacy & Security > Screen & System Audio Recording.${R}"
+fi
+
+say ""
+head1 "Done"
+say "  Check on it:   ${B}bcc-doctor${R}"
+say "  Watch it work: ${B}tail -f $STATE/agent.log${R}"
+say "  Status file:   ${D}$STATE/status.json${R}"
+say ""

@@ -1,0 +1,40 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "rewrites": [
+    { "source": "/", "destination": "/api/app" },
+    { "source": "/index.html", "destination": "/api/app" },
+    { "source": "/incidents.json", "destination": "/api/incidents" },
+    { "source": "/transcripts.json", "destination": "/api/transcripts" },
+    { "source": "/pipeline.json", "destination": "/api/pipeline" },
+    { "source": "/situations.json", "destination": "/api/situations" }
+  ],
+  "functions": {
+    "api/app.js": { "maxDuration": 10, "includeFiles": "app/**" },
+    "api/ingest.js": { "maxDuration": 60 },
+    "api/feed.js": { "maxDuration": 25 },
+    "api/cron/analyst.js": { "maxDuration": 120 },
+    "api/cron/sweep.js": { "maxDuration": 30 },
+    "api/pulse.js": { "maxDuration": 15 },
+    "api/cron/activity.js": { "maxDuration": 60 },
+    "api/cron/livefield.js": { "maxDuration": 300 },
+    "api/cron/pulse.js": { "maxDuration": 800 }
+  },
+  "crons": [
+    { "path": "/api/cron/analyst", "schedule": "* * * * *" },
+    { "path": "/api/cron/sweep", "schedule": "* * * * *" },
+    { "path": "/api/cron/activity", "schedule": "* * * * *" },
+    { "path": "/api/cron/livefield", "schedule": "*/5 * * * *" },
+    { "path": "/api/cron/pulse", "schedule": "0 */3 * * *" }
+  ],
+  "headers": [
+    {
+      "source": "/(.*)",
+      "headers": [
+        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
+        { "key": "Referrer-Policy", "value": "no-referrer" },
+        { "key": "X-Content-Type-Options", "value": "nosniff" }
+      ]
+    }
+  ]
+}

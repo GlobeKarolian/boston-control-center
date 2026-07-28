@@ -1,0 +1,71 @@
+#!/bin/bash
+# Runs as root after the payload lands.
+#
+# What it does NOT do is as important as what it does. It does not install
+# Homebrew packages, because Homebrew refuses to run as root and running it
+# under sudo leaves a trail of root-owned files in /opt/homebrew that break the
+# user's brew for good. It does not create a python venv or download a whisper
+# model, because those belong in the user's home directory and to the user's
+# account. It does not ask any questions, because a pkg script has no terminal.
+# All of that is bcc-setup, which the user runs themselves.
+#
+# So: fix permissions, put the commands on PATH, load the agent, and leave a
+# readable report saying what is still missing.
+
+LABEL="com.bostonglobe.bcc-agent"
+PLIST="/Library/LaunchAgents/$LABEL.plist"
+BIN="/Library/Application Support/BCC/bin"
+REPORT="/tmp/bcc-install-report.txt"
+
+CONSOLE_USER=$(stat -f%Su /dev/console 2>/dev/null)
+[ -z "$CONSOLE_USER" ] && CONSOLE_USER="$USER"
+UID_N=$(id -u "$CONSOLE_USER" 2>/dev/null)
+HOME_DIR=$(dscl . -read "/Users/$CONSOLE_USER" NFSHomeDirectory 2>/dev/null | awk '{print $2}')
+[ -z "$HOME_DIR" ] && HOME_DIR="/Users/$CONSOLE_USER"
+
+# Payload is machine-wide and read-only to users. Only the executables need +x.
+chown -R root:wheel "/Library/Application Support/BCC" 2>/dev/null
+chmod 755 "/Library/Application Support/BCC" "$BIN" 2>/dev/null
+chmod 644 "$BIN"/*.js "$BIN"/*.py 2>/dev/null
+chmod 755 "$BIN/bcc-run" "$BIN/bcc-doctor" "$BIN/bcc-setup" "$BIN/bcc-uninstall" "$BIN/bcc-audiotap" 2>/dev/null
+chown root:wheel "$PLIST" 2>/dev/null
+chmod 644 "$PLIST" 2>/dev/null
+
+# The user-facing commands go on PATH. /usr/local/bin is on the default PATH in
+# a login shell, /Library/Application Support is not and never will be.
+mkdir -p /usr/local/bin
+for c in bcc-doctor bcc-setup bcc-uninstall; do
+  ln -sf "$BIN/$c" "/usr/local/bin/$c"
+done
+
+# State directory, owned by the user from the start. If root creates it lazily
+# later the user cannot write their own config into it.
+STATE="$HOME_DIR/.bcc"
+mkdir -p "$STATE"
+chown "$CONSOLE_USER" "$STATE" 2>/dev/null
+chmod 700 "$STATE" 2>/dev/null
+
+# Load the agent now even though setup has not run. bcc-run gates on bcc-doctor
+# and will exit 0 with a clear line in the log, which proves the whole chain
+# works and leaves the machine one command away from running.
+if [ -n "$UID_N" ] && [ "$CONSOLE_USER" != "root" ]; then
+  launchctl bootstrap "gui/$UID_N" "$PLIST" 2>/dev/null
+fi
+
+# The report. The installer's conclusion pane is static HTML and cannot show
+# results, so this is where a machine says what it is still missing.
+{
+  echo "Boston Control Center agent"
+  echo "installed $(date '+%Y-%m-%d %H:%M:%S') for $CONSOLE_USER"
+  echo ""
+  if [ -n "$UID_N" ]; then
+    su - "$CONSOLE_USER" -c "'$BIN/bcc-doctor'" 2>&1
+  else
+    "$BIN/bcc-doctor" 2>&1
+  fi
+  echo ""
+  echo "Next: open Terminal and run   bcc-setup"
+} > "$REPORT" 2>&1
+chmod 644 "$REPORT" 2>/dev/null
+
+exit 0

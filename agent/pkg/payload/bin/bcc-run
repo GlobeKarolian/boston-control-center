@@ -1,0 +1,62 @@
+#!/bin/bash
+# LaunchAgent entry point. Everything launchd starts goes through here.
+#
+# There are two reasons this exists instead of pointing the plist straight at
+# node. The first is PATH: launchd hands a job /usr/bin:/bin:/usr/sbin:/sbin and
+# nothing else, so a Homebrew node at /opt/homebrew/bin/node is simply not there,
+# and the failure is an ENOENT in a log nobody is reading. The second is the
+# retry loop. KeepAlive is set to SuccessfulExit=false, which means launchd
+# restarts the job when it fails and leaves it alone when it succeeds. So a
+# machine with no node installed must exit 0, or launchd spins on it forever at
+# ThrottleInterval seconds apiece, writing the same error until someone notices
+# the log file is a gigabyte. Missing dependencies are a real state, not a crash,
+# and this script reports them and stops.
+#
+# Anything that is genuinely a crash still exits non-zero and still gets
+# restarted, which is the behaviour we actually want from KeepAlive.
+
+set -u
+
+BCC_DIR="/Library/Application Support/BCC"
+BIN="$BCC_DIR/bin"
+STATE="$HOME/.bcc"
+LOG="$STATE/agent.log"
+
+mkdir -p "$STATE"
+
+# Homebrew first, both architectures, then whatever launchd gave us.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"
+
+log() { printf '%s bcc-run: %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG"; }
+
+# Roll the log at 10 MB. A machine that has been transcribing for a month should
+# not be the machine that fills its own disk.
+if [ -f "$LOG" ]; then
+  SZ=$(stat -f%z "$LOG" 2>/dev/null || echo 0)
+  if [ "$SZ" -gt 10485760 ]; then
+    mv -f "$LOG" "$LOG.1"
+    log "rolled log at ${SZ} bytes"
+  fi
+fi
+
+log "starting, PATH=$PATH"
+
+# The gate. --quiet prints only failures, so a healthy machine writes nothing
+# here and the log stays readable.
+if ! "$BIN/bcc-doctor" --quiet >> "$LOG" 2>&1; then
+  log "dependencies are missing, see above. Not starting."
+  log "Run this in Terminal to fix it:  '$BIN/bcc-setup'"
+  log "Exiting 0 on purpose so launchd stops retrying. Re-run bcc-setup and it will start."
+  exit 0
+fi
+
+NODE="$(command -v node || true)"
+if [ -z "$NODE" ]; then
+  # bcc-doctor already covers this, so reaching here means the doctor and this
+  # script disagree about PATH. Worth its own line.
+  log "doctor passed but node is not on PATH. Refusing to guess."
+  exit 0
+fi
+
+log "exec $NODE $BIN/bcc-agent.js"
+exec "$NODE" "$BIN/bcc-agent.js" >> "$LOG" 2>&1

@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.bostonglobe.bcc-agent</string>
+
+  <!-- A LaunchAgent, not a LaunchDaemon, and the difference is load bearing.
+       Core Audio process taps only work inside a GUI login session, and the TCC
+       grant that authorises them is attached to a user, not to the machine. A
+       daemon would run at boot with no session, capture nothing, and report
+       success while doing it. -->
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Library/Application Support/BCC/bin/bcc-run</string>
+  </array>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!-- Restart on failure, leave alone on a clean exit. bcc-run exits 0 when a
+       dependency is missing precisely so this stops retrying: a machine without
+       node is a state to report, not a crash to recover from. -->
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <!-- Aqua only. Same reason as the agent-not-daemon choice above. -->
+  <key>LimitLoadToSessionType</key>
+  <string>Aqua</string>
+
+  <!-- Standard, not Background. Background QoS gets aggressively throttled on
+       Apple silicon and parks the work on efficiency cores, which for a
+       continuous whisper transcode means clips arriving faster than they finish
+       and a queue that never drains. -->
+  <key>ProcessType</key>
+  <string>Standard</string>
+
+  <!-- bcc-run appends everything to ~/.bcc/agent.log itself, including its own
+       first line, because launchd will not expand ~ here reliably. These two
+       catch the narrow case where bcc-run cannot start at all. -->
+  <key>StandardOutPath</key>
+  <string>/tmp/bcc-agent.launchd.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/bcc-agent.launchd.log</string>
+</dict>
+</plist>

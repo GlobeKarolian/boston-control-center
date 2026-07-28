@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><style>
+body { font: 13px -apple-system, sans-serif; color: #1d1d1f; margin: 0; line-height: 1.5; }
+h2 { font-size: 15px; margin: 0 0 10px; }
+h3 { font-size: 13px; margin: 18px 0 6px; }
+p { margin: 0 0 10px; }
+.dim { color: #6e6e73; }
+.step { background: #f2f2f7; border-radius: 6px; padding: 10px 12px; margin: 0 0 12px; }
+code { font: 11.5px ui-monospace, Menlo, monospace; }
+.cmd { font: 12px ui-monospace, Menlo, monospace; background: #fff; border: 1px solid #d8d8dd;
+       border-radius: 4px; padding: 5px 8px; display: inline-block; margin-top: 4px; }
+</style></head><body>
+
+<h2>Installed. One step left.</h2>
+
+<div class="step">
+  <strong>Open Terminal and run:</strong><br>
+  <span class="cmd">bcc-setup</span>
+  <p class="dim" style="margin:8px 0 0">Takes about two minutes. It asks which
+  feeds this Mac should carry, installs ffmpeg and Whisper if they are missing,
+  and starts the service.</p>
+</div>
+
+<h3>The audio permission prompt</h3>
+
+<p>If this Mac is assigned the Boston Police feed, the first capture will make
+macOS ask for permission to record audio from other applications. Say yes. The
+service captures nothing until you do, and it will keep reporting success while
+recording silence, so this prompt is the one thing worth watching for.</p>
+
+<p class="dim">If you miss it, or click the wrong button, it is under System
+Settings, Privacy &amp; Security, Screen &amp; System Audio Recording.</p>
+
+<p class="dim">This build is not signed by Apple, so macOS may also ask you to
+approve the service in System Settings, Privacy &amp; Security, under a
+"was blocked" notice near the bottom. Click Allow Anyway, then run
+<code>bcc-setup</code> again.</p>
+
+<h3>Checking on it later</h3>
+
+<p><code>bcc-doctor</code> reports what is working and what is missing, by name,
+with the command that fixes each one. <code>tail -f ~/.bcc/agent.log</code>
+watches it run. <code>bcc-uninstall</code> removes it.</p>
+
+<p class="dim">A report from this install is in
+<code>/tmp/bcc-install-report.txt</code>.</p>
+
+</body></html>

@@ -1,0 +1,177 @@
+#!/bin/bash
+# Reports what this Mac is missing, by name, with the command that fixes it.
+#
+# Everything the agent needs is either present or it is not, and the failure
+# modes without this script are all silent: node missing means launchd logs an
+# ENOENT nobody reads, faster-whisper missing means every clip transcribes to an
+# exception, and a missing TCC grant means bcc-audiotap captures 0 bytes forever
+# while reporting success. So the check is explicit, it runs before the agent
+# every single start, and it prints the fix rather than the diagnosis.
+#
+#   bcc-doctor          human readable, exit 1 if anything required is missing
+#   bcc-doctor --quiet  print only failures
+#   bcc-doctor --json   machine readable
+
+set -uo pipefail
+
+BCC_DIR="/Library/Application Support/BCC"
+BIN="$BCC_DIR/bin"
+STATE="$HOME/.bcc"
+QUIET=0; JSON=0
+for a in "$@"; do
+  [ "$a" = "--quiet" ] && QUIET=1
+  [ "$a" = "--json" ] && { JSON=1; QUIET=1; }
+done
+
+fails=0
+warns=0
+rows=()
+
+row() { # status name detail fix
+  rows+=("$1|$2|$3|$4")
+  [ "$1" = "FAIL" ] && fails=$((fails+1))
+  [ "$1" = "WARN" ] && warns=$((warns+1))
+  if [ "$QUIET" = "0" ] || [ "$1" = "FAIL" ]; then
+    if [ "$JSON" = "0" ]; then
+      printf '  %-5s %-16s %s\n' "$1" "$2" "$3"
+      [ -n "$4" ] && [ "$1" != "OK" ] && printf '        %s\n' "$4"
+    fi
+  fi
+}
+
+[ "$JSON" = "0" ] && echo "" && echo "BCC agent check on $(hostname -s)" && echo ""
+
+# ---- config first, because it names the python the rest of the check uses ----
+CFG=""
+for c in "$STATE/config.json" "$BCC_DIR/config.json"; do
+  [ -f "$c" ] && { CFG="$c"; break; }
+done
+if [ -n "$CFG" ]; then
+  row OK config "$CFG" ""
+else
+  row FAIL config "no config.json" "run: '$BIN/bcc-setup'"
+fi
+
+jsonval() { # key file
+  [ -f "$2" ] || return 1
+  /usr/bin/python3 -c "import json,sys
+try: d=json.load(open(sys.argv[2]))
+except Exception: sys.exit(1)
+v=d.get(sys.argv[1])
+print(v if v is not None else '')" "$1" "$2" 2>/dev/null
+}
+
+PY="$(jsonval python "$CFG" 2>/dev/null)"
+[ -z "$PY" ] && PY="$STATE/venv/bin/python3"
+[ -x "$PY" ] || PY="$(command -v python3 || true)"
+
+# ---- binaries ----
+NODE="$(command -v node || true)"
+if [ -n "$NODE" ]; then
+  row OK node "$($NODE --version) at $NODE" ""
+else
+  row FAIL node "not installed" "brew install node"
+fi
+
+FFMPEG=""
+for f in /opt/homebrew/bin/ffmpeg /usr/local/bin/ffmpeg "$(command -v ffmpeg || true)"; do
+  [ -n "$f" ] && [ -x "$f" ] && { FFMPEG="$f"; break; }
+done
+if [ -n "$FFMPEG" ]; then
+  row OK ffmpeg "$FFMPEG" ""
+else
+  row FAIL ffmpeg "not installed" "brew install ffmpeg"
+fi
+
+if [ -n "$PY" ] && [ -x "$PY" ]; then
+  if "$PY" -c "import faster_whisper" >/dev/null 2>&1; then
+    row OK whisper "faster-whisper via $PY" ""
+  else
+    row FAIL whisper "faster-whisper not importable by $PY" "run: '$BIN/bcc-setup'"
+  fi
+else
+  row FAIL python "no usable python3" "run: '$BIN/bcc-setup'"
+fi
+
+# ---- our own payload ----
+for f in bcc-agent.js stt.py bcc-audiotap; do
+  if [ -e "$BIN/$f" ]; then row OK "$f" "installed" ""
+  else row FAIL "$f" "missing from $BIN" "reinstall the pkg"; fi
+done
+
+# A tap binary that is not executable, or was replaced by a copy that stripped
+# its signature, loses its TCC grant and captures silence while reporting fine.
+if [ -x "$BIN/bcc-audiotap" ]; then
+  if codesign -dv "$BIN/bcc-audiotap" >/dev/null 2>&1; then
+    row OK signature "bcc-audiotap is signed, so its audio grant will stick" ""
+  else
+    row WARN signature "bcc-audiotap is unsigned" "macOS will re-ask for audio permission after every update"
+  fi
+fi
+
+# ---- secrets and state ----
+if [ -f "$STATE/.ingest_secret" ]; then
+  if [ "$(stat -f '%Lp' "$STATE/.ingest_secret")" = "600" ]; then
+    row OK "ingest token" "present, mode 600" ""
+  else
+    row WARN "ingest token" "present, mode $(stat -f '%Lp' "$STATE/.ingest_secret")" "chmod 600 '$STATE/.ingest_secret'"
+  fi
+else
+  row FAIL "ingest token" "no $STATE/.ingest_secret" "run: '$BIN/bcc-setup'"
+fi
+
+if [ -f "$HOME/.boston-control-center/.login" ]; then
+  row OK "broadcastify" "credentials present" ""
+else
+  row WARN "broadcastify" "no ~/.boston-control-center/.login" "only needed for kind=broadcastify sources"
+fi
+
+# ---- can we reach the server ----
+EP="$(jsonval endpoint "$CFG" 2>/dev/null)"
+if [ -n "$EP" ]; then
+  code="$(curl -s -o /dev/null -w '%{http_code}' -m 8 "$EP/api/healthz" 2>/dev/null || echo 000)"
+  if [ "$code" = "200" ]; then
+    row OK endpoint "$EP answers /api/healthz" ""
+  else
+    row FAIL endpoint "$EP returned $code" "check the URL in $CFG, and that the Vercel project is deployed"
+  fi
+else
+  row WARN endpoint "not set" "run: '$BIN/bcc-setup'"
+fi
+
+# ---- is it actually running ----
+if pgrep -f "bcc-agen[t]\.js" >/dev/null 2>&1; then
+  row OK running "agent process is up" ""
+else
+  row WARN running "agent is not running" "launchctl kickstart -k gui/$(id -u)/com.bostonglobe.bcc-agent"
+fi
+
+if [ -f "$STATE/status.json" ]; then
+  age=$(( $(date +%s) - $(stat -f %m "$STATE/status.json") ))
+  if [ "$age" -lt 120 ]; then row OK status "updated ${age}s ago" ""
+  else row WARN status "last updated ${age}s ago" "the agent is not writing status; check $STATE/agent.log"; fi
+fi
+
+if [ "$JSON" = "1" ]; then
+  printf '{"fails":%d,"warns":%d,"checks":[' "$fails" "$warns"
+  sep=""
+  for r in "${rows[@]}"; do
+    IFS='|' read -r s n d f <<< "$r"
+    printf '%s{"status":"%s","name":"%s","detail":"%s"}' "$sep" "$s" "$n" "${d//\"/\'}"
+    sep=","
+  done
+  printf ']}\n'
+elif [ "$QUIET" = "0" ]; then
+  echo ""
+  if [ "$fails" -gt 0 ]; then
+    echo "  $fails thing(s) must be fixed before this Mac can contribute."
+  elif [ "$warns" -gt 0 ]; then
+    echo "  Ready. $warns warning(s) above are worth a look but nothing is blocking."
+  else
+    echo "  Ready."
+  fi
+  echo ""
+fi
+
+[ "$fails" -gt 0 ] && exit 1
+exit 0

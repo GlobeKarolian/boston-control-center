@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>com.bostonglobe.controlcenter.audiotap</string>
+  <key>CFBundleName</key>
+  <string>bcc-audiotap</string>
+  <key>CFBundleShortVersionString</key>
+  <string>1.0</string>
+  <key>CFBundleVersion</key>
+  <string>1</string>
+  <!-- TCC reads this string out of the binary and shows it verbatim in the
+       permission prompt. It is the only sentence a colleague sees before
+       deciding whether to trust us, so it says exactly what we take. -->
+  <key>NSAudioCaptureUsageDescription</key>
+  <string>Boston Control Center records the scanner feed playing in your browser so it can be transcribed. No other audio is captured and nothing is recorded from your microphone.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Boston Control Center records the scanner feed playing in your browser so it can be transcribed.</string>
+  <key>LSMinimumSystemVersion</key>
+  <string>14.4</string>
+</dict>
+</plist>
