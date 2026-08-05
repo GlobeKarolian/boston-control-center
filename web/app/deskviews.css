@@ -1,0 +1,404 @@
+/* deskviews.css — the Desk and the Story, two reading views over the same feeds.
+
+   These are alternate front pages for data the dashboard already holds. They add
+   no requests of their own: index.html hands them the arrays its pollers are
+   already filling, and everything in here is a pure render of that state.
+
+   Every rule is scoped under #deskview or #storyview, and the design tokens are
+   declared on those two roots rather than on :root. The classic Map view shares
+   the file and inherits none of it, which is the point: a mistake in here cannot
+   reach the board that is already working.
+
+   Light is the default because these are views you read for an hour at a time,
+   and a screen read for an hour should not be a light source. data-theme="dark"
+   on the view root swaps token values and nothing else. No component below knows
+   which theme it is in. */
+
+#deskview,#storyview{
+  /* four type sizes, and only four */
+  --f-mono:11px;--f-base:13px;--f-head:15px;--f-disp:20px;
+  /* one 4px spacing scale */
+  --x1:4px;--x2:8px;--x3:12px;--x4:16px;--x5:24px;--x6:32px;
+  --r1:4px;--r2:8px;--r3:999px;
+
+  --sheet:#f5f3ef;--card:#fffdfa;--sunk:#ebe7e0;
+  --rule:#dbd5ca;--rule-soft:#e9e4db;
+  --t1:#16181c;--t2:#575d69;--t3:#8a8f9a;
+  /* Reserved. Nothing in either view may use this colour for anything except a
+     situation the desk has flagged high. That is the whole reason it works. */
+  --alarm:#d80028;
+  --c-traffic:#a8520c;--c-transit:#0b52a8;--c-scanner:#0d6b45;--c-alert:#6a35a0;
+  --c-quake:#8a6414;--c-chopper:#1f6b78;--c-civic:#6f6350;--c-cam:#4b5563;
+  --shadow:0 1px 2px rgba(20,18,14,.07);
+}
+#deskview[data-theme="dark"],#storyview[data-theme="dark"]{
+  --sheet:#0a0d12;--card:#111620;--sunk:#0e131b;
+  --rule:#242c3a;--rule-soft:#19202d;
+  --t1:#e9edf4;--t2:#98a2b4;--t3:#636d7f;
+  --alarm:#ff2d55;
+  --c-traffic:#ffb020;--c-transit:#4da3ff;--c-scanner:#34d399;--c-alert:#c07cff;
+  --c-quake:#e0b64a;--c-chopper:#5ec8d8;--c-civic:#b9a684;--c-cam:#93a0b5;
+  --shadow:0 1px 2px rgba(0,0,0,.45);
+}
+
+/* The two roots. Transparent and pointer-events:none so the live map underneath
+   shows and stays draggable through whichever cell is left unpainted; every
+   direct child paints its own background and takes its pointers back. This is
+   the same trick .hud-top has always used. --dkhdr is measured off the real
+   header by deskviews.js, because the header's height changes with the wrap
+   rules at 1010px and a guessed number leaves a seam. */
+#deskview,#storyview{
+  position:fixed;inset:0;z-index:1500;display:none;
+  padding-top:var(--dkhdr,56px);
+  background:transparent;pointer-events:none;
+  font-family:var(--sans);color:var(--t1);
+  font-size:var(--f-base);line-height:1.45;
+  -webkit-font-smoothing:antialiased;
+}
+#deskview.show,#storyview.show{display:grid}
+#deskview > *,#storyview > *{pointer-events:auto;min-width:0}
+
+/* --- shared primitives --- */
+#deskview .dk-h,#storyview .dk-h{
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.15em;
+  text-transform:uppercase;color:var(--t3);
+  padding:var(--x4) var(--x4) var(--x2);
+  display:flex;align-items:baseline;gap:var(--x2);flex:0 0 auto}
+#deskview .dk-h .n,#storyview .dk-h .n{color:var(--t2);letter-spacing:.06em}
+#deskview .dk-scroll,#storyview .dk-scroll{flex:1 1 auto;overflow-y:auto;min-height:0}
+#deskview .dk-scroll::-webkit-scrollbar,#storyview .dk-scroll::-webkit-scrollbar{width:8px}
+#deskview .dk-scroll::-webkit-scrollbar-thumb,#storyview .dk-scroll::-webkit-scrollbar-thumb{
+  background:var(--rule);border-radius:8px}
+#deskview .dk-empty,#storyview .dk-empty{
+  padding:var(--x5) var(--x4);color:var(--t3);line-height:1.6}
+#deskview .dot,#storyview .dot{
+  width:6px;height:6px;border-radius:var(--r3);flex:0 0 auto;background:var(--t3)}
+#deskview .btn,#storyview .btn{
+  border:1px solid var(--rule);background:var(--card);color:var(--t2);
+  border-radius:var(--r1);padding:5px 11px;cursor:pointer;
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.09em;text-transform:uppercase}
+#deskview .btn:hover,#storyview .btn:hover{color:var(--t1);border-color:var(--t3)}
+#deskview :focus-visible,#storyview :focus-visible{
+  outline:2px solid var(--c-transit);outline-offset:-2px;border-radius:var(--r1)}
+
+/* --- the Desk ---
+   Five regions, no gutters. The rules between them are 1px borders rather than
+   gaps, because a gap here would show the map through it and read as a crack.
+   The centre cell is left unpainted on purpose: that is the live Leaflet map,
+   the same instance the Map tab uses, seen through a window. */
+#deskview{
+  grid-template-columns:minmax(280px,23%) minmax(0,1fr) minmax(300px,25%);
+  grid-template-rows:auto minmax(0,1fr) auto;
+  grid-template-areas:
+    "state state state"
+    "board map   wire"
+    "keys  keys  keys";
+}
+#deskview .dk-state{grid-area:state;border-bottom:1px solid var(--rule)}
+#deskview .dk-board{grid-area:board;border-right:1px solid var(--rule)}
+#deskview .dk-mapwin{grid-area:map}
+#deskview .dk-wire{grid-area:wire;border-left:1px solid var(--rule)}
+#deskview .dk-keys{grid-area:keys;border-top:1px solid var(--rule)}
+#deskview .dk-state,#deskview .dk-board,
+#deskview .dk-wire,#deskview .dk-keys{background:var(--sheet)}
+#deskview .dk-board,#deskview .dk-wire{display:flex;flex-direction:column;min-height:0}
+
+/* The state line. Audit finding 6: one line of plain language about whether the
+   board can be trusted, above everything it is asking you to trust. It says
+   nothing at all when everything is working, which is what makes it worth
+   reading when it does. */
+#deskview .dk-state{
+  display:flex;align-items:center;gap:var(--x3);
+  padding:var(--x3) var(--x4);min-height:44px}
+#deskview .dk-state .lede{color:var(--t1)}
+#deskview .dk-state .lede b{font-weight:600}
+#deskview .dk-state .why{color:var(--t2)}
+#deskview .dk-state .when{
+  margin-left:auto;font-family:var(--mono);font-size:var(--f-mono);
+  color:var(--t3);letter-spacing:.09em;text-transform:uppercase;white-space:nowrap}
+/* Degraded and dark get a weight change and a dot, not a colour. The one colour
+   that means something on this screen is spoken for. */
+#deskview .dk-state .dot{width:7px;height:7px}
+#deskview .dk-state.s-live .dot{background:var(--c-scanner)}
+#deskview .dk-state.s-quiet .dot{background:var(--t3)}
+#deskview .dk-state.s-stale .dot,
+#deskview .dk-state.s-degraded .dot{background:var(--c-traffic)}
+#deskview .dk-state.s-dark .dot{background:var(--t1)}
+#deskview .dk-state.s-stale .lede,
+#deskview .dk-state.s-degraded .lede,
+#deskview .dk-state.s-dark .lede{font-weight:600}
+
+/* Situation rows. Real buttons, so Tab reaches them and Enter opens them
+   without the view having to register anything with the rove handler. */
+#deskview .sit-row{
+  display:block;width:100%;text-align:left;font:inherit;color:inherit;
+  background:transparent;border:0;border-top:1px solid var(--rule-soft);
+  padding:var(--x3) var(--x4);cursor:pointer}
+#deskview .sit-row:first-child{border-top:0}
+#deskview .sit-row:hover{background:var(--sunk)}
+#deskview .sit-row .hl{font-size:var(--f-head);line-height:1.34;font-weight:500}
+#deskview .sit-row .sum{
+  margin-top:var(--x1);color:var(--t2);line-height:1.5;
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+#deskview .sit-row .meta{
+  margin-top:var(--x2);display:flex;align-items:center;gap:var(--x2);
+  font-family:var(--mono);font-size:var(--f-mono);color:var(--t3);letter-spacing:.05em}
+#deskview .sit-row .meta .sep{opacity:.45}
+#deskview .sit-row .meta .beats{color:var(--t2)}
+/* The reserved treatment: a 2px alarm bar and the one word, on the only thing
+   that has earned it. */
+#deskview .sit-row.high{box-shadow:inset 2px 0 0 var(--alarm)}
+#deskview .sit-row.high .flag{color:var(--alarm);font-weight:700;letter-spacing:.11em}
+#deskview .sit-row.closed{opacity:.6}
+#deskview .sit-row.closed .hl{font-weight:400;color:var(--t2)}
+
+/* The map window. No background, no pointer capture, so this cell is a hole cut
+   in the view and the map behind it drags, zooms and clicks exactly as it does
+   on the Map tab. The two floating strips take their own pointers back. */
+#deskview .dk-mapwin{position:relative;pointer-events:none;background:transparent}
+#deskview .dk-mapwin > *{pointer-events:auto}
+#deskview .dk-cap{
+  position:absolute;top:var(--x3);left:var(--x3);
+  display:inline-flex;align-items:center;gap:var(--x2);
+  background:var(--card);border:1px solid var(--rule);border-radius:var(--r1);
+  padding:var(--x1) var(--x2);box-shadow:var(--shadow);
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.11em;
+  text-transform:uppercase;color:var(--t2)}
+/* Audit finding 1: the routine calls collapse to one counting line. They are
+   still there, still one click away, and they no longer spend the column. */
+#deskview .dk-routine{
+  position:absolute;left:var(--x3);right:var(--x3);bottom:var(--x3);
+  background:var(--card);border:1px solid var(--rule);border-radius:var(--r1);
+  box-shadow:var(--shadow);max-height:46%;display:flex;flex-direction:column;overflow:hidden}
+#deskview .dk-routine .bar{
+  display:flex;align-items:center;gap:var(--x2);width:100%;
+  padding:var(--x2) var(--x3);border:0;background:transparent;
+  font:inherit;color:var(--t2);cursor:pointer;text-align:left}
+#deskview .dk-routine .bar:hover{color:var(--t1)}
+#deskview .dk-routine .c{font-family:var(--mono);color:var(--t1);font-weight:700}
+#deskview .dk-routine .tail{
+  margin-left:auto;font-family:var(--mono);font-size:var(--f-mono);
+  color:var(--t3);letter-spacing:.11em;text-transform:uppercase}
+#deskview .dk-routine .list{
+  border-top:1px solid var(--rule-soft);overflow-y:auto;min-height:0;padding:var(--x1) 0}
+#deskview .dk-routine .list::-webkit-scrollbar{width:8px}
+#deskview .dk-routine .list::-webkit-scrollbar-thumb{background:var(--rule);border-radius:8px}
+#deskview .dk-routine .r{
+  display:flex;gap:var(--x2);align-items:baseline;padding:3px var(--x3);
+  font-size:var(--f-mono);font-family:var(--mono);color:var(--t2);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#deskview .dk-routine .r .w{color:var(--t3);flex:0 0 auto}
+#deskview .dk-routine .r .x{overflow:hidden;text-overflow:ellipsis}
+
+/* The wire: what came in, over what was said. Two halves of one column, split
+   by a rule, each scrolling on its own so a busy scanner cannot push the
+   incident list off the screen. */
+#deskview .dk-wire .half{display:flex;flex-direction:column;min-height:0;flex:1 1 50%}
+#deskview .dk-wire .half + .half{border-top:1px solid var(--rule)}
+#deskview .w-row{
+  display:flex;gap:var(--x2);align-items:flex-start;width:100%;text-align:left;
+  font:inherit;color:inherit;background:transparent;border:0;
+  border-top:1px solid var(--rule-soft);padding:var(--x2) var(--x4);cursor:pointer}
+#deskview .w-row:hover{background:var(--sunk)}
+#deskview .w-row .dot{margin-top:6px}
+#deskview .w-row .tx{flex:1;min-width:0;line-height:1.42}
+#deskview .w-row .tx .loc{color:var(--t3)}
+#deskview .w-row .at{
+  font-family:var(--mono);font-size:var(--f-mono);color:var(--t3);
+  flex:0 0 auto;padding-top:2px;letter-spacing:.03em}
+#deskview .w-row.cleared{opacity:.5}
+
+#deskview .a-row{
+  border-top:1px solid var(--rule-soft);padding:var(--x2) var(--x4);line-height:1.48}
+#deskview .a-row .src{
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.07em;
+  text-transform:uppercase;color:var(--t3);margin-right:var(--x2)}
+#deskview .a-row .t{color:var(--t1)}
+#deskview .a-row.clear .t{color:var(--t3)}
+
+/* Audit finding 7. The shortcuts were built and then never written down
+   anywhere a person could find them. */
+#deskview .dk-keys{
+  display:flex;align-items:center;gap:var(--x4);flex-wrap:wrap;
+  padding:var(--x2) var(--x4);
+  font-family:var(--mono);font-size:var(--f-mono);color:var(--t3);letter-spacing:.05em}
+#deskview .dk-keys .k{display:inline-flex;align-items:center;gap:var(--x1)}
+#deskview .dk-keys kbd{
+  font:inherit;border:1px solid var(--rule);border-radius:3px;
+  padding:1px 5px;color:var(--t2);background:var(--card)}
+#deskview .dk-keys .sp{margin-left:auto}
+
+/* --- the Story ---
+   Same data, asked a different question. The Desk asks what is happening; this
+   asks what you would file. Left is every thread the analyst is holding, centre
+   is the one you picked written out as a draft, right is the evidence it came
+   out of, with the map underneath so the address has a place. */
+#storyview{
+  grid-template-columns:minmax(230px,19%) minmax(0,1fr) minmax(280px,24%);
+  grid-template-rows:minmax(0,1fr) auto;
+  grid-template-areas:
+    "list draft ev"
+    "keys keys  keys";
+}
+#storyview .sv-list{grid-area:list;background:var(--sheet);border-right:1px solid var(--rule)}
+#storyview .sv-draft{grid-area:draft;background:var(--card)}
+#storyview .sv-ev{grid-area:ev;border-left:1px solid var(--rule);background:transparent}
+#storyview .dk-keys{
+  grid-area:keys;background:var(--sheet);border-top:1px solid var(--rule);
+  display:flex;align-items:center;gap:var(--x4);flex-wrap:wrap;
+  padding:var(--x2) var(--x4);
+  font-family:var(--mono);font-size:var(--f-mono);color:var(--t3);letter-spacing:.05em}
+#storyview .dk-keys kbd{
+  font:inherit;border:1px solid var(--rule);border-radius:3px;
+  padding:1px 5px;color:var(--t2);background:var(--card)}
+#storyview .dk-keys .sp{margin-left:auto}
+#storyview .sv-list,#storyview .sv-ev{display:flex;flex-direction:column;min-height:0}
+#storyview .sv-draft{overflow-y:auto;min-height:0}
+
+#storyview .sv-row{
+  display:block;width:100%;text-align:left;font:inherit;color:inherit;
+  background:transparent;border:0;border-top:1px solid var(--rule-soft);
+  padding:var(--x3) var(--x4);cursor:pointer}
+#storyview .sv-row:first-child{border-top:0}
+#storyview .sv-row:hover{background:var(--sunk)}
+#storyview .sv-row .hl{
+  line-height:1.4;
+  display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+#storyview .sv-row .meta{
+  margin-top:var(--x1);font-family:var(--mono);font-size:var(--f-mono);
+  color:var(--t3);letter-spacing:.05em;display:flex;gap:var(--x2);align-items:center}
+#storyview .sv-row .meta .sep{opacity:.45}
+#storyview .sv-row.on{background:var(--sunk);box-shadow:inset 2px 0 0 var(--t1)}
+#storyview .sv-row.on .hl{font-weight:600}
+#storyview .sv-row.high.on{box-shadow:inset 2px 0 0 var(--alarm)}
+#storyview .sv-row.high .flag{color:var(--alarm);font-weight:700;letter-spacing:.11em}
+#storyview .sv-row.closed{opacity:.6}
+
+/* The draft. Measure is capped in ems rather than pixels so it stays a readable
+   line at any window width instead of running to 200 characters on a 27 inch
+   monitor, which is the one thing that would make this view useless. */
+#storyview .sv-draft{padding:var(--x6) var(--x6) 72px}
+#storyview .sv-draft .kicker{
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.17em;
+  text-transform:uppercase;color:var(--t3);
+  display:flex;align-items:center;gap:var(--x2);flex-wrap:wrap}
+#storyview .sv-draft .kicker .flag{color:var(--alarm);font-weight:700}
+#storyview .sv-draft .kicker .sep{opacity:.45}
+#storyview .sv-draft h1{
+  font-family:var(--serif);font-size:var(--f-disp);line-height:1.3;font-weight:700;
+  margin:var(--x3) 0 0;max-width:30em}
+#storyview .sv-draft .sum{
+  margin:var(--x3) 0 0;color:var(--t2);line-height:1.65;max-width:42em}
+#storyview .sv-draft .where{
+  margin:var(--x3) 0 0;font-family:var(--mono);font-size:var(--f-mono);
+  color:var(--t3);letter-spacing:.05em}
+#storyview .sv-actions{display:flex;gap:var(--x2);margin:var(--x5) 0 0;flex-wrap:wrap}
+#storyview .sv-note{
+  margin:var(--x4) 0 0;max-width:42em;color:var(--t3);line-height:1.6;
+  border-left:2px solid var(--rule);padding-left:var(--x3)}
+
+#storyview .sv-beats{margin:var(--x5) 0 0;max-width:44em;border-top:1px solid var(--rule)}
+#storyview .sv-beats .cap{
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.15em;
+  text-transform:uppercase;color:var(--t3);padding:var(--x3) 0 var(--x2)}
+#storyview .beat{
+  display:grid;grid-template-columns:76px minmax(0,1fr);gap:var(--x3);
+  padding:var(--x3) 0;border-top:1px solid var(--rule-soft)}
+#storyview .beat .at{
+  font-family:var(--mono);font-size:var(--f-mono);color:var(--t3);padding-top:3px}
+#storyview .beat .tx{line-height:1.58}
+#storyview .beat .kind{
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.1em;
+  text-transform:uppercase;color:var(--t3);margin-right:var(--x2)}
+/* A beat you could actually quote is set in the reading face. One that cannot
+   be pulled stays in the interface face, so the difference is visible before
+   you read a word of either. */
+#storyview .beat.pull .tx{font-family:var(--serif);font-size:14px}
+#storyview .sv-hidden{
+  font-family:var(--mono);font-size:var(--f-mono);color:var(--t3);padding:var(--x3) 0}
+
+/* Evidence, and the map under it. The pane paints itself; the map slot does
+   not, so the same live Leaflet instance shows through the bottom of the
+   column with the story's own pin on it. */
+#storyview .sv-ev .pane{
+  flex:1 1 auto;min-height:0;overflow-y:auto;background:var(--sheet);
+  display:flex;flex-direction:column}
+#storyview .sv-ev .pane::-webkit-scrollbar{width:8px}
+#storyview .sv-ev .pane::-webkit-scrollbar-thumb{background:var(--rule);border-radius:8px}
+#storyview .sv-map{
+  flex:0 0 34%;min-height:150px;position:relative;
+  background:transparent;border-top:1px solid var(--rule);pointer-events:none}
+#storyview .sv-map > *{pointer-events:auto}
+#storyview .sv-map .dk-cap{
+  position:absolute;top:var(--x2);left:var(--x2);
+  display:inline-flex;align-items:center;gap:var(--x2);
+  background:var(--card);border:1px solid var(--rule);border-radius:var(--r1);
+  padding:var(--x1) var(--x2);box-shadow:var(--shadow);
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.11em;
+  text-transform:uppercase;color:var(--t2)}
+#storyview .ev-row{padding:var(--x2) var(--x4);border-top:1px solid var(--rule-soft);line-height:1.5}
+#storyview .ev-row .src{
+  font-family:var(--mono);font-size:var(--f-mono);letter-spacing:.07em;
+  text-transform:uppercase;color:var(--t3);margin-right:var(--x2)}
+#storyview .ev-row .at{font-family:var(--mono);font-size:var(--f-mono);color:var(--t3)}
+
+/* --- what the classic chrome does while one of these is up ---
+   #stopsview and #backend are opaque wall to wall, so the rail, the layer panel
+   and the console can simply sit behind them. These two are not: they leave a
+   window onto the map, and anything left floating would show through it. So the
+   old furniture stands down for the duration and comes straight back. The big
+   alert does not: it is the one thing that is allowed to interrupt any view. */
+body.altview .rail,
+body.altview .layers,
+body.altview .console,
+body.altview .pulsebar,
+body.altview #bezos,
+body.altview .leaflet-control-zoom,
+body.altview .leaflet-control-attribution{display:none !important}
+
+/* The header is z-index 1600 and floats above every view, which is what keeps
+   the tabs clickable. Under a light view it has to stop being a dark gradient,
+   or the top 56px of the screen belongs to the other design. Solid, not a
+   gradient: the view's own first row starts exactly at its bottom edge, and a
+   fade there would show the map through the seam. */
+body.altview.lightview .hud-top{
+  background:#f5f3ef;border-bottom:0;box-shadow:none}
+body.altview.lightview .mast{color:#16181c;text-shadow:none}
+body.altview.lightview .sub{color:#8a8f9a}
+body.altview.lightview .hud-meta{color:#575d69;text-shadow:none}
+body.altview.lightview .hud-meta .clock{color:#16181c}
+body.altview.lightview .status-pill{color:#575d69}
+body.altview.lightview .tabs{background:#fffdfa;border-color:#dbd5ca}
+body.altview.lightview .tab{color:#575d69}
+body.altview.lightview .tab:hover{color:#16181c}
+body.altview.lightview .tab.active{background:#16181c;color:#f5f3ef}
+body.altview.lightview .tab .tdot{background:#8a8f9a}
+body.altview.lightview .live-badge{color:#c8102e}
+body.altview.lightview .dot{background:#c8102e}
+
+/* Under 1180px the three columns stop being three columns. The map keeps the
+   width, because a 240px map is a decoration, and the two side columns take
+   turns underneath it. */
+@media(max-width:1180px){
+  #deskview{
+    grid-template-columns:minmax(0,1fr) minmax(280px,34%);
+    grid-template-areas:
+      "state state"
+      "map   wire"
+      "board wire"
+      "keys  keys";
+    grid-template-rows:auto minmax(0,40%) minmax(0,1fr) auto}
+  #deskview .dk-board{border-right:0;border-top:1px solid var(--rule)}
+  #storyview{
+    grid-template-columns:minmax(220px,30%) minmax(0,1fr);
+    grid-template-areas:
+      "list draft"
+      "list ev"
+      "keys keys";
+    grid-template-rows:minmax(0,1fr) minmax(0,42%) auto}
+  #storyview .sv-ev{border-left:0;border-top:1px solid var(--rule)}
+  #storyview .sv-draft{padding:var(--x5) var(--x5) 48px}
+}
+@media(prefers-reduced-motion:reduce){
+  #deskview *,#storyview *{animation:none !important;transition:none !important}
+}

@@ -11,6 +11,10 @@
     --bg:#05070b;--panel:rgba(14,18,26,.86);--panel-solid:#0e121a;--border:#232c3b;--border-soft:#1a2230;
     --text:#e9edf4;--text-dim:#9aa4b6;--text-faint:#5f6a7e;
     --crash:#ff4d4d;--road:#ffb020;--transit:#4da3ff;--scanner:#34d399;--alert:#c07cff;--wire:#ff3b30;
+    /* Stale, not alarming. Held back from --road's #ffb020 on purpose: a feed that
+       missed one refresh is worth noticing on the second glance, not the first, and
+       it must not compete with the reds and oranges that mean something happened. */
+    --stale:#e8a33d;
     --red-l:#DA291C;--orange-l:#ED8B00;--blue-l:#003DA5;--green-l:#00843D;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --serif:Georgia,"Times New Roman",serif;
@@ -19,6 +23,22 @@
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;overflow:hidden;background:var(--bg)}
   body{font-family:var(--sans);color:var(--text)}
+  /* Before this rule the whole file had exactly one :focus declaration and it was
+     .st-find's, which sets outline:none and pays for it with a border colour. Every
+     other control here is a div with an onclick, so a keyboard had nothing to aim at
+     and nothing to show it where it was aiming. This is the ring; the keyboard
+     handler at the bottom of the script is what makes it worth having.
+     :focus-visible and not :focus, because the browser only counts keyboard and
+     assistive intent under that name. Bound to :focus on divs, every tap and click
+     would leave a ring behind on a touch screen, which is the reason outline:none
+     gets written in the first place.
+     The offset is negative on purpose. #feed, #clog and .st-wrap are all
+     overflow-y:auto, and a ring drawn 2px outside a full-width row is drawn outside
+     the scroller's padding edge, where it is clipped on both sides and reads as two
+     stubs. Inset it cannot be clipped by anything.
+     Green because .st-find already made green mean focus in this file, and one
+     focus colour is worth more than a prettier second one. */
+  :focus-visible{outline:2px solid var(--scanner);outline-offset:-2px}
   #map{position:fixed;inset:0;z-index:0;background:#05070b}
   .leaflet-container{background:#05070b}
   /* The map is built with zoomControl:false so this control is the only one, and
@@ -140,6 +160,29 @@
      down the list, instead of nine ragged numbers all in the same faint grey. */
   .lyr .lcount{font-family:var(--mono);font-size:10.5px;color:var(--text-dim);font-variant-numeric:tabular-nums;
     min-width:26px;text-align:right;flex:0 0 auto}
+  /* A layer whose last fetch failed. What this replaces was a bare "!" written into
+     the count, and on the 390x844 phone shot three of the nine rows were showing one
+     at the same time: traffic, choppers and 311. An exclamation mark in a column of
+     right-aligned numbers does not read as an error, it reads as a count, and it
+     destroyed the last good number on its way in.
+     So the number stays now and the row says it is stale around it. The map keeps its
+     old markers as well, because all six of these loaders fetch before they call
+     clearLayers, so a failed refresh leaves the previous markers drawn. Row, count and
+     map then agree with each other: this is the last good data, not current data.
+     The dot carries it at a glance. It is the one part of a row that is a solid block
+     of colour, so hollowing it out is what survives peripheral vision at arm's length,
+     which is the phone case. Name dims and count goes amber behind that. All three are
+     wanted, because the count column is 22px wide in the two-column phone layout and a
+     colour change alone inside 22px is not much of a signal.
+     The !important is not decoration. Every dot carries its layer colour as an inline
+     style attribute, and inline beats the stylesheet, so this is the only way to
+     override nine of them without rewriting all nine spans.
+     The title is desktop-only in practice: there is no hover on a phone. That is why
+     the visual state has to stand on its own and the title is the explanation you get
+     when you go asking, rather than the notice itself. */
+  .lyr.failed .lname{color:var(--text-dim)}
+  .lyr.failed .lcount{color:var(--stale)}
+  .lyr.failed .ldot{background:transparent!important;box-shadow:inset 0 0 0 1.5px var(--stale)}
 
   /* bottom wire ticker */
   .wire{position:fixed;left:0;right:0;bottom:0;z-index:1000;height:36px;display:flex;align-items:center;
@@ -162,6 +205,50 @@
   .pop-t{font-size:13px;font-weight:700;margin-bottom:3px}
   .pop-r{font-size:11.5px;color:var(--text-dim);margin:2px 0}
   .pop-src{font-family:var(--mono);font-size:10px;color:var(--text-faint);margin-top:5px}
+  /* Traffic camera popup. The picture is the content, so it takes the full width
+     of the popup and carries a placeholder height: without one, the popup is
+     laid out at nothing, then jumps and re-anchors itself the instant the first
+     frame arrives, which on a click near the edge of the map drags the whole
+     view. cam-dead hides the element rather than shrinking it, because a broken
+     image icon on a wall screen reads as the dashboard being broken. */
+  .cam-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+  .cam-img{display:block;width:100%;margin:7px 0 3px;border-radius:6px;background:#0b0f16;min-height:112px}
+  .cam-img.cam-dead{display:none}
+  .cam-raw{font-family:var(--mono);font-size:9.5px;color:var(--text-faint);word-break:break-word;margin-top:4px}
+  /* Live webcam popup. Wider than the traffic one because this is video, and a
+     16:9 box held open by aspect-ratio rather than a min-height, so the frame
+     never resizes after it loads and drags the map under it. The iframe src is
+     empty at bind time and filled on open, for the same reason the traffic
+     camera src is: Leaflet builds every popup when the layer goes on, and twelve
+     YouTube players booting at once because somebody flipped a switch is a
+     different order of expensive than twelve JPEGs. */
+  .wc-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+  .wc-box{position:relative;width:100%;aspect-ratio:16/9;margin:7px 0 4px;border-radius:6px;
+    overflow:hidden;background:#0b0f16;border:1px solid var(--border-soft)}
+  .wc-box iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
+  /* Sits under the frame, so it is what shows through if the embed never paints:
+     a blocked or ended stream leaves a transparent iframe, not an error page. */
+  .wc-wait{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-faint)}
+  .wc-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:3px}
+  .wc-face{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
+    color:#f472b6;background:rgba(244,114,182,.12);border:1px solid rgba(244,114,182,.3);border-radius:4px;padding:1px 5px}
+  /* Always shown, never conditional on the frame working. An embed can fail for
+     reasons the catalog cannot predict, and a dead box next to a live link is a
+     camera you can still watch. A dead box on its own is a bug report. */
+  .wc-out{font-family:var(--mono);font-size:10px;color:var(--transit);text-decoration:none}
+  .wc-out:hover{text-decoration:underline}
+  .wc-off{font-family:var(--mono);font-size:9.5px;color:var(--text-faint);margin-top:3px}
+  /* The way out of a stacked pin. At metro zoom the three rooftop cameras draw on
+     top of each other no matter how the fan is sized, so the one you can click
+     carries buttons to the ones you cannot. Styled as controls rather than links
+     because they move the map rather than leaving it. */
+  .wc-sibs{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:5px}
+  .wc-sibl{font-family:var(--mono);font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:var(--text-faint)}
+  .wc-sib{font-family:var(--mono);font-size:9.5px;color:var(--text-dim);background:rgba(244,114,182,.08);
+    border:1px solid rgba(244,114,182,.28);border-radius:4px;padding:2px 6px;cursor:pointer;line-height:1.3}
+  .wc-sib:hover{color:var(--text);background:rgba(244,114,182,.18);border-color:rgba(244,114,182,.5)}
+  .wc-sib:focus-visible{outline:2px solid #f472b6;outline-offset:1px}
   .veh-pop{font-family:var(--mono);font-size:11px}
   .train-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
   /* The caveat used to float at top-centre, in the same 40px band as the toast
@@ -320,7 +407,19 @@
   .pop-tl{font-size:11.5px;line-height:1.4;color:var(--text);margin-bottom:5px}
   .pop-tl.clear{color:var(--text-dim)}
   .pop-tlt{font-family:var(--mono);font-size:9.5px;color:var(--text-faint);margin-right:5px}
-  .pop-more{margin-top:8px;font-size:11px;color:var(--scanner);cursor:pointer;font-weight:700}
+  /* A tap target and a ring target, not just coloured text. Two separate things drove
+     the padding. The line is 11px type, so before this it was a 15px-tall hit area, and
+     the popup is the one surface on this page a phone user arrives at by tapping, so 15px
+     is the wrong number to hand a thumb. And the page's single focus ring is inset by 2px
+     for the scrollers' sake, which on a 15px line draws the ring straight through the
+     words; 6px of padding gives that ring somewhere to sit around the text instead of
+     across it. The negative side margin cancels the horizontal padding so the words stay
+     flush with .pop-t and .pop-r above them, which is what keeps the bigger target from
+     looking like an indent bug. inline-block so the box is the width of the words: a
+     full-width ring on a 230px popup would read as the whole popup being focused rather
+     than one control inside it. 2px top margin plus 6px top padding keeps the gap above
+     the line at the 8px it already was. */
+  .pop-more{margin:2px -8px 0;padding:6px 8px;font-size:11px;color:var(--scanner);cursor:pointer;font-weight:700;display:inline-block;border-radius:6px}
   .pop-more:hover{text-decoration:underline}
   .badge{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:4px}
   .badge.active{background:var(--scanner);color:#06090f}.badge.high{background:var(--wire);color:#fff}.badge.cleared{background:#374151;color:#cbd5e1}
@@ -510,6 +609,62 @@
   .sit-loc{font-family:var(--mono);font-size:10px;color:#b39ddb;margin-top:4px}
   .sit-loc::before{content:"\25CE  "}
 
+  /* --- story threads (#190) ---
+     The desk strip first. On a column that redraws itself every five seconds a
+     correction that landed and one that was refused look identical, because the
+     board repaints either way, so the only way to tell them apart is to say so.
+     Zero high when there is nothing to say, which is why it can sit in the flex
+     column at all: the rail budget is unchanged on every poll where nobody has
+     pressed anything, and it only borrows a line from the live feed while a
+     sentence is actually up. */
+  .desk-say{max-height:0;overflow:hidden;font-size:11px;line-height:1.35;color:#d6b3ff;
+    background:rgba(192,124,255,.10);border-left:2px solid #c07cff;padding:0 12px;
+    transition:max-height .12s ease,padding .12s ease}
+  .desk-say.show{max-height:64px;padding:6px 12px}
+  .desk-say.bad{color:#ffb3b3;background:rgba(255,59,48,.10);border-left-color:var(--wire)}
+  /* The chip is the handle for the whole card: it says how many beats are on it
+     and pressing it is what puts the beats and the desk controls on screen. It
+     is sized off the type row it sits in rather than given a height of its own,
+     so a card with a chip and a card without are the same height and a board
+     that gains a thread does not reflow the column under somebody reading it. */
+  .thr-chip{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.4px;
+    padding:1px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;
+    color:var(--text-faint);cursor:pointer}
+  .thr-chip:hover{border-color:#c07cff;color:#d6b3ff}
+  .thr-chip.many{border-color:#6b4a8f;color:#c9a6ef}
+  .sit.open .thr-chip{background:rgba(192,124,255,.18);border-color:#c07cff;color:#e6d0ff}
+  /* The one line a folded thread owes the room: what has happened on it since
+     the headline was written. Two lines is the cap, because the card above it is
+     already a summary and this is a footnote on the summary. */
+  .thr-last{font-size:11px;color:#c9a6ef;margin-top:5px;font-style:italic;
+    display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+  .thr{margin-top:8px;border-top:1px solid var(--border-soft);padding-top:6px}
+  .thr-more{font-family:var(--mono);font-size:9px;color:var(--text-faint);margin-bottom:5px}
+  .thr-beat{display:flex;gap:7px;align-items:baseline;padding:3px 0;font-size:11px;line-height:1.35}
+  .thr-when{font-family:var(--mono);font-size:9px;color:var(--text-faint);flex:0 0 auto;min-width:36px}
+  .thr-text{color:var(--text-dim);flex:1;min-width:0}
+  /* The pull control and the two words standing in where there is no pull share
+     one rule, so a thread carrying a mix of the two does not read as a ragged
+     right edge with a fault somewhere in it. */
+  .thr-pull{font-family:var(--mono);font-size:9px;flex:0 0 auto;text-align:right;
+    background:transparent;border:0;padding:0;cursor:pointer;color:#8fb6ff}
+  .thr-pull:hover{color:#bcd4ff;text-decoration:underline}
+  .thr-pull.off{color:var(--text-faint);cursor:help;font-style:italic}
+  .sit-acts{display:flex;gap:6px;margin-top:8px}
+  .sit-acts button{flex:1;font-family:var(--mono);font-size:9px;padding:4px 2px;cursor:pointer;
+    background:#232b3b;border:1px solid var(--border);border-radius:5px;color:#c9d4e6}
+  .sit-acts button:hover{background:#2d3852;border-color:#c07cff;color:#fff}
+  /* Arming a fold changes what a plain click on every other card means, so the
+     column has to look different while it is armed or the next click is a
+     surprise. The armed card is the one that will move. Everything else is
+     somewhere it can go, and says so under the cursor rather than in a line of
+     its own, because eight copies of the same sentence in a 340px column is not
+     eight times the guidance. */
+  .sit.armed{background:rgba(192,124,255,.14);outline:1px dashed #c07cff;outline-offset:-2px}
+  .sit.target:hover,.sit.target:focus{background:rgba(143,182,255,.12);outline:1px solid #8fb6ff;outline-offset:-2px}
+  #situations.arming .sit{cursor:copy}
+  .thr-drop{font-family:var(--mono);font-size:9px;color:#d6b3ff;margin-top:6px;line-height:1.4}
+
   /* big flashing alert for a new high-priority situation */
   /* Centred on the viewport it reached across the situations rail, and under about
      930px wide the layer panel as well, so the banner announcing a call sat on top
@@ -536,6 +691,36 @@
   .big-alert .ba-h{font-size:19px;font-weight:800;color:#fff;margin-top:3px;font-family:var(--serif);
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .big-alert .ba-l{font-family:var(--mono);font-size:11px;color:#ffb3b3;margin-top:3px}
+  /* The headline was clamped and these two were not, which made the banner's height a
+     function of how long the dispatcher's words were. At 390px, with a two-line
+     headline, "⚠ MOTOR VEHICLE ACCIDENT WITH ENTRAPMENT" wraps and so does "Southeast
+     Expressway inbound at Exit 12, Columbia Road, Dorchester", 13px each, and the
+     banner goes from 102px to 128px. --ntop only reserves 124 for it, so the bottom
+     8px of the banner was drawn over the top of the incident rail. The same 26px would
+     have pushed through the toast stack's 186px reserve as well.
+     Widening the reserve would have been fixing the number I happened to measure. A
+     line each makes the height the same 102px for every call that will ever come
+     through, which is what a fixed reserve above it needs to be true.
+     The kicker loses nothing by it: it is a category, its first two words are the
+     category, and it is in full on the card and in the detail panel.
+     The location was argued for the same way here, on the grounds that an address
+     reads most specific first so the end of it is the part you already know, and
+     that argument did not survive being measured. Two streets and a town is not
+     most-specific-first, it is a corner, and cutting it leaves one of the two roads
+     and no town. The ≤700 block at the end of this stylesheet gives .ba-l a second
+     line for that reason and moves the reserve to match; the numbers are in the
+     comment there. This rule still supplies the clamp mechanism and still owns the
+     kicker at every width and the location above 700px, where the line holds 77
+     characters and only two labels in the whole corpus pass it. Those two are
+     recoverable by hover from the title showBigAlert() writes, which is the trade
+     that makes one line defensible up here and not down there.
+     Clamped rather than nowrap with an ellipsis, and the two are not the same when
+     the text is centred: a nowrap line that does not fit overflows both edges, so
+     the ellipsis goes on the end and the street number quietly comes off the front.
+     Clamping keeps the line a line, so the truncation happens where you can see it.
+     Same mechanism the headline above already uses, one line instead of two. */
+  .big-alert .ba-k,.big-alert .ba-l{display:-webkit-box;-webkit-line-clamp:1;
+    -webkit-box-orient:vertical;overflow:hidden}
   .big-alert .ba-x{position:absolute;top:5px;right:6px;width:26px;height:26px;display:flex;align-items:center;
     justify-content:center;border-radius:7px;cursor:pointer;color:#ff9a9a;font-size:16px;line-height:1;
     transition:background .12s,color .12s}
@@ -550,7 +735,334 @@
     .big-alert .ba-k{font-size:9.5px;letter-spacing:1.4px;padding:0 20px}
     .big-alert .ba-h{font-size:16px}
     .big-alert .ba-l{font-size:9.5px}}
+
+  /* --- phone ---------------------------------------------------------------
+     This block is last in the stylesheet on purpose. The rail's top is restated
+     twice further up, once in the scanner additions and again under SITUATIONS,
+     and a media query adds nothing to specificity, so being written after both
+     of them is the only thing that lets a narrow rule move the rail at all.
+
+     What it fixes: .hud-top is a nowrap flex row and the page is overflow:hidden,
+     so below about 700px the header did not wrap, it was amputated. Rendered at
+     390px the row ran out partway through the third tab and took the caveat, the
+     status pill, the refresh stamp and the clock off the right edge with it. The
+     one line on this page carrying legal weight and the one dot that turns amber
+     when a feed drops were both simply absent on a phone, with nothing left on
+     screen to suggest anything was missing. */
+  @media(max-width:700px){
+    .hud-top{flex-wrap:wrap;row-gap:6px;column-gap:9px;padding:8px 12px}
+    /* Masthead and clock on the first row, the caveat and the tabs on the second.
+       The break is forced by .spacer rather than left to the wrap algorithm: flex
+       assigns items to lines from their base sizes before auto margins are
+       resolved, so margin-left:auto pushes the clock right but cannot be relied on
+       to end a line, while a 100% basis can. It costs one extra zero-height line
+       and 6px of row gap, and buys a header that does not depend on how wide
+       "Under the Hood" happens to render in whatever font actually loaded. */
+    .hud-meta{gap:10px;margin-left:auto;order:2}
+    .spacer{flex:0 0 100%;height:0;order:3}
+    .caveat{order:4}
+    .tabs{order:5}
+    .tab{font-size:10px;padding:5px 9px}
+    .mast{font-size:16px}
+    /* Scoped to the header because .st-row .sub is a different element with the
+       same class, and the !important here would otherwise shrink every subtitle in
+       the stops log. It needs to be !important at all because the span carries an
+       inline font-size:11px, which no plain rule can reach, and it cannot simply be
+       dropped because it is the second half of the masthead. */
+    .hud-top .sub{font-size:8.5px!important;letter-spacing:1.4px}
+    /* Third thing on the row saying live, after the status pill and the clock
+       beside it. #updated was dropped at 1010px for exactly this reason. The pill
+       is the one that keeps its place, because it is the one that turns amber. */
+    .live-badge{display:none}
+
+    /* One reserve for the whole stack, same as the 820px block, re-measured for a
+       two-row header. Measured at 390px the wrapped header draws 76px tall, and
+       84px is that plus an 8px gap, which is the same breathing room the desktop
+       layout gives itself when it puts .rail at top:58px under a header of about
+       50. The 76 is measured rather than added up on paper, because the second row
+       is only as tall as the caveat wraps to. --hdr is kept separate from --ntop
+       because the banner rule below needs to know where the header ends, while
+       --ntop grows to swallow the banner itself when one is up. */
+    body{--sat:env(safe-area-inset-top,0px);--sab:env(safe-area-inset-bottom,0px);
+      --hdr:calc(84px + var(--sat));--ntop:var(--hdr);
+      --nbot:calc(160px + var(--sab));--nres:calc(280px + var(--sat) + var(--sab))}
+    /* The 258px floor in the 820px block reserves the console and the pulse
+       scrubber's band together, but the pulse layer is off by default, so on a
+       phone all three panels were giving up 98px to a control that was not on
+       screen. The floor is the console alone now and the scrubber buys its own band
+       back when it is genuinely up. 258 and the reserve that goes with it are the
+       old numbers exactly, so nothing about the scrubber-on layout moves.
+       The :not() is load-bearing: :has(.pulsebar.show) still matches while an alert
+       has the scrubber at display:none, and the two selectors otherwise weigh the
+       same, which would leave the outcome to whichever was written last. */
+    body:has(.pulsebar.show):not(:has(.big-alert.show)){
+      --nbot:calc(258px + var(--sab));--nres:calc(378px + var(--sat) + var(--sab))}
+    /* 124px was 182 minus 58 from the block above, carried over rather than
+       re-guessed, and it was the right number for as long as the banner was 102px
+       tall at every width. Giving the location its second line below makes it 115px
+       here, measured, and against a 124px reserve that leaves 5px before the rail.
+       Five pixels is not a collision, but the banner's shadow is 0 16px 50px, so
+       the whole of it lands on the card underneath and the two read as touching.
+       The reserve moves by the same 13px the banner grew, which puts the clearance
+       back where the block was written to have it rather than at a new number.
+       --nres tracks it. Everywhere an alert is up in this stylesheet --nres is
+       --ntop plus --nbot exactly: 368 was 208 plus 160, and 182 plus 160 was 342 in
+       the 820px block. The 36px the base state carries on top is the scrubber's
+       band, not the banner's, so 381 is 221 plus 160 and the relationship the rest
+       of the block already assumes still holds.
+       This costs 13px of rail height, and only while an alert is actually up, which
+       is the one state where the rail is not the thing being read.
+       The rest of the cost is worth stating plainly, because it falls on the common
+       case and not the one being fixed. This selector keys on state, and 137 has to
+       cover the worst content that state can hold. CSS cannot ask whether the line
+       actually wrapped, so a one-line location gets the same reserve a two-line one
+       does: the harness measures the banner at 88..190 h102 with 31px of gap for a
+       typical 29-character location, against 88..203 h115 with 18px for the 86-
+       character corner. So 97.35% of labels pay 13px of rail and show 13px more gap
+       than they need, to keep the 2.65% that wrap from sitting under the shadow.
+       Trimming the banner's padding does not buy this back; it moves the one-line
+       and two-line heights together and the difference between them survives. The
+       only thing that would is measuring the wrap in JS and writing --ntop per
+       alert, which trades a fixed reserve for a reflow on every banner and is a
+       worse deal than 13px. */
+    body:has(.big-alert.show){--ntop:calc(var(--hdr) + 137px);
+      --nres:calc(381px + var(--sat) + var(--sab))}
+    .big-alert{top:calc(var(--hdr) + 4px)}
+    /* The one-line clamp above is right about the kicker and wrong about the
+       location, and the harness is what says so. At 390px this box is 322px of
+       content at a 6.623px advance, which is 48 characters to a line, and a single
+       line was truncating 1,604 of the 60,449 labels lib/streets.json can produce.
+       A desktop hover recovers a cut like that, from the title showBigAlert() puts
+       on the line. There is no hover on a phone, so what comes off here comes off
+       for good, and 1,604 is too many to take that way.
+       Two rather than no clamp at all, because a fixed banner height is what the
+       reserve above depends on being true, and two lines is still fixed, just
+       fixed at 115px instead of 102. Two is also enough: greedy-wrapped at 48
+       characters, every one of those 60,449 labels fits inside two lines and the
+       longest single token in the set is 19 characters, so none of them breaks
+       mid-word either. The 48 is measured at this width and is not a constant, so
+       it is the harness and not this comment that should be believed after any
+       change to the type or the lane.
+       What is left uncovered is the geocoder fallback, which takes three comma
+       fields off a response we do not own and is bounded by nothing. That one can
+       still reach the ellipsis, and should.
+       The kicker keeps its single line: it is a category out of a closed set and
+       its first two words are the category. Worth knowing that it holds 28
+       characters and not 48, because 3px of letter-spacing on an 11px face costs
+       it a third of the line. */
+    .big-alert .ba-l{-webkit-line-clamp:2}
+    .rail{top:var(--ntop)}
+
+    /* Nine switches in one column draw 348px: a 34px heading plus eight rows of
+       35px and a last row of 34, since that one drops its border. At 390x844 the
+       panel has 246px of room inside its own border, so 102px of the list was
+       below the fold, which is 311 requests cut through the middle and Pulse and
+       Movement gone entirely. The only thing on screen saying so was the scrim at
+       the bottom edge, a few pixels of shadow that reads as a shadow.
+       Two columns draw the same nine rows in 208px, so the whole list is on screen
+       at once and the panel gives 38px back to the map instead of asking for more:
+       the band between the rail and this panel goes from 93px to 131px.
+       Widening to the rail's own edges is what pays for the second column, and the
+       panel stops hanging 130px inboard of the rail while it is at it. */
+    .layers{left:14px;width:auto;display:grid;
+      grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-content:start;
+      max-height:calc((100vh - var(--nres)) * .52)}
+    .layers h3{grid-column:1/-1}
+    /* minmax(0,1fr) and not 1fr, and the two are not interchangeable here. 1fr is
+       minmax(auto,1fr), so each column refuses to go below its own min-content, and
+       a row whose name is nowrap text reports that whole name as min-content however
+       much overflow:hidden is on it. Written as 1fr the two columns came out 192.5
+       and 200.7, a 393px grid inside a 362px panel, and the panel clips its own
+       overflow-x, so the far edge of the right column was gone: not the names, the
+       switches. Nine rows all present and four of them with no visible control.
+       Floored at 0 the columns are 180px each and the names ellipsize instead, which
+       is what they have overflow:hidden and text-overflow:ellipsis for. min-width:0
+       on the name is the same argument one level down. */
+    /* .44 of the remainder is 248px with nothing else up, but 205px with the pulse
+       scrubber up and 209px under an alert, and 208px of rows does not fit either of
+       those. .52 clears all three. It is a cap and not a height, so on this phone it
+       never binds: the panel draws 210px, being 208px of rows inside its own border,
+       because that is what nine rows measure and nothing here stretches.
+       It binds on a 667px screen, where the cap lands at 201px and the last row
+       gives up 7px, and that is the right place to lose the argument. */
+
+    /* 9px of side padding and a 6px gap, down from 13 and 9, and 11.5px type. Every
+       pixel of that goes to the name, which still lands at 80px in the left column
+       and 81px in the right, the 1px being the divider, against 102px when there was
+       one column. Measured against that: Traffic, Quakes and Choppers ellipsize,
+       where only Choppers did before. All three keep the word that identifies them.
+       Pulse (typical) survives whole at exactly 81px, and Movement (live) spells
+       itself out on the full-width last row, which is the one worth having, because
+       those two are the pair you have to be able to tell apart. Three clipped names
+       beats three rows that are not there. */
+    .lyr{padding:8px 9px;gap:6px;font-size:11.5px;overflow:hidden}
+    .lyr .lname{min-width:0}
+    .lyr .lcount{min-width:22px}
+    /* The line between the columns. It has to be keyed to nth-child parity because
+       CSS cannot ask which column a cell landed in, so this is the left column only
+       for as long as there are two columns and the heading spans both. Add or remove
+       one layer and every line in here swaps sides: count the rows if you touch that
+       list. :not(:last-child) rather than a second rule turning it back off, because
+       .layers .lyr:nth-child(even) outweighs .lyr:last-child and would have won. */
+    .layers .lyr:nth-child(even){border-right:1px solid var(--border-soft)}
+    /* Twelve is even, so the grid closes on a clean pair and nothing needs to span.
+       The previous rule here gave the last row the full width, which is what an odd
+       count needs to avoid a gap, and it carried a note saying that adding one more
+       row would swap every line in this block to the wrong column. Adding webcams
+       is that one more row. The count went 9, then 11 with cameras and outages,
+       now 12. The parity of the .lyr elements did not move, because the h3 spans
+       both columns and is still child one, so even is still the left column and the
+       border stays on the same side. What changed is that there is no longer an odd
+       row left over, so :last-child has nothing to do and the :not() guard that
+       existed only to keep it from fighting this rule went with it. If a thirteenth
+       layer ever lands, put both back. */
+
+    /* The home bar. Both of these resolve to 0px in any browser that is not
+       reporting an inset, which is every browser until viewport-fit=cover is on the
+       meta tag, so today they change nothing and the day that tag lands they stop
+       the last line of the scanner log ending underneath the home indicator. The
+       left and right insets are deliberately not handled: they are zero in portrait,
+       and landscape on a phone is already unusable on arithmetic alone, because a
+       390px-tall viewport minus this header and this console leaves 146px for three
+       panels. That is a layout decision, not an inset. */
+    .hud-top{padding-top:calc(8px + var(--sat))}
+    .console{height:calc(150px + var(--sab));padding-bottom:var(--sab)}
+  }
+
+  /* --- reduced motion -----------------------------------------------------
+     Nothing on this page moves purely as decoration, so none of it is simply
+     switched off. Each animation is replaced by the end state it was oscillating
+     around, so a stilled page says the same thing a moving one did. */
+  @media(prefers-reduced-motion:reduce){
+    .live-badge .dot,.console .rec,.tab .tdot,
+    .be-feed.connecting .fdot,.be-feed.reconnecting .fdot{animation:none}
+    /* The breathing halo was the only thing separating a live dot from a dead one
+       at 9px, so it stays. It just stops breathing. */
+    .live-badge .dot,.console .rec{box-shadow:0 0 0 3px rgba(255,59,48,.28)}
+    .be-feed.connecting .fdot,.be-feed.reconnecting .fdot{box-shadow:0 0 0 3px rgba(255,176,32,.3)}
+    /* The expanding ring is the only mark on the map that separates a call running
+       right now from one cleared an hour ago, and it expands forever. Held near its
+       widest and dimmed, it reads as a halo around the dot instead. */
+    .inc-ico.pulse::before{animation:none;transform:scale(2.4);opacity:.22}
+    /* This is the one that matters. A banner flashing its border at roughly one
+       cycle a second, for as long as the call stays open, is the pattern people who
+       set this preference set it to avoid. Held at the bright end of its own cycle:
+       same red, same weight, no strobe. */
+    .big-alert{animation:none;border-color:#ff8a80;
+      box-shadow:0 0 0 4px rgba(255,59,48,.34),0 16px 50px rgba(0,0,0,.6)}
+    /* These two are one-shot rather than looping, and each carries something a
+       still frame does not: which feed row is new, and that a toast arrived rather
+       than having been sitting there. So the flash becomes a hold and the slide
+       becomes a fade, rather than either becoming nothing. */
+    .feed-item.fresh{animation:flash 2.4s step-end}
+    .toast{animation:toastfade .3s ease-out}
+    @keyframes toastfade{from{opacity:0}to{opacity:1}}
+    /* Panels that slide their own edges when an alert or the scrubber appears. */
+    .detail{transition:none}
+    .lyr .sw,.lyr .sw::after{transition:none}
+    /* Leaflet pans and zooms under its own power, and the map re-centres when a
+       call is opened from the rail, which is a full-viewport slide nobody asked
+       for. !important because Leaflet sets these inline as it animates. */
+    .leaflet-pan-anim .leaflet-tile-container,
+    .leaflet-zoom-anim .leaflet-zoom-animated{transition:none!important}
+  }
+
+  /* The alert toggle, which app/alerts.js creates and only ever sets a class
+     and a data-mode on. The border carries the state as well as the label,
+     because across a newsroom the thing you can read at four feet is a colour.
+     Off is dimmed rather than hidden: somebody has to be able to see at a
+     glance that the room chose silence, or silence gets mistaken for calm. */
+  .alertbtn{background:#1b2430;color:#c7d4e2;border:1px solid #2c3a4a;
+    border-radius:6px;padding:4px 9px;font:inherit;font-size:12px;cursor:pointer;
+    line-height:1.35;white-space:nowrap}
+  .alertbtn:hover{background:#22303f}
+  .alertbtn:focus-visible{outline:2px solid #4d8fd6;outline-offset:2px}
+  .alertbtn[data-mode="off"]{opacity:.55}
+  .alertbtn[data-mode="high"]{border-color:#3d6ea5}
+  .alertbtn[data-mode="all"]{border-color:#c8912f}
+
+  /* The state police section. app/statepolice.js decides what belongs in it.
+
+     The chip is the whole design problem here. Some of these cards are in the
+     column because a dispatcher said "trooper" on the air, and the rest are in
+     it because the crash happened on a road the State Police patrol and this
+     page worked the rest out. A reporter glancing at the rail has to be able
+     to tell those two apart before reading a word, because one of them is
+     reporting and the other is a lead to make a call on.
+
+     So the tiers differ by fill and by border, not by hue alone: filled and
+     solid means somebody said it, hollow and dashed means the page inferred
+     it. Colour is the third signal rather than the only one, which matters for
+     the roughly one man in twelve who cannot use it.
+
+     The rail is a fixed-height flex column, so this section is not free: every
+     pixel it takes comes off the live feed at the bottom, which is flex:1 and
+     therefore the thing that absorbs all three caps. On a 1080 display the rail
+     is about 976px. The old split was one 38px head, 48% of situations, a
+     second head, and 432px of feed. Adding a head and a 26% body took the feed
+     to 140px, which is two items, so a column somebody asked for would have
+     quietly eaten the column they already read.
+
+     So the caps move only when there is something to show. has-sp is set by
+     renderStatePolice and pulls situations back to 40% while this section takes
+     20%, leaving the feed 277px. With the section empty the rail is exactly
+     what it was before, minus a head and one line of text, and the cap never
+     binds because max-height is a ceiling rather than a height. */
+  .sp-head .tag{background:#4d8fd6}
+  .sp-head h2{color:#9ec7f0}
+  .sp-body{max-height:20%;overflow-y:auto;border-bottom:1px solid var(--border)}
+  .sp-body .empty{padding:7px 14px;font-size:10.5px}
+  .rail.has-sp .sit-body{max-height:40%}
+  @media(max-width:820px){
+    .sp-body{max-height:18%}
+    .rail.has-sp .sit-body{max-height:32%}
+  }
+  .sp-body::-webkit-scrollbar{width:8px}
+  .sp-body::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
+  .sp-body::-webkit-scrollbar-thumb:hover{background:#4d5b78}
+  .sp{padding:8px 14px;border-bottom:1px solid var(--border-soft);transition:background .12s}
+  .sp[role="button"]{cursor:pointer}
+  .sp:hover{background:rgba(77,143,214,.07)}
+  .sp-top{display:flex;align-items:center;gap:7px;margin-bottom:3px}
+  .sp-chip{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;
+    text-transform:uppercase;padding:1px 6px;border-radius:4px;white-space:nowrap}
+  /* One weight now, because there is one tier. The chip used to rank three
+     grades of evidence against each other; the column no longer admits the
+     other two, so a second colour here would be saying something the data
+     cannot say. */
+  .sp-chip.heard{background:#4d8fd6;color:#08131f;border:1px solid #9cc8f5}
+  .sp-when{font-family:var(--mono);font-size:9px;color:var(--text-faint);margin-left:auto;text-transform:uppercase}
+  .sp-line{font-size:12px;font-weight:600;line-height:1.3;color:#fff}
+  .sp-why{font-size:10.5px;color:var(--text-dim);line-height:1.35;margin-top:2px}
+  /* The plain em is a caveat and reads dimmer than the line it qualifies.
+     .hit is the opposite job, so it goes the other way. */
+  .sp-why em{font-style:normal;color:#8b98ac}
+  .sp-why em.hit{font-style:normal;color:#9cc8f5;font-weight:600}
+
+  /* The radio underneath the cards. A divider rather than a second .rail-head,
+     because a second head would put another 38px fixed row into a flex column
+     that is already three heads deep, and it would read as a separate section
+     when it is the same one seen closer up. */
+  .sp-rad-head{display:flex;align-items:center;gap:6px;padding:6px 14px 4px;
+    font-family:var(--mono);font-size:8.5px;letter-spacing:.6px;text-transform:uppercase;
+    color:#7d8da3;border-top:1px solid var(--border)}
+  .sp-rad-head b{color:#9ec7f0;font-weight:700}
+  .sp-rad-n{margin-left:auto;color:var(--text-faint)}
+  .sp-rad{padding:4px 14px 5px;border-bottom:1px solid var(--border-soft);
+    font-size:11px;line-height:1.35;display:flex;gap:7px;align-items:baseline}
+  .sp-rad:hover{background:rgba(77,143,214,.07)}
+  .sp-rad-t{font-family:var(--mono);font-size:9px;color:var(--text-faint);flex:none}
+  .sp-rad-x{color:#c9d3e2;word-break:break-word}
+  /* A transmission the desk turned into a card. Same idea as .cline.hit in the
+     console: the ones you can press look pressable, the rest are just radio. */
+  .sp-rad.hit{cursor:pointer}
+  .sp-rad.hit .sp-rad-x{color:#fff}
+  .sp-rad.hit .sp-rad-t{color:#9cc8f5}
 </style>
+<!-- The Desk and the Story. Loaded after the block above so its overrides of
+     .hud-top land, and scoped entirely under #deskview and #storyview so the
+     board that is already working cannot inherit a single rule from it. -->
+<link rel="stylesheet" href="./deskviews.css">
 </head>
 <body>
   <div id="map"></div>
@@ -564,11 +1076,14 @@
     <div class="tabs" id="tabs">
       <button class="tab active" data-view="map">Map</button>
       <button class="tab" data-view="stops">Stops<span class="n" id="tabStops" style="font-family:var(--mono);font-size:10px;margin-left:6px;opacity:.75"></span></button>
+      <button class="tab" data-view="desk">Desk</button>
+      <button class="tab" data-view="story">Story</button>
       <button class="tab" data-view="backend"><span class="tdot"></span>Under the Hood</button>
     </div>
     <span class="caveat" title="Live scanner and geodata on Boston. Calls are machine-transcribed and machine-located, so they are unverified and not for publication until the desk confirms. Click any incident for its live timeline.">Unverified &middot; not for publication</span>
     <div class="spacer"></div>
     <div class="hud-meta">
+      <span id="alertMount"></span>
       <span class="status-pill" id="status"><span class="sdot"></span><span class="stxt">live</span></span>
       <span id="updated">&nbsp;</span>
       <span class="clock" id="clock">--:--:--</span>
@@ -577,7 +1092,22 @@
 
   <div class="rail">
     <div class="rail-head sit-head"><span class="tag" style="background:#c07cff"></span><h2>Situations</h2><span class="count" id="sitCount">0</span></div>
+    <!-- Says whether the last correction landed. It is above the column and not
+         floating over it, because the rail is a fixed-height flex column and
+         anything floating would cover the bottom line of the live feed. Empty it
+         is zero high, so it costs the rail nothing on the polls nobody has
+         pressed anything. -->
+    <div class="desk-say" id="deskSay" role="status" aria-live="polite"></div>
     <div class="sit-body" id="situations"><div class="empty">Desk editor is reading the scanner&hellip;</div></div>
+    <div class="rail-head sp-head"><span class="tag"></span><h2>State Police</h2><span class="count" id="spCount">0</span></div>
+    <!-- One scroller, two lists. Cards come off situations.json every five
+         seconds and the radio underneath comes off transcripts.json every one
+         and a half, so they are separate elements with separate renders rather
+         than one function that would need both feeds in hand to draw either. -->
+    <div class="sp-body">
+      <div id="statepolice"><div class="empty">Watching the state police feed&hellip;</div></div>
+      <div id="spRadio"></div>
+    </div>
     <div class="rail-head"><span class="tag"></span><h2>Live Feed</h2><span class="count" id="feedCount">0</span></div>
     <div class="rail-body" id="feed"><div class="empty">Connecting to feeds&hellip;</div></div>
   </div>
@@ -593,6 +1123,9 @@
     <div class="lyr" data-layer="civic311"><span class="ldot" style="background:#38bdf8"></span><span class="lname">311 requests</span><span class="lcount" id="c-311">0</span><span class="sw"></span></div>
     <div class="lyr" data-layer="pulse"><span class="ldot" style="background:#f97316"></span><span class="lname">Pulse (typical)</span><span class="lcount" id="c-pulse">0</span><span class="sw"></span></div>
     <div class="lyr on" data-layer="flow"><span class="ldot" style="background:#22d3ee"></span><span class="lname">Movement (live)</span><span class="lcount" id="c-flow">0</span><span class="sw"></span></div>
+    <div class="lyr" data-layer="cameras"><span class="ldot" style="background:#94a3b8"></span><span class="lname">Traffic cameras</span><span class="lcount" id="c-cameras">0</span><span class="sw"></span></div>
+    <div class="lyr" data-layer="outages"><span class="ldot" style="background:#a78bfa"></span><span class="lname">Power outages</span><span class="lcount" id="c-outages">0</span><span class="sw"></span></div>
+    <div class="lyr" data-layer="webcams"><span class="ldot" style="background:#f472b6"></span><span class="lname">Live webcams</span><span class="lcount" id="c-webcams">0</span><span class="sw"></span></div>
   </div>
 
   <!-- Pulse scrubber. Only visible when the Pulse layer is on. The whole 24h
@@ -615,9 +1148,27 @@
     <div class="chead"><span class="rec"></span><h3>Live Audio</h3><span class="sub2" id="consoleSub">connecting&hellip;</span></div>
     <div class="clog" id="clog"><div class="cline">Waiting for transmissions&hellip;</div></div>
   </div>
+  <!-- The two live regions, and the one panel that deliberately is not one.
+       Toasts get polite: a toast is a duplicate of a feed row that is already on
+       screen, so it is worth saying and not worth interrupting for.
+       The banner gets assertive, because interrupting is the whole reason it exists.
+       atomic="true" so the kicker, the headline and the location are read as one
+       sentence; without it each of the three divs is its own announcement and the
+       reader hears three fragments in whatever order they land.
+       #detail is left alone on purpose. It looks like a live region and is not one:
+       pollScanner() pushes the selected call back through renderDetail() every cycle
+       to grow its timeline, so aria-live here would re-read the whole open call,
+       type and location and every transmission, every few seconds. What a reader
+       needs from this panel is to be able to read it, which is what the focus
+       handling in renderDetail() and closeDetail() is for. -->
   <div class="detail" id="detail"></div>
-  <div class="toast-wrap" id="toastWrap"></div>
-  <div class="big-alert" id="bigAlert"></div>
+  <div class="toast-wrap" id="toastWrap" aria-live="polite"></div>
+  <div class="big-alert" id="bigAlert" aria-live="assertive" aria-atomic="true"></div>
+
+  <!-- The Desk and the Story. Empty on purpose: deskviews.js builds both, so a
+       missing module leaves two hidden empty divs rather than half a layout. -->
+  <div id="deskview"></div>
+  <div id="storyview"></div>
 
   <!-- Stops and field contacts: the log under the map -->
   <div id="stopsview">
@@ -630,7 +1181,11 @@
         out of. A stop that turned into news is also a pin on the map.
       </p>
       <div class="st-tools">
-        <input class="st-find" id="stFind" type="search" placeholder="plate, name, unit, street" autocomplete="off" spellcheck="false"/>
+        <!-- Labelled by attribute because there is no visible label to point at, and a
+             placeholder is not one: it is the example text, it disappears the moment
+             anybody types, and a reader that falls back to it announces the four
+             example words as the name of the field. -->
+        <input class="st-find" id="stFind" type="search" aria-label="Search stops and field contacts" placeholder="plate, name, unit, street" autocomplete="off" spellcheck="false"/>
         <span class="st-hit" id="stHit"></span>
       </div>
       <div class="st-grid" id="stStats"></div>
@@ -667,6 +1222,16 @@
 
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
+<!-- Local and tiny, and every call into it is guarded, so the page still runs
+     if this file is missing. It owns the sound, the desktop notification and
+     the title flash, and nothing else on the page. -->
+<script src="./alerts.js"></script>
+<script src="./freshness.js"></script>
+<script src="./statepolice.js"></script>
+<script src="./threadui.js"></script>
+<script src="./track.js"></script>
+<script src="./webcams.js"></script>
+<script src="./deskviews.js"></script>
 <script>
 /* ===================== CONFIG ===================== */
 const CONFIG = {
@@ -674,7 +1239,10 @@ const CONFIG = {
   massdotUrl:'http://events.massdot.evbg.net/',
   mbtaRoutes:'Red,Orange,Blue,Green-B,Green-C,Green-D,Green-E,Mattapan',
   wireQuery:'Massachusetts breaking OR Boston breaking when:1d',
-  refresh:{ vehicles:20000, civic:60000, scanner:2500, console:1500 },
+  /* health is the header's own poll. The console view reads the same file every
+     1.5s, but only while somebody is looking at it, and the header is on every
+     view. This is the slow always-on one. */
+  refresh:{ vehicles:20000, civic:60000, scanner:2500, console:1500, health:15000 },
 };
 const LINE_COLORS={Red:'#DA291C',Orange:'#ED8B00',Blue:'#003DA5','Green-B':'#00843D','Green-C':'#00843D','Green-D':'#00843D','Green-E':'#00843D',Mattapan:'#DA291C'};
 const CAT_COLORS={crash:'#ff4d4d',road:'#ffb020',scanner:'#34d399',alert:'#c07cff',quake:'#e8590c'};
@@ -692,6 +1260,50 @@ async function fetchJSON(url){const r=await fetch(url,{cache:'no-store',headers:
 function pDate(s){if(!s)return null;const d=new Date(s);return isNaN(d)?null:d;}
 function ago(d){if(!d)return'';const s=Math.floor((Date.now()-d.getTime())/1000);if(s<60)return s+'s ago';const m=(s/60)|0;if(m<60)return m+'m ago';const h=(m/60)|0;if(h<24)return h+'h ago';return((h/24)|0)+'d ago';}
 function esc(s){return(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+
+/* ---- Layer row state: did this feed answer or not ----
+   One place where a row learns whether its feed came back. Six loaders were each
+   doing their own getElementById and four of the six without a null guard, so a
+   renamed span would have thrown from inside the catch block that existed to handle
+   the failure. The count element goes in by its full element id and not by layer key,
+   because the two are not the same everywhere: the 311 row is c-311 while its
+   data-layer is civic311, and a lookup table mapping one to the other is a second
+   thing to keep in sync for no gain. */
+const layerEverLoaded={};
+function layerRow(elId){const el=document.getElementById(elId);return el?{el:el,row:el.closest('.lyr')}:null;}
+function layerCount(elId,n){
+  const t=layerRow(elId); if(!t)return;
+  layerEverLoaded[elId]=true;
+  t.el.textContent=n;
+  if(!t.row||!t.row.classList.contains('failed'))return;
+  t.row.classList.remove('failed');
+  /* Pulse and Movement write their own explanatory titles into these rows, so what
+     was there is put back rather than removed. Neither of them comes through here
+     today. The cost of being careful is two lines, and the cost of not being careful
+     is a row that silently loses its description the first time its feed hiccups,
+     which is not something anyone would catch for months. */
+  const was=t.row.getAttribute('data-title-was');
+  if(was!==null){t.row.title=was;t.row.removeAttribute('data-title-was');}
+  else t.row.removeAttribute('title');
+}
+function layerFail(elId,source){
+  const t=layerRow(elId); if(!t)return;
+  /* Never loaded means the 0 sitting in the column is a lie, and a quiet one, so it
+     becomes two dashes. Loaded before means the number is true, only old, and it
+     stays exactly where it is. */
+  if(!layerEverLoaded[elId])t.el.textContent='--';
+  if(!t.row)return;
+  if(!t.row.classList.contains('failed')){
+    const prev=t.row.getAttribute('title');
+    if(prev!==null)t.row.setAttribute('data-title-was',prev);
+  }
+  t.row.classList.add('failed');
+  const name=(t.row.querySelector('.lname')||{}).textContent||'This layer';
+  t.row.title=name+': could not reach '+source+' on the last refresh. '+
+    (layerEverLoaded[elId]
+      ? 'The count and the markers on the map are the last good ones, not current.'
+      : 'Nothing has loaded yet, so there is no count to show.');
+}
 function gnews(q){return'https://news.google.com/rss/search?q='+encodeURIComponent(q)+'&hl=en-US&gl=US&ceid=US:en';}
 function cleanG(t){return t.replace(/\s+-\s+[^-]+$/,'').trim()||t;}
 function parseFeedXML(x){const d=new DOMParser().parseFromString(x,'text/xml');const o=[];d.querySelectorAll('item').forEach(it=>{const g=t=>{const e=it.querySelector(t);return e?e.textContent.trim():'';};o.push({title:g('title'),link:g('link'),source:g('source'),date:pDate(g('pubDate'))});});return o.filter(i=>i.title);}
@@ -705,15 +1317,63 @@ function parseFeedXML(x){const d=new DOMParser().parseFromString(x,'text/xml');c
 const map=L.map('map',{zoomControl:false,attributionControl:true,worldCopyJump:true}).setView(CONFIG.center,CONFIG.zoom);
 window.map=map;
 L.control.zoom({position:'bottomright'}).addTo(map);
-L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',{subdomains:'abcd',maxZoom:19,attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+/* The basemap had no name because nothing ever needed to speak to it. The Desk
+   and the Story are light, and a light sheet with a dark map in the hole in the
+   middle of it reads as a rendering fault, so the tiles follow the view. Same
+   layer object either way: swapping the URL template keeps the pane, the zoom
+   and every marker on top of it exactly where they were. */
+const BASE_TILES={
+  dark:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
+  light:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+};
+const baseLayer=L.tileLayer(BASE_TILES.dark,{subdomains:'abcd',maxZoom:19,attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+let baseTheme='dark';
+window.baseMapTheme=function(t){
+  const want=(t==='light')?'light':'dark';
+  if(want===baseTheme)return;
+  baseTheme=want;
+  baseLayer.setUrl(BASE_TILES[want]);
+};
 
-const groups={traffic:L.layerGroup(),transit:L.layerGroup(),scanner:L.layerGroup(),alerts:L.layerGroup(),quakes:L.layerGroup(),choppers:L.layerGroup(),civic311:L.layerGroup(),pulse:L.layerGroup(),flow:L.layerGroup()};
-const enabled={traffic:true,transit:true,scanner:true,alerts:true,quakes:false,choppers:true,civic311:false,pulse:false,flow:true};
+const groups={traffic:L.layerGroup(),transit:L.layerGroup(),scanner:L.layerGroup(),alerts:L.layerGroup(),quakes:L.layerGroup(),choppers:L.layerGroup(),civic311:L.layerGroup(),pulse:L.layerGroup(),flow:L.layerGroup(),cameras:L.layerGroup(),outages:L.layerGroup(),webcams:L.layerGroup()};
+/* Cameras and outages both start off. 306 camera pins over the metro would bury
+   the incidents this map exists to show, and the outage layer is a storm tool
+   that is empty most nights. Both announce themselves through the count in the
+   Layers panel instead, which is why both feeds are pulled while their layer is
+   off. A row reading "Traffic cameras 0" beside an off switch reads as "there
+   are no cameras," and the count is the only thing on screen that can say
+   otherwise. */
+/* Webcams start on, unlike the other camera layer, because twelve pins is not
+   386 and because eight of the twelve sit outside the default view anyway. The
+   argument for shipping cameras off does not transfer: it was about burying the
+   incidents, and twelve cannot. */
+const enabled={traffic:true,transit:true,scanner:true,alerts:true,quakes:false,choppers:true,civic311:false,pulse:false,flow:true,cameras:false,outages:false,webcams:true};
 Object.keys(groups).forEach(k=>{if(enabled[k])groups[k].addTo(map);});
 const markerIndex={}; // feed id -> marker
 
+/* These eleven rows are the main control surface of the page and they were divs with
+   an onclick, so nothing but a mouse or a finger could reach them. role="switch"
+   rather than "button" or "checkbox" is what they actually are: the .sw pill is a
+   two-state track with a knob that slides, drawn to look like the iOS switch it is
+   copying, and a switch is on or off rather than checked or submitted.
+   aria-checked is set from enabled and not from the .on class, and so is the class.
+   Before this the markup carried the initial states by hand as class="lyr on" on six
+   of the nine and the enabled object carried the same six as true, which is the same
+   fact written twice with nothing keeping the two copies honest. They did agree, so
+   deriving both from enabled changes nothing on screen today; what it buys is that
+   the next person to flip a default has one place to flip it rather than two, and
+   a screen reader that reads the wrong state is no longer one typo away.
+   The Enter and Space that activate these come from the delegated handler at the
+   bottom of the script, so there is no per-row key wiring here to fall out of sync
+   with the click. */
 document.querySelectorAll('.lyr').forEach(el=>{
-  el.onclick=()=>{const k=el.dataset.layer;enabled[k]=!enabled[k];el.classList.toggle('on',enabled[k]);
+  const k=el.dataset.layer;
+  el.setAttribute('role','switch');
+  el.tabIndex=0;
+  const paint=()=>{el.classList.toggle('on',!!enabled[k]);
+    el.setAttribute('aria-checked',enabled[k]?'true':'false');};
+  paint();
+  el.onclick=()=>{enabled[k]=!enabled[k];paint();
     if(enabled[k])groups[k].addTo(map);else map.removeLayer(groups[k]);};
 });
 
@@ -730,16 +1390,35 @@ function trainIcon(color,bearing){
 
 /* ===================== FEED (left rail) ===================== */
 let feedItems=[]; const seen=new Set(); let firstLoad=true;
+/* The last transcript list pollConsole fetched. It used to live and die inside
+   that function, which was fine while the backend console was the only thing
+   that wanted the air. The Desk and the Story both read it now, and the wrong
+   fix would be a second fetch of the same file on the same cadence to get
+   bytes we already have in hand. Declared here rather than beside pollConsole
+   so it sits with the other feed state, and initialised so a repaint that
+   lands before the first poll gets an empty list instead of a throw. */
+let lastTx=[];
 function renderFeed(){
   feedItems.sort((a,b)=>{const sa=a.status==='cleared'?1:0,sb=b.status==='cleared'?1:0;if(sa!==sb)return sa-sb;return (b.time?b.time.getTime():0)-(a.time?a.time.getTime():0);});
   document.getElementById('feedCount').textContent=feedItems.filter(f=>f.status!=='cleared').length;
   const el=document.getElementById('feed');
-  if(!feedItems.length){el.innerHTML='<div class="empty">Listening for calls&hellip;</div>';return;}
+  /* roveKeep before the swap and its return value after: this render throws every row
+     away on a timer, so a keyboard on row twelve has to come back to row twelve and
+     not to the top of the document. The empty branch returns early through it too,
+     because a feed that just went empty is exactly when focus has nowhere to land. */
+  const keep=roveKeep();
+  if(!feedItems.length){el.innerHTML='<div class="empty">Listening for calls&hellip;</div>';keep();return;}
   el.innerHTML=feedItems.map(it=>{
     const color=it.status==='cleared'?'#6b7280':((it.isScanner&&it.priority==='high')?'#ff4d4d':(CAT_COLORS[it.cat]||'#7C878E'));
     const fresh=!firstLoad&&!seen.has(it.id); seen.add(it.id);
     const label=it.isScanner?(it.status==='cleared'?'cleared':(it.priority==='high'?'priority':'active')):it.cat;
-    return '<div class="feed-item'+(fresh?' fresh':'')+(it.status==='cleared'?' cleared':'')+'" data-id="'+esc(it.id)+'" data-scan="'+(it.isScanner?1:'')+'">'+
+    /* role and tabindex go in the template rather than in a pass over the rows
+       afterwards, because the template is the only place that runs exactly once per
+       row per render and cannot drift out of step with the markup it describes. No
+       aria-label: a button's name is computed from its contents, and the contents here
+       are the label, the time, the type, the location and the source, which is a
+       better description of the row than anything worth hand-writing. */
+    return '<div class="feed-item'+(fresh?' fresh':'')+(it.status==='cleared'?' cleared':'')+'" role="button" tabindex="-1" data-id="'+esc(it.id)+'" data-scan="'+(it.isScanner?1:'')+'">'+
       '<div class="fi-top"><span class="pill" style="background:'+color+'">'+esc(label)+'</span>'+
       '<span class="fi-time">'+(it.time?ago(it.time):'')+'</span></div>'+
       '<div class="fi-title">'+esc(it.type)+(it.title?' &middot; '+esc(it.title):'')+'</div>'+
@@ -749,6 +1428,7 @@ function renderFeed(){
   el.querySelectorAll('.feed-item').forEach(row=>{
     row.onclick=()=>{ if(row.dataset.scan){openDetail(row.dataset.id);} else {const mk=markerIndex[row.dataset.id];if(mk){map.setView(mk.getLatLng(),15);mk.openPopup();}} };
   });
+  keep();
   firstLoad=false;
 }
 
@@ -774,9 +1454,9 @@ async function loadTraffic(){
       mk.bindPopup('<div class="pop-t" style="color:'+color+'">'+esc(e.type)+'</div><div class="pop-r"><b>'+esc(e.title)+'</b></div><div class="pop-r">'+esc(e.location)+'</div>'+(e.detail?'<div class="pop-r" style="color:var(--text-faint)">'+esc(e.detail)+'</div>':'')+'<div class="pop-src">MassDOT &middot; '+(e.time?ago(e.time):'')+'</div>');
       mk.addTo(groups.traffic);markerIndex[e.id]=mk;feedItems.push(e);
     });
-    document.getElementById('c-traffic').textContent=evs.length;
+    layerCount('c-traffic',evs.length);
     return true;
-  }catch(e){document.getElementById('c-traffic').textContent='!';return false;}
+  }catch(e){layerFail('c-traffic','MassDOT');return false;}
 }
 
 /* ===================== LAYER: MBTA live vehicles ===================== */
@@ -792,9 +1472,9 @@ async function loadVehicles(){
       mk.bindPopup('<div class="pop-t" style="color:'+color+'">'+esc(rid||'MBTA')+' train</div><div class="veh-pop">'+esc((a.current_status||'').replace(/_/g,' ').toLowerCase())+(a.bearing!=null?' &middot; '+Math.round(a.bearing)+'&deg;':'')+'</div>');
       mk.addTo(groups.transit);
     });
-    document.getElementById('c-transit').textContent=(d.data||[]).length;
+    layerCount('c-transit',(d.data||[]).length);
     return true;
-  }catch(e){document.getElementById('c-transit').textContent='!';return false;}
+  }catch(e){layerFail('c-transit','the MBTA v3 API');return false;}
 }
 
 /* ===================== Scanner incidents (live, with timelines) ===================== */
@@ -815,7 +1495,20 @@ async function pollScanner(){
   // Only rebuild the dot layer when something actually changed, so an open popup
   // (tap a dot to read the call right there) does not blink shut on every poll.
   const mSig=JSON.stringify(scanner.filter(i=>i.lat!=null&&i.lon!=null).map(i=>[i.id,i.status,i.lat,i.lon,i.priority,(i.timeline||[]).length]));
-  const rebuild=(mSig!==scan._mSig); if(rebuild){ scan._mSig=mSig; groups.scanner.clearLayers(); }
+  const rebuild=(mSig!==scan._mSig);
+  /* Both of these are read before clearLayers rather than after, and that ordering is the
+     whole point. clearLayers is the call that destroys the open popup, and asked after it
+     both answers are the state the clear left behind rather than the state the user was
+     in: activeElement has fallen back to <body>, and removing a marker closes its popup,
+     which fires the popupclose handler below, which nulls scan.popupOpen. A local taken
+     first is true either way, so this does not depend on Leaflet's teardown order and
+     will not quietly stop working if that order changes.
+     The closest() is against .leaflet-popup and not against .pop-more so this keeps
+     holding if the popup ever grows a second control. */
+  const openWas=rebuild?scan.popupOpen:null;
+  const popupHadFocus=!!openWas&&!!document.activeElement&&!!document.activeElement.closest&&
+    !!document.activeElement.closest('.leaflet-popup');
+  if(rebuild){ scan._mSig=mSig; groups.scanner.clearLayers(); }
   scanner.forEach(inc=>{
     nowIds.add(inc.id); scan.byId[inc.id]=inc;
     const isNew=!(inc.id in scan.known);
@@ -831,15 +1524,44 @@ async function pollScanner(){
     feedItems.push({id:inc.id,cat:'scanner',type:inc.type,title:(inc.units&&inc.units.length)?inc.units.join(', '):inc.title,location:inc.location,time:pDate(inc.lastUpdate||inc.firstHeard),source:inc.source,verified:false,status:inc.status,priority:inc.priority,isScanner:true});
     scan.known[inc.id]=inc.status;
   });
-  if(rebuild&&scan.popupOpen&&markerIndex[scan.popupOpen])markerIndex[scan.popupOpen].openPopup();
+  /* openWas and not scan.popupOpen, for the reason given where it is captured. Putting the
+     popup back was already handled here; putting back the focus that was inside it was
+     not, and they are not the same job, exactly as renderStops needed keep() at its end
+     after rebuilding both lists. The re-focus is conditioned on popupHadFocus so a poll
+     landing while somebody is typing in the filter box does not pull the caret into a
+     popup they opened with the mouse ten minutes ago. */
+  if(rebuild&&openWas&&markerIndex[openWas]){
+    markerIndex[openWas].openPopup();
+    if(popupHadFocus){const pm=document.querySelector('.leaflet-popup .pop-more');if(pm)pm.focus();}
+  }
   Object.keys(scan.known).forEach(id=>{if(!nowIds.has(id))delete scan.known[id];});
-  document.getElementById('c-scanner').textContent=scanner.filter(i=>i.status==='active').length;
+  layerCount('c-scanner',scanner.filter(i=>i.status==='active').length);
   renderFeed();
   if(scan.selected){ if(scan.byId[scan.selected]) renderDetail(scan.byId[scan.selected]); else closeDetail(); }
   return true;
 }
-function openDetail(id){const inc=scan.byId[id];if(!inc)return;scan.selected=id;renderDetail(inc);const mk=markerIndex[id];if(mk)map.setView(mk.getLatLng(),15,{animate:true});}
-function closeDetail(){scan.selected=null;document.getElementById('detail').classList.remove('show');}
+/* Where focus goes when the panel closes. Without this it goes to <body>, because
+   the × it was sitting on is inside a panel that just went display:none, and the
+   next Tab starts over from the masthead. The row that opened the panel is the
+   place the reader was, so that is where they get put back.
+   Only recorded when the panel was shut, so that a second call opened from the feed
+   while the first is still up does not overwrite the way back out with a row from
+   halfway through the trip. Everything that can open this panel is a possible
+   return: a feed row, a console line, the popup's full-log link, a toast.
+   Three conditions before focus() because two of those four do not survive. A toast
+   calls remove() on itself the moment it is clicked and disappears on a nine second
+   timer besides, and a feed row is replaced wholesale on the next poll. isConnected
+   catches the removed node, offsetParent catches the one that is still in the tree
+   but hidden, and if neither holds we leave focus alone rather than throwing it at
+   something invisible. */
+let detailReturn=null;
+function openDetail(id){const inc=scan.byId[id];if(!inc)return;
+  const el=document.getElementById('detail');
+  if(el&&!el.classList.contains('show'))detailReturn=document.activeElement;
+  scan.selected=id;renderDetail(inc);const mk=markerIndex[id];if(mk)map.setView(mk.getLatLng(),15,{animate:true});}
+function closeDetail(){scan.selected=null;document.getElementById('detail').classList.remove('show');
+  const back=detailReturn;detailReturn=null;
+  if(back&&back.isConnected&&back.offsetParent!==null&&typeof back.focus==='function')back.focus();}
 /* Inline popup shown when you tap an incident dot (so you can read the call
    right at the dot instead of the upper-right panel). */
 function incPopupHTML(inc){
@@ -853,7 +1575,23 @@ function incPopupHTML(inc){
     '<div class="pop-r">'+esc(inc.location||'')+'</div>'+
     '<div class="pop-meta">'+badge+hi+'</div>'+units+
     '<div class="pop-tls">'+tl+'</div>'+
-    '<div class="pop-more" onclick="openDetail(\''+esc(inc.id)+'\')">full log &rsaquo;</div>';
+    /* role="button" and tabindex="0" put this on the same footing as every other div
+       with an onclick in this file, and the delegated Enter and Space handler picks it
+       up by the role attribute with no wiring of its own. It matters more here than it
+       looks: every marker on this map is built with keyboard:false, which keeps hundreds
+       of transit vehicles and 311 pins out of the tab order, and the side effect is that
+       the popup pane holds the only focusable things over the map. So the tab distance
+       from the zoom control to this line is a handful of presses rather than the marker
+       count, and the thing that looked like it would make this unreachable is what makes
+       it cheap.
+       The label names the call because "full log" on its own tells a screen reader
+       nothing about which of forty open incidents it would open, and a popup is exactly
+       the context where the surrounding text has already been read and moved past.
+       esc() escapes both quote characters, so interpolating the type and the location
+       into a double-quoted attribute is safe. */
+    '<div class="pop-more" role="button" tabindex="0" aria-label="Full log for '+
+      esc(inc.type)+(inc.location?(' at '+esc(inc.location)):'')+
+      '" onclick="openDetail(\''+esc(inc.id)+'\')">full log &rsaquo;</div>';
 }
 /* Boston 311 live service requests (Open311 real-time feed). */
 function threeIcon(color){
@@ -887,9 +1625,9 @@ async function load311(){
         photo+'<div class="pop-src">Boston 311 &middot; Open311</div>');
       mk.addTo(groups.civic311);
     });
-    const el=document.getElementById('c-311'); if(el) el.textContent=n;
+    layerCount('c-311',n);
     return true;
-  }catch(e){const el=document.getElementById('c-311'); if(el) el.textContent='!'; return false;}
+  }catch(e){layerFail('c-311','the Boston 311 Open311 feed');return false;}
 }
 function renderDetail(inc){
   const el=document.getElementById('detail'); el.classList.add('show');
@@ -897,7 +1635,20 @@ function renderDetail(inc){
   const hi=(inc.priority==='high'&&inc.status==='active')?'<span class="badge high">&#9888; Priority</span>':'';
   const cl=(inc.status!=='active'&&inc.clearedAt)?'<div class="dunits" style="margin-top:5px">cleared '+new Date(inc.clearedAt).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})+'</div>':'';
   const tl=(inc.timeline||[]).slice().reverse().map(e=>'<div class="tl-item'+(e.clear?' clear':(e.onScene?' onscene':''))+'"><div class="tlt">'+new Date(e.t).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'America/New_York'})+'</div><div class="tlx">'+esc(e.text)+'</div><div class="tlsrc">'+esc(e.source)+' '+roleBadge(e.role)+'</div></div>').join('');
-  el.innerHTML='<div class="dh"><span class="dclose" onclick="closeDetail()">&times;</span><div class="dtype">'+esc(inc.type)+'</div><div class="dloc">'+esc(inc.location||'')+'</div><div class="dmeta">'+badge+hi+'<span class="dunits">'+esc((inc.units||[]).join(', '))+'</span></div>'+cl+'</div><div class="dtl">'+(tl||'<div class="dunits" style="padding:10px 14px">no transmissions yet</div>')+'</div>';
+  /* The panel re-renders on every scanner poll and not only when it is opened: the
+     branch at the end of pollScanner() feeds the selected incident back through here
+     so that a live call's timeline grows while you are reading it. That rewrite
+     throws away the node tree, and the close box is the only focusable thing in it,
+     so a keyboard user who tabbed to the × lost focus to <body> inside one poll
+     cycle and had to tab in from the top of the document again. Two lines to notice
+     the focus was ours and hand it back.
+     Tested with contains() rather than against the box itself, because what has to
+     be true is that focus was inside this panel. The new × is not the same node as
+     the old one, so there is nothing to compare it to. */
+  const keepClose=el.contains(document.activeElement)&&
+    document.activeElement.classList.contains('dclose');
+  el.innerHTML='<div class="dh"><span class="dclose" role="button" tabindex="0" aria-label="Close call detail" onclick="closeDetail()">&times;</span><div class="dtype">'+esc(inc.type)+'</div><div class="dloc">'+esc(inc.location||'')+'</div><div class="dmeta">'+badge+hi+'<span class="dunits">'+esc((inc.units||[]).join(', '))+'</span></div>'+cl+'</div><div class="dtl">'+(tl||'<div class="dunits" style="padding:10px 14px">no transmissions yet</div>')+'</div>';
+  if(keepClose){const c=el.querySelector('.dclose');if(c)c.focus();}
 }
 function showToast(inc){
   const w=document.getElementById('toastWrap');
@@ -920,9 +1671,9 @@ async function loadAlerts(){
       if(lat!=null){const mk=circle(lat,lon,CAT_COLORS.alert,7,false);mk.bindPopup('<div class="pop-t" style="color:var(--alert)">'+esc(p.event)+'</div><div class="pop-r">'+esc(item.location)+'</div><div class="pop-src">NWS &middot; '+esc(p.severity||'')+'</div>');mk.addTo(groups.alerts);markerIndex[item.id]=mk;}
       feedItems.push(item);
     });
-    document.getElementById('c-alerts').textContent=(d.features||[]).length;
+    layerCount('c-alerts',(d.features||[]).length);
     return true;
-  }catch(e){document.getElementById('c-alerts').textContent='!';return false;}
+  }catch(e){layerFail('c-alerts','the National Weather Service');return false;}
 }
 
 /* ===================== LAYER: Quakes (USGS) ===================== */
@@ -936,12 +1687,16 @@ async function loadQuakes(){
       mk.bindPopup('<div class="pop-t" style="color:var(--quake)">M'+m.toFixed(1)+'</div><div class="pop-r">'+esc(f.properties.place||'')+'</div><div class="pop-src">USGS &middot; '+ago(new Date(f.properties.time))+'</div>');
       mk.addTo(groups.quakes);
     });
-    document.getElementById('c-quakes').textContent=(d.features||[]).length;
+    layerCount('c-quakes',(d.features||[]).length);
     return true;
-  }catch(e){document.getElementById('c-quakes').textContent='!';return false;}
+  }catch(e){layerFail('c-quakes','USGS');return false;}
 }
 
 /* ===================== LAYER: Choppers (police / news / medical via ADS-B) ===================== */
+/* hex -> { fixes:[], bad:0, seen }, one lane per aircraft, holding the last
+   half hour of positions. app/track.js owns the shape and nothing out here
+   reaches into it. The whole trail is accumulated in the browser off a feed
+   we already poll, so it costs no Redis commands and no extra request. */
 const chopperTrail={};
 /* Identify a helicopter from its registered owner (ownOp in the ADS-B feed, or an adsbdb lookup). */
 function titleCase(s){return(s||'').toLowerCase().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase()).replace(/\b(Llc|Inc|Ii|Iii|Pd|Ems|Usa|Uscg|Msp|Bpd|Nypd)\b/gi,x=>x.toUpperCase());}
@@ -969,6 +1724,10 @@ async function enrichChopper(hex,reg){
     chopperDB[key]=ac?{owner:ac.registered_owner||'',type:ac.type||'',photo:ac.url_photo_thumbnail||''}:'none';
   }catch(e){chopperDB[key]='none';}
 }
+/* A span in minutes, floored, and never zero: a tooltip reading "circling 0m"
+   looks like a bug, and the shortest run the module will call circling is two
+   and a half minutes anyway, so the floor is only ever a rounding guard. */
+function heldFor(msSpan){const m=Math.floor((msSpan||0)/60000);return (m<1?1:m)+'m';}
 function heliIcon(track,loiter,color){
   const rot=(typeof track==='number')?track:0, c=loiter?'#ff4d4d':(color||'#ffd23f');
   const html='<svg width="28" height="28" viewBox="0 0 24 24" style="transform:rotate('+rot+'deg);transform-origin:12px 12px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.75))">'
@@ -984,30 +1743,48 @@ async function loadAircraft(){
     const raw=await fetchText('https://api.airplanes.live/v2/point/42.36/-71.06/75');
     const j=JSON.parse(raw), ac=Array.isArray(j.ac)?j.ac:[];
     const heli=ac.filter(a=>a.category==='A7'&&a.lat!=null&&a.lon!=null);
-    groups.choppers.clearLayers();
-    heli.forEach(a=>{
-      const tr=(chopperTrail[a.hex]=chopperTrail[a.hex]||[]);tr.push({lat:a.lat,lon:a.lon});while(tr.length>30)tr.shift();
-      const alt=(typeof a.alt_baro==='number')?a.alt_baro:99999;
-      let span=1;if(tr.length>=6){const la=tr.map(p=>p.lat),lo=tr.map(p=>p.lon);span=(Math.max(...la)-Math.min(...la))+(Math.max(...lo)-Math.min(...lo));}
-      const loiter=alt<3500&&tr.length>=6&&span<0.05;
+    const now=Date.now(), TR=window.BCCTrack;
+    /* Positions are recorded whether or not the layer is switched on. Turning
+       the choppers on should show where they have been, not start a stopwatch. */
+    const seen=heli.map(a=>{
+      const key=a.hex||a.r||'';
+      if(TR&&key)TR.push(chopperTrail,key,{lat:a.lat,lon:a.lon},now);
+      const held=(TR&&key)?TR.circling(chopperTrail,key,a.alt_baro,now):{yes:false,radius:0,forMs:0};
       const db=chopperDB[a.hex], owner=a.ownOp||(db&&db.owner)||'';
       if(!owner) enrichChopper(a.hex,a.r);
-      const id=classifyChopper(owner,a.t,a.desc,a.flight), col=loiter?'#ff4d4d':id.color;
+      return {a:a,key:key,db:db,owner:owner,id:classifyChopper(owner,a.t,a.desc,a.flight),held:held};
+    });
+    if(TR)TR.prune(chopperTrail,now);
+    groups.choppers.clearLayers();
+    /* Lines first, all of them, before any marker goes down. Leaflet stacks in
+       the order layers were added, so a trail drawn after its own marker lies
+       across the icon somebody is trying to click. */
+    if(TR)seen.forEach(s=>{
+      const col=s.held.yes?'#ff4d4d':s.id.color;
+      TR.legs(chopperTrail,s.key,now).forEach(leg=>{
+        L.polyline(TR.latlngs(leg),{color:col,weight:2,opacity:.35,interactive:false,smoothFactor:1.4}).addTo(groups.choppers);
+        const tip=TR.tip(leg);
+        if(tip.length)L.polyline(TR.latlngs(tip),{color:col,weight:3.5,opacity:.9,interactive:false,smoothFactor:1.2}).addTo(groups.choppers);
+      });
+    });
+    seen.forEach(s=>{
+      const a=s.a, id=s.id, loiter=s.held.yes, col=loiter?'#ff4d4d':id.color;
+      const alt=(typeof a.alt_baro==='number')?a.alt_baro:99999;
       const mk=L.marker([a.lat,a.lon],{icon:heliIcon(a.track,loiter,id.color),keyboard:false,zIndexOffset:1600});
       const tail=esc(a.r||a.hex||''), typ=esc(a.desc||a.t||'Helicopter');
-      const photo=(db&&db.photo)?'<img src="'+esc(db.photo)+'" referrerpolicy="no-referrer" style="width:100%;border-radius:6px;margin-top:6px;display:block">':'';
-      mk.bindTooltip(id.emoji+' '+esc(id.label)+(loiter?' · circling':''),{permanent:true,direction:'top',offset:[0,-11],className:'heli-tip'});
-      mk.bindPopup('<div class="pop-t" style="color:'+col+'">'+id.emoji+' '+esc(id.label)+(loiter?' &middot; circling a scene':'')+'</div>'+
+      const photo=(s.db&&s.db.photo)?'<img src="'+esc(s.db.photo)+'" referrerpolicy="no-referrer" style="width:100%;border-radius:6px;margin-top:6px;display:block">':'';
+      mk.bindTooltip(id.emoji+' '+esc(id.label)+(loiter?' · circling '+heldFor(s.held.forMs):''),{permanent:true,direction:'top',offset:[0,-11],className:'heli-tip'});
+      mk.bindPopup('<div class="pop-t" style="color:'+col+'">'+id.emoji+' '+esc(id.label)+(loiter?' &middot; circling a scene for '+heldFor(s.held.forMs):'')+'</div>'+
         '<div class="pop-r"><b>'+tail+'</b>'+(typ?(' &middot; '+typ):'')+'</div>'+
-        (owner?'<div class="pop-r" style="color:var(--text-dim)">'+esc(titleCase(owner))+'</div>':'')+
+        (s.owner?'<div class="pop-r" style="color:var(--text-dim)">'+esc(titleCase(s.owner))+'</div>':'')+
         '<div class="pop-r">'+(alt<99999?alt+' ft':'')+' &middot; '+Math.round(a.gs||0)+' kt'+(a.flight&&a.flight.trim()?(' &middot; '+esc(a.flight.trim())):'')+'</div>'+
         photo+
-        '<div class="pop-src">ADS-B airplanes.live'+((!a.ownOp&&db&&db.owner)?' &middot; ID adsbdb':'')+'</div>');
+        '<div class="pop-src">ADS-B airplanes.live'+((!a.ownOp&&s.db&&s.db.owner)?' &middot; ID adsbdb':'')+'</div>');
       mk.addTo(groups.choppers);
     });
-    const el=document.getElementById('c-choppers');if(el)el.textContent=heli.length;
+    layerCount('c-choppers',heli.length);
     return true;
-  }catch(e){const el=document.getElementById('c-choppers');if(el)el.textContent='!';return false;}
+  }catch(e){layerFail('c-choppers','airplanes.live');return false;}
 }
 
 /* ===================== Live audio console (speech-to-text stream) ===================== */
@@ -1015,16 +1792,37 @@ async function pollConsole(){
   let list=[];
   try{const r=await fetch('./transcripts.json',{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j))list=j;}}catch(e){}
   const sub=document.getElementById('consoleSub'), el=document.getElementById('clog');
+  /* Ahead of the early return, because the state police radio keeps a buffer of
+     what it has already been sent and an empty poll must not be treated as a
+     reason to skip the redraw. Also because this is the one place the raw log
+     is in hand, and a second fetch for the same bytes at the same cadence is
+     the one thing that section is built to avoid. */
+  renderSPRadio(list);
+  /* Also ahead of the early return, and for the same reason. This function used
+     to be the only thing that ever held the raw transcript list, and it held it
+     in a local and dropped it. The Desk and the Story both read the air, and a
+     second fetch of the same file on the same cadence to get bytes this
+     function already has would be the worst way to feed them. */
+  lastTx=list;
   if(!list.length){ if(sub)sub.textContent='waiting for audio'; return; }
   const newest=list[0]&&list[0].time?new Date(list[0].time):null;
   if(sub)sub.textContent=(newest&&(Date.now()-newest.getTime()<25000))?'ingesting live':'idle';
+  const keep=roveKeep();
   el.innerHTML=list.map(t=>{
     const hit=!!t.incidentId, cleared=t.tags&&t.tags.clear;
-    return '<div class="cline'+(hit?' hit':'')+(cleared?' clear':'')+'"'+(hit?' data-id="'+esc(t.incidentId)+'"':'')+'>'+
+    /* Only a .hit line gets the role and the tabindex, because only a .hit line does
+       anything when you press it. The rest are transmissions with no call attached
+       yet, and putting them in the arrow sequence would make a keyboard walk through
+       dead rows to reach live ones. The arrow selector in ROVE is .cline[role="button"]
+       rather than .cline.hit for exactly this reason: keying it off the role instead of
+       the class means the set the arrows walk is the set this line just gave a role to,
+       and the two cannot come apart if the hit condition here ever changes. */
+    return '<div class="cline'+(hit?' hit':'')+(cleared?' clear':'')+'"'+(hit?' role="button" tabindex="-1" data-id="'+esc(t.incidentId)+'"':'')+'>'+
       '<span class="ctime">'+(t.time?new Date(t.time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'America/New_York'}):'')+'</span>'+
       '<span class="csrc">'+esc(t.source)+'</span> '+(t.role?roleBadge(t.role)+' ':'')+esc(t.text)+(cleared?' <span class="ctag">[clear]</span>':'')+'</div>';
   }).join('');
   el.querySelectorAll('.cline.hit').forEach(l=>{l.onclick=()=>openDetail(l.dataset.id);});
+  keep();
 }
 
 /* ===================== Roles + backend "under the hood" tab ===================== */
@@ -1033,13 +1831,42 @@ function roleBadge(role){ return (role==='dispatch'||role==='field') ? '<span cl
 /* Tab switch. Each non-map view is a fixed overlay that shows on .show, and
    each one polls only while it is the visible tab, so a newsroom leaving the
    map up all night pays for the map alone. */
-const VIEWS={ stops:{el:'stopsview',poll:()=>pollStops()}, backend:{el:'backend',poll:()=>pollPipeline()} };
+const VIEWS={ stops:{el:'stopsview',poll:()=>pollStops()}, backend:{el:'backend',poll:()=>pollPipeline()},
+  desk:{el:'deskview',poll:()=>deskPaint()}, story:{el:'storyview',poll:()=>deskPaint()} };
+/* The Desk and the Story open no connection of their own. Everything they draw
+   is already in this scope because the pollers that own the map put it there,
+   so the whole integration is this function: hand the module the arrays, let it
+   render. If deskviews.js failed to load, this is a no-op and the two tabs open
+   on an empty div rather than on an error. */
+function deskPaint(){
+  if(!window.BCCDesk)return;
+  BCCDesk.paint({feed:feedItems, sits:sitState.list, tx:lastTx, pipe:PIPE, now:Date.now()});
+}
+/* These are real <button>s, so Tab and Enter and Space already reach them and
+   nothing here has to make that work. What was missing is which one is on: .active
+   says it in colour alone, and colour is not available to a reader.
+   aria-current and not aria-pressed or role="tab". Pressed would be defensible, but
+   these read as navigation rather than as three independent toggles, and current is
+   the attribute for one item out of a set. role="tab" is the closest fit on paper and
+   the wrong choice in practice: it promises a reader that Left and Right move between
+   the tabs and that only one of the three is in the tab order, and a promise like that
+   has to be implemented or it makes things worse than saying nothing. These are
+   buttons that work; leave them buttons.
+   Set from the same loop that owns .active, so the two cannot disagree. */
 document.querySelectorAll('.tab').forEach(t=>{
+  if(t.classList.contains('active'))t.setAttribute('aria-current','true');
   t.onclick=()=>{
-    document.querySelectorAll('.tab').forEach(x=>x.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(x=>{x.classList.remove('active');
+      x.removeAttribute('aria-current');});
     t.classList.add('active');
+    t.setAttribute('aria-current','true');
     const v=t.dataset.view;
     for(const k in VIEWS) document.getElementById(VIEWS[k].el).classList.toggle('show',k===v);
+    /* Before the poll, not after. changed() is what stands the old furniture
+       down, swaps the basemap and measures the header, and all three have to be
+       true before the first frame of the new view is drawn or it paints once
+       against the wrong chrome and corrects itself a tick later. */
+    if(window.BCCDesk) BCCDesk.changed(v);
     if(VIEWS[v]) VIEWS[v].poll();
   };
 });
@@ -1111,6 +1938,12 @@ function stTape(r){
 }
 
 function renderStops(){
+  /* Read at the very top because this function is called from a row's own click
+     handler, so the row whose tape is being opened is the element that currently has
+     focus. Capturing it here and restoring it at the bottom is what makes opening a
+     tape by keyboard land you back on the same row, now reading as expanded, instead
+     of at the top of the document. */
+  const keep=roveKeep();
   const q=(document.getElementById('stFind').value||'').trim().toLowerCase();
   const open=(STOPS.open||[]).filter(r=>stMatch(r,q));
   const log=(STOPS.closed||[]).filter(r=>stMatch(r,q));
@@ -1133,9 +1966,21 @@ function renderStops(){
   document.getElementById('stHit').textContent=q?(open.length+log.length)+' matching':'';
   stBadge((STOPS.open||[]).length);
 
+  /* These two lists are the reason roveKeep exists rather than being a nicety. A row
+     here does not navigate, it discloses: clicking one puts its tape in ST_TAPE and
+     calls renderStops() again, which throws both lists away. Without the keep, opening
+     a tape with the keyboard loses your place in the list in the same keystroke that
+     opened it, and you are back at the top of the document with the tape you asked for
+     somewhere below you.
+     aria-expanded and not aria-pressed, because what the row does is show and hide a
+     region of content, which is the disclosure pattern rather than a two-state button.
+     No aria-controls to go with it: the tape is rendered as the row's next sibling and
+     carries no id of its own, and inventing one to point at buys nothing a reader acts
+     on, since support for following aria-controls is thin. Expanded is the fact that
+     matters and expanded is the one that is here. */
   document.getElementById('stOpen').innerHTML=open.length?open.map(r=>{
     const el=(stNow()-r.start)/1000;
-    return '<div class="st-live'+(el>1800?' vlong':el>900?' long':'')+'" data-sid="'+esc(r.id)+'">'+
+    return '<div class="st-live'+(el>1800?' vlong':el>900?' long':'')+'" role="button" tabindex="-1" aria-expanded="'+(ST_TAPE.has(r.id)?'true':'false')+'" data-sid="'+esc(r.id)+'">'+
       '<div class="top"><span class="clk" data-start="'+r.start+'">'+stDur(el)+'</span>'+
       '<span class="unit">'+esc(r.unitSpoken||r.unit)+'</span>'+
       '<span class="dept">'+esc(r.dept||'')+'</span></div>'+
@@ -1146,7 +1991,7 @@ function renderStops(){
   }).join(''):'<div class="st-empty">'+(q?'No open stop matches that.':'Nobody is out with anyone right now.')+'</div>';
 
   document.getElementById('stLog').innerHTML=log.length?log.map(r=>
-    '<div class="st-row" data-sid="'+esc(r.id)+'">'+
+    '<div class="st-row" role="button" tabindex="-1" aria-expanded="'+(ST_TAPE.has(r.id)?'true':'false')+'" data-sid="'+esc(r.id)+'">'+
       '<span class="t">'+stHM(r.start)+'</span>'+
       '<span class="u">'+esc(r.unitSpoken||r.unit)+'</span>'+
       '<span class="dur">'+(r.seconds==null?'~'+stDur(r.heardFor):stDur(r.seconds))+'</span>'+
@@ -1159,6 +2004,11 @@ function renderStops(){
   document.querySelectorAll('#stOpen [data-sid],#stLog [data-sid]').forEach(el=>{
     el.onclick=()=>{const id=el.dataset.sid; ST_TAPE.has(id)?ST_TAPE.delete(id):ST_TAPE.add(id); renderStops();};
   });
+  /* Last, after both lists have been rebuilt and rebound, because the row this puts
+     focus back on has to be a node that exists and has its handler on it. This is the
+     call that makes opening a tape by keyboard land you back on the row you pressed,
+     now reading as expanded, rather than at the top of the document. */
+  keep();
 }
 
 // The clocks tick on their own so an open stop does not sit still between
@@ -1202,9 +2052,23 @@ async function pollStopsCount(){
   }catch(e){/* the badge is the least important thing on the page */}
 }
 
-async function pollPipeline(){
+/* Everything that reads pipeline.json comes through here. The console panel
+   below only polls while somebody is on the backend view, and the header is on
+   every view, so the fetch that feeds the header cannot be tied to the panel.
+   That is how a broken relay would have stayed invisible on the map view even
+   after all of this. */
+async function pullPipeline(){
   let d=null;
   try{const r=await fetch('./pipeline.json',{cache:'no-store'});if(r.ok)d=await r.json();}catch(e){}
+  /* A failed poll deliberately leaves the last good payload in place, so the
+     age in the header keeps climbing rather than freezing at whatever it said
+     when the fetch started failing. A frozen number looks like a working one. */
+  if(d){PIPE=d;paintHealth();}
+  return d;
+}
+
+async function pollPipeline(){
+  const d=await pullPipeline();
   if(!d)return;
   const exl=document.getElementById('beExtractor'); if(exl)exl.textContent=' · extractor: '+(d.extractor||'—');
   // feed health
@@ -1270,38 +2134,424 @@ async function pollPipeline(){
 
 /* ===================== Desk-editor SITUATIONS (smart layer) ===================== */
 const sitLayer=L.layerGroup().addTo(map);
-const sitState={byId:{},seenHigh:new Set()};
+const sitState={list:[],byId:{},seenHigh:new Set(),open:new Set(),merge:null};
 function sitColor(s){return s.priority==='high'?'#ff4d4d':'#c07cff';}
 async function pollSituations(){
-  let list=[];
-  try{const r=await fetch('./situations.json',{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j))list=j;}}catch(e){return;}
-  sitState.byId={};list.forEach(s=>sitState.byId[s.id]=s);
-  const el=document.getElementById('situations'),cnt=document.getElementById('sitCount');
-  if(cnt)cnt.textContent=list.length;
-  if(el){
-    if(!list.length)el.innerHTML='<div class="empty">Nothing major right now. Watching&hellip;</div>';
-    else{el.innerHTML=list.map(s=>'<div class="sit'+(s.priority==='high'?' high':'')+'" data-id="'+esc(s.id)+'">'+
-      '<div class="sit-top"><span class="sit-type">'+esc(s.type||'situation')+'</span><span class="sit-status">'+esc(s.status||'')+'</span></div>'+
-      '<div class="sit-head-line">'+esc(s.headline||'')+'</div>'+
-      '<div class="sit-sum">'+esc(s.summary||'')+'</div>'+
-      (s.location?'<div class="sit-loc">'+esc(s.location)+'</div>':'')+'</div>').join('');
-      el.querySelectorAll('.sit').forEach(c=>{c.onclick=()=>{const s=sitState.byId[c.dataset.id];if(s&&s.lat!=null)map.setView([s.lat,s.lon],13,{animate:true});};});}
-  }
+  /* meta.ok is "we are holding a board the server actually served", which is a
+     different question from "the fetch did not throw". The old version only
+     bailed on a thrown fetch; a 500 or a 404 fell straight through with an
+     empty list and wiped the column, so a backend hiccup read in the newsroom
+     as a quiet night. Anything short of a parsed board now leaves what is on
+     screen alone and tells the alert layer that the feed went dark. */
+  let list=[],meta={ok:false};
+  try{
+    const r=await fetch('./situations.json',{cache:'no-store'});
+    if(r.ok){const j=await r.json();
+      if(Array.isArray(j)){list=j;meta={ok:true};}
+      else if(j&&Array.isArray(j.situations)){list=j.situations;meta={ok:true,at:j.at||null};}
+    }
+  }catch(e){}
+  /* Guarded because the page has to keep working if alerts.js is missing.
+     Passing null rather than [] on a bad poll matters: [] means "nothing is
+     happening", null means "we do not know", and only one of those should
+     eventually make a noise. */
+  if(window.BCCAlert)BCCAlert.tick(meta.ok?list:null,meta);
+  if(!meta.ok)return;
+  paintBoard(list);
+}
+
+/* One board in, everything on the page repainted off it. This is its own
+   function rather than the tail of the poll because /api/sitlink answers with
+   the board it has just written, and a correction that waits up to five
+   seconds for the next poll to show it is a correction somebody makes twice. */
+function paintBoard(list){
+  sitState.list=list;
+  sitState.byId={};list.forEach(s=>{if(s&&s.id)sitState.byId[s.id]=s;});
+  /* Which cards are open, and which one is half way through being folded, are
+     held here and not in the DOM, because the column is thrown away and built
+     again every five seconds and anything living inside it goes too. Both are
+     pruned against the board on the way past, so a card that ages off does not
+     leave a row open or a fold armed against something nobody can see. */
+  sitState.open.forEach(id=>{if(!sitState.byId[id])sitState.open.delete(id);});
+  if(sitState.merge&&!sitState.byId[sitState.merge])sitState.merge=null;
+  paintSits();
   sitLayer.clearLayers();
   list.forEach(s=>{if(s.lat!=null&&s.lon!=null){const c=sitColor(s);
     const circ=L.circle([s.lat,s.lon],{radius:s.priority==='high'?2600:1600,color:c,weight:1.5,opacity:.6,fillColor:c,fillOpacity:.12});
     circ.bindPopup('<div class="pop-t" style="color:'+c+'">'+esc(s.headline||'')+'</div><div class="pop-r">'+esc(s.summary||'')+'</div><div class="pop-src">approx &middot; '+esc(s.location||'')+'</div>');
     circ.addTo(sitLayer);}});
+  renderStatePolice(list);
   const hi=list.find(s=>s.priority==='high'&&!sitState.seenHigh.has(s.id));
   if(hi){sitState.seenHigh.add(hi.id);showBigAlert(hi);}
   if(sitState.seenHigh.size>150)sitState.seenHigh=new Set(list.filter(s=>s.priority==='high').map(s=>s.id));
+}
+
+/* ---- story threads (#190) -------------------------------------------------
+   A thread is one card carrying the beats that belong to it, so the jumper and
+   the bag found on the walkway afterwards read as one story instead of two.
+   The threading in lib/threads.js is good and it will sometimes be wrong, and
+   what makes it usable is not the error rate but whether the person who spots
+   the error can fix it here and have it stay fixed.
+   Collapsed by default and showing only the latest beat, because the column is
+   340px wide and three open threads would push the live feed off the bottom of
+   the rail. app/threadui.js decides what a beat row says and which beat can be
+   pulled out; this half only draws it. Every call into it is guarded, so the
+   page still renders the old flat cards if that file fails to load. */
+function paintSits(){
+  const list=sitState.list||[];
+  const el=document.getElementById('situations'),cnt=document.getElementById('sitCount');
+  if(cnt)cnt.textContent=list.length;
+  if(!el)return;
+  /* Held across the swap. innerHTML drops every child, which drops the scroll
+     with it, so without this a poll landing while somebody reads the fourth
+     card throws them back to the first one twice a minute. */
+  const top=el.scrollTop;
+  const keep=roveKeep();
+  el.classList.toggle('arming',!!sitState.merge);
+  if(!list.length)el.innerHTML='<div class="empty">Nothing major right now. Watching&hellip;</div>';
+  else el.innerHTML=list.map(s=>sitCard(s)).join('');
+  el.scrollTop=top;
+  keep();
+}
+
+function sitCard(s){
+  const T=window.BCCThread,id=s.id||'';
+  const open=sitState.open.has(id),arm=sitState.merge,armed=(arm===id);
+  /* Only a card with coordinates gets the role and the tab stop. The click does
+     nothing without them, and a control that does nothing is a worse promise
+     than a card that never claimed to be one. A card that is a fold target is a
+     control whatever else it is, so it gets one then too. */
+  const go=(s.lat!=null&&s.lon!=null)||(arm&&!armed);
+  const n=T?T.count(s):0;
+  const last=T?T.latest(s):null;
+  let h='<div class="sit'+(s.priority==='high'?' high':'')+(open?' open':'')+
+    (armed?' armed':'')+(arm&&!armed?' target':'')+'"'+
+    (go?' role="button" tabindex="-1"':'')+
+    (arm&&!armed?' title="Fold the armed card in here"':'')+' data-id="'+esc(id)+'">';
+  h+='<div class="sit-top"><span class="sit-type">'+esc(s.type||'situation')+'</span>';
+  if(n)h+='<button class="thr-chip'+(n>1?' many':'')+'" data-thr="open" data-id="'+esc(id)+'"'+
+    ' aria-expanded="'+(open?'true':'false')+'" title="'+(open?'Close this card':'Open the beats on this card and the desk controls')+'">'+
+    esc(T.label(s))+'</button>';
+  h+='<span class="sit-status">'+esc(s.status||'')+'</span></div>';
+  h+='<div class="sit-head-line">'+esc(s.headline||'')+'</div>';
+  h+='<div class="sit-sum">'+esc(s.summary||'')+'</div>';
+  if(s.location)h+='<div class="sit-loc">'+esc(s.location)+'</div>';
+  /* The one line a collapsed thread owes the room: what has happened on it
+     since the headline was written. */
+  if(n>1&&!open&&last)h+='<div class="thr-last">then '+esc(last.text)+'</div>';
+  if(open&&T)h+=threadBody(s,id);
+  /* Only the armed card carries the line, because only the armed card is the
+     instruction. Every other card on the board is a target, and printing "fold
+     it in here" on all of them turns a 340px column into eight copies of one
+     sentence. What marks a target is the outline it takes under the cursor and
+     the title it answers a hover with. */
+  if(armed)h+='<div class="thr-drop">Now pick the card this one belongs inside. '+
+    'Press it again, or Escape, to stop.</div>';
+  return h+'</div>';
+}
+
+function threadBody(s,id){
+  const T=window.BCCThread,sh=T.shown(s);
+  let h='<div class="thr">';
+  if(sh.hidden)h+='<div class="thr-more">'+sh.hidden+' earlier '+(sh.hidden===1?'beat':'beats')+' not shown</div>';
+  /* pDate rather than new Date, because ago() of an unparseable string is not an
+     error, it is the string "0m ago" sitting on a beat nobody can date. A beat
+     with a timestamp the browser cannot read should say so. */
+  h+=sh.rows.map(b=>{const w=pDate(b.at);return '<div class="thr-beat">'+
+    '<span class="thr-when">'+esc(w?ago(w):'no time')+'</span>'+
+    '<span class="thr-text">'+esc(b.text)+'</span>'+
+    (b.canPull
+      ? '<button class="thr-pull" data-thr="pull" data-id="'+esc(id)+'" data-at="'+esc(b.at)+'"'+
+        ' title="Pull this beat out of the thread and give it its own card">pull out</button>'
+      /* Marked rather than left blank. A control that is simply absent on some
+         rows reads as a bug, and the reason is the sort of thing nobody would
+         ever guess, so it is on the row in two words and in full on hover. */
+      : '<span class="thr-pull off" title="'+esc(b.why||'')+'">'+esc(b.tag||'')+'</span>')+
+    '</div>';}).join('');
+  h+='</div><div class="sit-acts">'+
+    '<button data-thr="merge" data-id="'+esc(id)+'" title="Fold this card into another one on the board">Fold into&hellip;</button>'+
+    '<button data-thr="pin" data-id="'+esc(id)+'" title="Stop anything else being threaded into this card">Pin on its own</button>'+
+    '<button data-thr="undo" data-id="'+esc(id)+'" title="Forget the corrections made to this card and put back what was folded in">Undo</button>'+
+    '</div>';
+  return h;
+}
+
+/* One sentence about the last thing the desk did. It earns its place because
+   the column repaints itself every five seconds whatever happens: a fold that
+   landed and a fold the store refused both end with the board being redrawn,
+   so without this the only difference between them is whether the cards moved,
+   and nobody watching a nine-screen wall is going to catch that. plan() in
+   threadui.js already writes the sentence for everything it turns down; this
+   only has to put it somewhere a person will read it. */
+let deskSayTimer=null;
+function deskSay(msg,ok){
+  const el=document.getElementById('deskSay');if(!el)return;
+  el.textContent=msg||'';
+  el.className='desk-say'+(msg?' show':'')+(msg&&!ok?' bad':'');
+  if(deskSayTimer)clearTimeout(deskSayTimer);
+  if(!msg)return;
+  /* A refusal stays up more than twice as long as a confirmation. Somebody who
+     was told no has a reason to read; somebody who was told yes can see the
+     answer on the board in front of them and does not need the caption. */
+  deskSayTimer=setTimeout(()=>{
+    el.className='desk-say';el.textContent='';
+  },ok?4500:10000);
+}
+
+/* Every desk verb comes through here. Two of them never leave the page, and
+   the other four go to /api/sitlink and repaint off the board that comes back
+   rather than waiting for the next poll, because a correction that takes up to
+   five seconds to show is a correction somebody makes twice.
+   Nothing is attached to the request. The route sits behind the same Basic
+   auth as the rest of the app, and a browser resends that on a same-origin
+   fetch by itself. */
+let deskBusy=false;
+async function deskAct(kind,id,at){
+  const T=window.BCCThread;
+  if(!T){deskSay('The thread controls did not load. Reload the page.',false);return;}
+  if(!id)return;
+
+  if(kind==='open'){
+    if(sitState.open.has(id))sitState.open.delete(id);else sitState.open.add(id);
+    paintSits();return;
+  }
+  if(kind==='merge'){
+    /* Pressing it again is the way out, and so is Escape. Arming a second card
+       while one is already armed means the first pick was the wrong one, so it
+       moves rather than refusing and making somebody undo their own mistake
+       before they are allowed to correct it. */
+    sitState.merge=(sitState.merge===id)?null:id;
+    deskSay(sitState.merge?'Now pick the card this one belongs inside.':'',true);
+    paintSits();return;
+  }
+
+  /* Everything past this line writes to the store. One at a time, because both
+     requests would reconcile against the board they read on the way in, and the
+     second answer would be the whole board as it stood before the first one
+     landed. Repainting off that would put the first correction back on screen
+     undone, which is the exact thing this route exists to stop. */
+  if(deskBusy){deskSay('Still saving the last one.',false);return;}
+
+  let p=null;
+  if(kind==='into')p=T.plan('merge',{id:sitState.merge,into:id,ids:Object.keys(sitState.byId)});
+  else if(kind==='pull')p=T.plan('split',{id:id,at:at,sit:sitState.byId[id]});
+  else if(kind==='pin')p=T.plan('split',{id:id});
+  else if(kind==='undo')p=T.plan('undo',{id:id});
+  else return;
+  if(!p.ok){deskSay(p.why,false);return;}
+
+  /* Disarmed before the request rather than after it. The fold is a mode, and
+     leaving the column in it for the length of a round trip means the click
+     somebody makes while waiting folds a second card they never meant to move. */
+  const wasArmed=sitState.merge;
+  sitState.merge=null;
+  deskBusy=true;
+  paintSits();
+  try{
+    const r=await fetch('/api/sitlink',{method:'POST',cache:'no-store',
+      headers:{'content-type':'application/json'},body:JSON.stringify(p.body)});
+    let j=null;try{j=await r.json();}catch(e){}
+    if(!r.ok||!j||!j.ok){
+      /* Put the fold back on the card it was armed on. Somebody whose
+         correction failed is going to try it again, and making them find the
+         card and arm it a second time is the desk paying for the store being
+         slow. Only if that card is still on the board. */
+      if(wasArmed&&sitState.byId[wasArmed])sitState.merge=wasArmed;
+      deskSay((j&&j.error)?String(j.error):'The desk could not save that. Try again.',false);
+      paintSits();return;
+    }
+    /* A pull mints a card, and a card the desk made a second ago is not news
+       breaking. Marking that one id seen before the repaint is what stops the
+       room's own correction setting off the big red banner. Only that id: a
+       high-priority call that genuinely arrived in the same window still has to
+       ring, and suppressing the whole board here would swallow it. */
+    if(j.spawned)sitState.seenHigh.add(j.spawned);
+    if(Array.isArray(j.situations))paintBoard(j.situations);
+    else paintSits();
+    deskSay(p.say,true);
+  }catch(e){
+    if(wasArmed&&sitState.byId[wasArmed])sitState.merge=wasArmed;
+    deskSay('The desk could not be reached. The correction was not saved.',false);
+    paintSits();
+  }finally{deskBusy=false;}
+}
+
+/* One listener on the column, bound once, in the capture phase.
+   Bound once because #situations is thrown away and rebuilt every five
+   seconds, so anything wired per card would have to be rewired in the render
+   function on every poll, and the first poll that forgot would leave a control
+   that silently stopped working.
+   Capture rather than bubble because the card is itself a control: it pans the
+   map. On the way up, the card's handler would run first and the map would
+   already have moved under somebody who pressed "pull out", so the correction
+   and a map jump would arrive together looking like one gesture. Taking the
+   event on the way down makes a press on a control inside a card a press on
+   that control and nothing else. */
+function deskSetup(){
+  const el=document.getElementById('situations');if(!el)return;
+  el.addEventListener('click',e=>{
+    const t=e.target;if(!t||!t.closest)return;
+    const ctl=t.closest('[data-thr]');
+    if(ctl){
+      e.preventDefault();e.stopPropagation();
+      deskAct(ctl.getAttribute('data-thr'),ctl.getAttribute('data-id'),ctl.getAttribute('data-at'));
+      return;
+    }
+    const card=t.closest('.sit');
+    if(!card)return;
+    const id=card.dataset.id;
+    /* While a fold is armed, every other card on the board is a drop target, so
+       a plain click on one means "in here" and not "show me this on the map".
+       The armed card itself is the way out, which is the same gesture that
+       armed it, so there is one thing to remember rather than two. */
+    if(sitState.merge){
+      e.preventDefault();e.stopPropagation();
+      deskAct(id===sitState.merge?'merge':'into',id);
+      return;
+    }
+    const s=sitState.byId[id];
+    if(s&&s.lat!=null&&s.lon!=null)map.setView([s.lat,s.lon],13,{animate:true});
+  },true);
+}
+/* The two halves of the state police section are drawn by two different polls,
+   and the section has one count and one layout switch between them, so both
+   live out here rather than in whichever render happened to run last. */
+const spState={cards:0,radio:[]};
+/* The state police column. John Ellement asked the newsroom for one and Matt
+   set the rule for what belongs in it: only transmissions from the State Police
+   feed. So everything here is first-hand. A Boston Police dispatcher saying
+   "trooper" is Boston Police radio and does not appear, and neither does a
+   crash on a road the State Police happen to patrol. app/statepolice.js makes
+   that call and this function draws it.
+
+   Two lists in one scroller. The cards are situations the desk editor built out
+   of State Police traffic, and there will be stretches with none, because State
+   Police radio is unit numbers and side changes far more often than it is a
+   scene. Underneath them is the radio itself, which is the part that is always
+   there when the feed is up, and which is what the request actually said.
+
+   Both halves run off polls the page was already making, so the whole section
+   still costs nothing at the store. Given the command budget that is the reason
+   it works this way rather than a happy accident. */
+function renderStatePolice(list){
+  const el=document.getElementById('statepolice');
+  if(!el)return;
+  const rows=(window.BCCStatePolice?BCCStatePolice.select(list):[]);
+  spState.cards=rows.length;
+  spCount();
+  /* Same contract as the situations column: keep() spans the innerHTML swap on
+     both branches, the empty one included, since a column that just emptied is
+     exactly when focus has nowhere to land. */
+  const keep=roveKeep();
+  if(!rows.length){
+    /* Worded as a fact about the radio rather than as a fault. Empty here means
+       the State Police have not given the desk a scene to write up, which on a
+       quiet hour is the correct answer and not a broken column. The radio list
+       below is the evidence that the feed is arriving. */
+    el.innerHTML='<div class="empty">No state police scenes on the board.</div>';
+    keep();return;
+  }
+  el.innerHTML=rows.map(r=>{
+    const s=r.sit;
+    /* The role and the tab stop go on only when there are coordinates, because
+       the click below does nothing without them and a control that does nothing
+       is a worse promise than a card that never claimed to be one. */
+    const go=(s.lat!=null&&s.lon!=null);
+    /* Built from the string only if there is one. ago() takes a Date and a
+       missing stamp would otherwise arrive as new Date(0), which reads on the
+       card as a call from 1970 rather than as a call with no time on it. */
+    const t=s.updated||s.firstSeen;
+    const when=t?ago(new Date(t)):'';
+    return '<div class="sp"'+(go?' role="button" tabindex="-1"':'')+' data-id="'+esc(s.id)+'"'+
+      ' title="'+esc(BCCStatePolice.detail(r.mark))+'">'+
+      '<div class="sp-top"><span class="sp-chip heard">'+
+        esc(BCCStatePolice.label(r.mark))+'</span>'+
+      '<span class="sp-when">'+esc(when)+'</span></div>'+
+      '<div class="sp-line">'+esc(s.headline||'')+'</div>'+
+      '<div class="sp-why"><em class="hit">Heard on their own radio.</em> '+
+        esc(r.mark.why)+' feed.</div></div>';
+  }).join('');
+  el.querySelectorAll('.sp').forEach(c=>{c.onclick=()=>{
+    const s=sitState.byId[c.dataset.id];
+    if(s&&s.lat!=null)map.setView([s.lat,s.lon],13,{animate:true});};});
+  keep();
+}
+function spCount(){
+  const cnt=document.getElementById('spCount');
+  /* Everything in the box, cards and transmissions together, because that is
+     what the number is sitting next to. Counting cards alone is what put a 0
+     beside a heading while the feed was plainly streaming, which is the report
+     that started this. */
+  if(cnt)cnt.textContent=spState.cards+spState.radio.length;
+  /* The rail is a fixed-height flex column and the live feed at the bottom is
+     what absorbs every cap above it, so this section only takes its room when
+     it has something to show. See the .sp-body block for the arithmetic. */
+  const rail=document.querySelector('.rail');
+  if(rail)rail.classList.toggle('has-sp',(spState.cards+spState.radio.length)>0);
+}
+/* The transmissions. Fed the console log pollConsole just fetched, which is the
+   last 80 lines across every channel on the network and therefore about twenty
+   minutes of State Police. BCCStatePolice.merge keeps what this browser has
+   already been sent, so a desk that has been open an hour shows the hour
+   without anyone asking the store for a byte more. */
+const SP_RADIO_KEEP=150;
+function renderSPRadio(list){
+  const el=document.getElementById('spRadio');
+  if(!el||!window.BCCStatePolice)return;
+  spState.radio=BCCStatePolice.merge(spState.radio,BCCStatePolice.radio(list),SP_RADIO_KEEP);
+  spCount();
+  const keep=roveKeep();
+  if(!spState.radio.length){ el.innerHTML=''; keep(); return; }
+  /* Which feeds these came off, named on the divider. There is more than one
+     State Police channel on the network and a reporter reading a terse line
+     out of context deserves to know which radio it was. */
+  const feeds=[...new Set(spState.radio.map(t=>t.source).filter(Boolean))]
+    .map(s=>String(s).replace(/[^a-z0-9]+/gi,' ').trim()).join(' &middot; ');
+  el.innerHTML='<div class="sp-rad-head"><b>Radio</b> '+esc(feeds)+
+      '<span class="sp-rad-n">'+spState.radio.length+' heard</span></div>'+
+    spState.radio.map(t=>{
+      const hit=!!t.incidentId;
+      return '<div class="sp-rad'+(hit?' hit':'')+'"'+
+        (hit?' role="button" tabindex="-1" data-id="'+esc(t.incidentId)+'"':'')+'>'+
+        '<span class="sp-rad-t">'+(t.time?new Date(t.time).toLocaleTimeString('en-US',
+          {hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}):'')+'</span>'+
+        '<span class="sp-rad-x">'+esc(t.text||'')+'</span></div>';
+    }).join('');
+  el.querySelectorAll('.sp-rad.hit').forEach(l=>{l.onclick=()=>openDetail(l.dataset.id);});
+  keep();
 }
 let bigAlertTimer=null;
 function showBigAlert(s){
   const el=document.getElementById('bigAlert');if(!el)return;
   const isChase=/pursuit|chase/i.test((s.type||'')+' '+(s.headline||''));
   const kicker=isChase?'⚠ Potential car chase':'⚠ '+((s.type||'alert').toUpperCase());
-  el.innerHTML='<span class="ba-x" onclick="hideBigAlert(event)">&times;</span><div class="ba-k">'+esc(kicker)+'</div><div class="ba-h">'+esc(s.headline||'')+'</div>'+(s.location?'<div class="ba-l">'+esc(s.location)+'</div>':'');
+  /* All three of these are clamped in CSS, so all three can be showing an ellipsis,
+     and until now none of them carried the full string anywhere a reader could get
+     at it. Two comments in the stylesheet already said a desktop hover covered the
+     truncation. It did not: there was no title here to hover.
+     It is worth having even though it only works with a mouse. The harness says the
+     location holds 48 characters at 390px and 77 at 1440, and of the 60,449 labels
+     lib/streets.json can produce, 1,604 pass 48 and exactly two pass 77. The phone
+     answer to those 1,604 was to give the line a second row, which the ≤700 block
+     does. The desktop answer to the last two is this, because widening a lane or
+     shrinking type for two labels in sixty thousand is the wrong trade and leaving
+     them silently cut is the other wrong one.
+     The headline gets one for a better reason than the tail: it is clamped to two
+     lines at every width and the fixture's 105-character headline wants four of
+     them at 390px and three at 1440, so it is the field most often mid-sentence
+     when the banner closes.
+     esc() escapes quotes as well as angle brackets, so it is safe in an attribute.
+     A screen reader gets the text node rather than the title and is unaffected
+     either way, since the visible text is what is clipped and not what is read. */
+  const tip=t=>t?' title="'+esc(t)+'"':'';
+  /* The × carries a label because its text content is a multiplication sign, which is
+     what a reader is handed if you do not give it something else to say. It is also
+     inside an aria-atomic banner, so without the label the announcement ends up
+     reading the glyph as part of the sentence. */
+  el.innerHTML='<span class="ba-x" role="button" tabindex="0" aria-label="Dismiss alert" onclick="hideBigAlert(event)">&times;</span>'+
+    '<div class="ba-k"'+tip(kicker)+'>'+esc(kicker)+'</div>'+
+    '<div class="ba-h"'+tip(s.headline||'')+'>'+esc(s.headline||'')+'</div>'+
+    (s.location?'<div class="ba-l"'+tip(s.location)+'>'+esc(s.location)+'</div>':'');
   el.classList.add('show');
   el.onclick=()=>{if(s.lat!=null)map.setView([s.lat,s.lon],13,{animate:true});};
   if(bigAlertTimer)clearTimeout(bigAlertTimer);
@@ -1310,12 +2560,97 @@ function showBigAlert(s){
 function hideBigAlert(e){if(e)e.stopPropagation();const el=document.getElementById('bigAlert');if(el)el.classList.remove('show');}
 
 /* ===================== Clock + status + scheduler ===================== */
-function tickClock(){document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'})+' ET';}
-function setUpdated(){document.getElementById('updated').textContent='updated '+new Date().toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});}
+function tickClock(){
+  document.getElementById('clock').textContent=new Date().toLocaleTimeString('en-US',{hour12:false,timeZone:'America/New_York'})+' ET';
+  /* The health line rides the clock rather than the poll. If the poll is what
+     broke, the age still has to climb, because a header that stops updating
+     when the data stops arriving is exactly how twenty hours went unnoticed. */
+  paintHealth();
+}
+/* The header used to describe this browser tab and nothing else. setUpdated
+   printed the local clock, which is current no matter what is happening, and
+   setStatus counted failed civic fetches, which succeed whether or not a
+   scanner is alive. On August 3 the relay Mac lost its route to the dashboard
+   at 3:16 in the morning and the header read "live, updated 08:27 AM" for the
+   next twenty hours.
+
+   Both now come off the newest audio any feed has reported, which is the one
+   clock that stops when the relay stops, and they repaint on the second tick
+   so the age keeps climbing even when the poll itself is what is failing.
+   app/freshness.js holds the rules; this only paints them. */
+let PIPE=null, CIVIC_FAILS=0;
+const BOOT=Date.now();
+function setUpdated(){paintHealth();}
 function setStatus(results){
-  const fails=results.filter(r=>r.status==='fulfilled'&&r.value===false).length+results.filter(r=>r.status==='rejected').length;
-  const el=document.getElementById('status');el.className='status-pill'+(fails===0?'':fails>=3?' down':' degraded');
-  el.querySelector('.stxt').textContent=fails===0?'live':fails+' degraded';
+  CIVIC_FAILS=results.filter(r=>r.status==='fulfilled'&&r.value===false).length+results.filter(r=>r.status==='rejected').length;
+  paintHealth();
+}
+function paintHealth(){
+  const el=document.getElementById('status'), up=document.getElementById('updated');
+  const now=Date.now(), F=window.BCCFresh;
+  const v=(F&&PIPE)?F.verdict(PIPE,now):null;
+  /* No module or no payload yet falls back to the old wall clock, so a missing
+     freshness.js degrades to what the board did before rather than to a blank. */
+  if(up)up.textContent=v?F.stamp(PIPE,now)
+    :'updated '+new Date(now).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
+  if(!el)return;
+  let cls='',txt='live',tip='';
+  if(v){
+    cls=(v.level==='dark'||v.level==='stale')?' down':(v.level==='degraded'?' degraded':'');
+    txt=v.text; tip=v.detail;
+  }else if(now-BOOT>45000){
+    /* For the first few seconds an empty payload is just startup. After that it
+       means pipeline.json is not loading at all, and a green pill over a board
+       that has no idea what the scanners are doing is the same lie in a new
+       place. Say the board is blind rather than saying it is live. */
+    const waited=F?F.phrase(now-BOOT):Math.round((now-BOOT)/1000)+'s';
+    cls=' down'; txt='no pipeline';
+    tip='pipeline.json has not loaded in '+waited+'. The board cannot tell what the scanners are doing.';
+  }else{
+    cls=CIVIC_FAILS===0?'':(CIVIC_FAILS>=3?' down':' degraded');
+    txt=CIVIC_FAILS===0?'starting':CIVIC_FAILS+' degraded';
+    tip='Waiting for the first pipeline poll.';
+  }
+  /* Traffic and weather failing is still worth saying, but only when the
+     scanners are not already saying something worse. Scanner trouble wins. */
+  if(v&&!cls&&CIVIC_FAILS){
+    cls=CIVIC_FAILS>=3?' down':' degraded';
+    txt=CIVIC_FAILS+' feeds down';
+    tip=CIVIC_FAILS+' civic data feeds failed to load. '+tip;
+  }
+  el.className='status-pill'+cls;
+  el.title=tip;
+  const t=el.querySelector('.stxt'); if(t)t.textContent=txt;
+  alarmHealth(v);
+}
+
+/* Reading the pill still requires looking at the pill. John Ellement asked not
+   to have to stare at the screen, and a relay that stops at 3:16 in the morning
+   is the exact case for that: nobody is looking, and the one thing that would
+   have caught it is a noise.
+
+   The existing alert layer watches situations.json, which a Vercel cron rebuilt
+   on schedule all through August 3 while the Macs were unreachable, so it had
+   nothing to complain about. This watches the audio clock instead. */
+let DARK_SINCE=0, DARK_SAID=0;
+const DARK_RESAY=30*60000;
+function alarmHealth(v){
+  if(!window.BCCAlert)return;
+  const now=Date.now();
+  if(!v||v.level!=='dark'){
+    /* Recovery re-arms it and stops the title flashing, so the tab goes quiet
+       the moment the audio comes back rather than waiting to be dismissed. */
+    if(DARK_SAID)BCCAlert.stopFlash();
+    DARK_SINCE=0; DARK_SAID=0;
+    return;
+  }
+  if(!DARK_SINCE)DARK_SINCE=now;
+  /* Says it again every half hour for as long as it stays dark. Saying it once
+     and then going quiet is indistinguishable from nothing being wrong, which
+     is the whole failure being fixed here. Mute is a button, not a timeout. */
+  if(DARK_SAID&&now-DARK_SAID<DARK_RESAY)return;
+  DARK_SAID=now;
+  BCCAlert.say('stale',{title:'Scanners are dark',body:v.detail,tag:'bcc-scanners-dark'},'⚠');
 }
 async function refreshCivic(){
   const rs=await Promise.allSettled([loadTraffic(),loadAlerts(),enabled.quakes?loadQuakes():Promise.resolve(true)]);
@@ -1543,7 +2878,7 @@ function renderPulse(){
     gradient:{0.08:'#1e1b4b',0.25:'#4c1d95',0.45:'#9d174d',0.62:'#c2410c',0.78:'#f97316',0.90:'#fbbf24',1.0:'#fffbeb'}};
   if(!pulseHeat){pulseHeat=L.heatLayer(pts,opts);groups.pulse.addLayer(pulseHeat);}
   else{pulseHeat.setOptions(opts);pulseHeat.setLatLngs(pts);}
-  document.getElementById('c-pulse').textContent=pts.length;
+  layerCount('c-pulse',pts.length);
   if(PB.hour)PB.hour.textContent=hourLabel(h);
   if(PB.slider&&+PB.slider.value!==h)PB.slider.value=h;
   if(PB.now)PB.now.classList.toggle('live',h===new Date().getHours());
@@ -1668,7 +3003,7 @@ function renderFlow(){
     else               m=L.circleMarker([p.lat,p.lon],{radius:rad,color:'#22d3ee',weight:2.2,fillColor:'#22d3ee',fillOpacity:.08,dashArray:'3 3'});
     m.bindPopup(flowPopup(p,win));groups.flow.addLayer(m);shown++;
   }
-  document.getElementById('c-flow').textContent=shown;
+  layerCount('c-flow',shown);
   const row=document.querySelector('.lyr[data-layer="flow"]');
   if(row){
     const f=(flowDoc&&flowDoc.summary&&flowDoc.summary.flow)||null;
@@ -1688,8 +3023,570 @@ async function loadActivity(){
   }catch(e){/* keep the last good render rather than blanking the map */}
 }
 
+/* ------------------------------ the long lists ------------------------------
+   Five lists here are built the same way and every one of them was mouse-only: the
+   call feed, the transmission console, the situations column, and the two stop lists.
+   A plain tabindex="0" on each row is the obvious fix and the wrong one. At real
+   volume that is fifty feed rows plus a hundred console lines plus two hundred stop
+   rows dropped into the tab sequence, and a list that takes three hundred presses to
+   get past is worse for a keyboard than one it cannot enter at all.
+   So a roving tabindex. One row per list is in the tab order and the rest sit at -1,
+   Tab moves between lists, and Up and Down move within one. Home and End go to the
+   ends, which earns its keep on the feed, where what you want is nearly always the
+   newest call or the oldest one still open.
+   The rows are role="button", which is not a cosmetic choice: the delegated handler
+   below already activates role="button" on Enter and Space, so none of this needs an
+   activation path of its own. role="option" would be the reflex for a list, and it
+   would cost more than it pays. A reader flattens an option's contents, and a feed
+   row is a pill, a time, a headline, a location and a source; button keeps all five
+   of them audible and leaves the semantics honest, since clicking one of these rows
+   does something rather than selecting it.
+   Which row is current is remembered by the row's own id, never by the node. Every
+   one of these lists is a full innerHTML replacement on a poll, so the node that had
+   focus a moment ago does not exist any more. Keying on the id is what lets the
+   tabindex and the focus both land back on the same call after a redraw. */
+/* Every selector below is qualified by [role="button"], and that is load-bearing rather
+   than decorative. Two of these lists put the role on only some of their rows: a console
+   line gets it when it has a call attached, a situation card gets it when it has
+   coordinates. Naming the class alone would let the arrows walk rows that carry no role
+   and no tabindex, so Down would move focus onto something a reader announces as a plain
+   div and Enter would do nothing on. Qualifying by the role makes one fact out of two:
+   the rows the arrows walk are, by construction, exactly the rows that act. Add a row
+   kind later and it joins the arrow sequence the moment it gets a role, not whenever
+   somebody remembers to come back here. */
+const ROVE=[
+  {list:'feed',       row:'.feed-item[role="button"]', at:'id'},
+  {list:'clog',       row:'.cline[role="button"]',     at:'id'},
+  {list:'situations', row:'.sit[role="button"]',       at:'id'},
+  {list:'statepolice',row:'.sp[role="button"]',        at:'id'},
+  {list:'stOpen',     row:'[data-sid][role="button"]', at:'sid'},
+  {list:'stLog',      row:'[data-sid][role="button"]', at:'sid'}
+];
+const roveAt={};
+function roveRows(c){
+  const r=document.getElementById(c.list);
+  return r?[].slice.call(r.querySelectorAll(c.row)):[];
+}
+function roveCfgFor(node){
+  for(let i=0;i<ROVE.length;i++){
+    const r=document.getElementById(ROVE[i].list);
+    if(r&&r.contains(node))return ROVE[i];
+  }
+  return null;
+}
+/* Exactly one row per list carries tabindex 0. It is the remembered row if that row
+   is still on screen and the first row if it is not, so a list whose current call got
+   cleared out from under it still has a way in rather than no way in at all. */
+function rovePaint(){
+  ROVE.forEach(c=>{
+    const rows=roveRows(c);
+    if(!rows.length)return;
+    let want=-1;
+    if(roveAt[c.list]!=null)
+      want=rows.findIndex(x=>x.dataset[c.at]===roveAt[c.list]);
+    if(want<0)want=0;
+    rows.forEach((x,i)=>{x.tabIndex=(i===want?0:-1);});
+  });
+}
+/* Called on both sides of an innerHTML swap: roveKeep() before, and the function it
+   hands back after. What it reads going in is the id of the row focus was on, not the
+   row itself, and what it does coming out is put focus on whichever node now carries
+   that id. If the row is gone the list catches the focus on its first row instead,
+   because the alternative is focus falling to <body>, which throws a keyboard user
+   silently back to the top of the document in the middle of a poll they did not ask
+   for. Matching by walking the rows rather than by building an attribute selector is
+   deliberate: these ids come off the scanner feed, and a selector would have to be
+   escaped correctly every time or it throws.
+   The stop lists are what make this more than a nicety. Clicking a stop row toggles
+   its tape and calls renderStops(), so without this, opening a tape with the keyboard
+   loses your place in the list in the same gesture that opened it. */
+function roveKeep(){
+  const a=document.activeElement;
+  /* The cfg is accepted only if the focused node is a row or something inside one, not
+     merely something inside a row's container. roveCfgFor answers "which list is this
+     node in", which is the right question for the arrows and the wrong one here: without
+     the climb below, focus sitting on anything else inside one of the five containers
+     would be pulled onto the list's first row by the fallback, and a redraw would have
+     moved focus somewhere the user never put it. Landing on the first row is the right
+     recovery when a row that HAD focus is gone. It is not a recovery at all when no row
+     had focus to begin with. */
+  let c=(a&&a!==document.body)?roveCfgFor(a):null;
+  /* Focus does not only sit on rows any more. A thread card carries a chip, a
+     pull control on each beat and three desk buttons, and every one of them is
+     thrown away by the next poll like everything else in the column. Climbing
+     to the owning row answers the same question a matches() check on the node
+     used to, and answers it for the controls too: a node inside a
+     row belongs to that row, and a node inside the container but inside no row
+     still belongs to nothing. Without the climb, focus on a desk button read as
+     no focus at all and the poll dropped the user on <body>, which is the exact
+     silent throw to the top of the document this function exists to prevent. */
+  const row=(c&&a.closest)?a.closest(c.row):null;
+  if(!row)c=null;
+  const key=(c&&row.dataset)?(row.dataset[c.at]||null):null;
+  /* Which control, if it was a control and not the row. Restoring to the row
+     would be a quiet wrong thing rather than a loud one: press the chip to open
+     a card, let a poll land two seconds later, and focus slides from the chip
+     to the card, where the next Enter pans the map instead of closing what you
+     just opened. Identified by its verb and its beat rather than by a built
+     selector, for the reason above: these values come off the scanner feed. */
+  const ctl=(c&&a!==row&&a.getAttribute)?a.getAttribute('data-thr'):null;
+  const ctlAt=(ctl&&a.getAttribute)?(a.getAttribute('data-at')||''):'';
+  return function(){
+    rovePaint();
+    if(!c)return;
+    const root=document.getElementById(c.list);
+    if(!root)return;
+    let back=null;
+    if(key)back=[].slice.call(root.querySelectorAll(c.row))
+      .find(x=>x.dataset[c.at]===key)||null;
+    if(!back)back=root.querySelector(c.row);
+    if(!back)return;
+    if(ctl){
+      const again=[].slice.call(back.querySelectorAll('[data-thr]'))
+        .find(x=>x.getAttribute('data-thr')===ctl&&(x.getAttribute('data-at')||'')===ctlAt);
+      if(again){again.focus();return;}
+    }
+    back.focus();
+  };
+}
+/* Arrows move inside one list and never leave it. The clamp at both ends is on
+   purpose and so is preventDefault at the ends: at the last row a Down that falls
+   through would scroll the list's own container instead, which looks like the arrow
+   did nothing and moved the page anyway. An arrow pressed inside one of these lists
+   belongs to the list. Anywhere else, including the search field, it falls straight
+   through to the caret where it belongs, because roveCfgFor only matches a node that
+   is actually inside one of the five containers. */
+function roveArrow(e){
+  const t=document.activeElement;
+  const c=t?roveCfgFor(t):null;
+  if(!c)return;
+  const rows=roveRows(c);
+  /* Climbed for the same reason roveKeep climbs. A thread card has controls
+     inside it, and until this was here an arrow pressed with one of them
+     focused missed the row list entirely and fell through to the container's
+     own scrollbar: the list scrolls, focus does not move, and the arrow looks
+     like it did nothing and moved the page anyway, which is the one failure the
+     clamp below exists to prevent. Arrows walk cards, wherever inside a card
+     they were pressed, because there is nothing else in a card they could mean. */
+  const row=t.closest?t.closest(c.row):null;
+  const i=row?rows.indexOf(row):-1;
+  if(i<0)return;
+  let n=i;
+  if(e.key==='ArrowDown')n=Math.min(i+1,rows.length-1);
+  else if(e.key==='ArrowUp')n=Math.max(i-1,0);
+  else if(e.key==='Home')n=0;
+  else n=rows.length-1;
+  e.preventDefault();
+  if(n===i)return;
+  roveAt[c.list]=rows[n].dataset[c.at]||null;
+  rows.forEach((x,k)=>{x.tabIndex=(k===n?0:-1);});
+  rows[n].focus();
+}
+
+/* One listener on the document instead of a key handler per control, because every
+   list on this page is rebuilt by throwing innerHTML away and binding onclick to the
+   new nodes. Per-row key wiring would have to be redone in five render functions on
+   every poll, and the first one anybody forgot would be a row that clicks but does
+   not activate. Delegation means the render functions only have to get the attributes
+   right, which they do in one template string each.
+   It fires on the explicit role attribute and not on the tag, which is what keeps a
+   real <button> out of it. The .tab buttons and the pulse controls are <button>s, and
+   a button already activates itself on Enter and Space; matching them here would call
+   click() alongside the browser's own activation and toggle play twice per press.
+   getAttribute returns null for a button's implicit role, so they are excluded by
+   construction rather than by a list of exceptions that could go stale.
+   e.repeat is dropped because these are toggles. Holding Enter on a layer switch
+   would otherwise add and remove a Leaflet layer group at the keyboard's repeat
+   rate, which is a stutter of tile work for a key nobody meant to hold.
+   preventDefault is for Space. The page cannot scroll, html and body are
+   overflow:hidden, but a focused row inside #feed or #clog can scroll its own
+   container out from under itself, which is the opposite of activating it. */
+function keyboardSetup(){
+  const ACTIVATES={switch:1,button:1};
+  const ARROWS={ArrowDown:1,ArrowUp:1,Home:1,End:1};
+  document.addEventListener('keydown',e=>{
+    if(e.key==='Escape'){escapeOut(e);return;}
+    if(ARROWS[e.key]){roveArrow(e);return;}
+    if(e.key!=='Enter'&&e.key!==' ')return;
+    if(e.repeat)return;
+    const t=document.activeElement;
+    if(!t||!t.getAttribute)return;
+    if(!ACTIVATES[t.getAttribute('role')])return;
+    e.preventDefault();
+    t.click();
+  });
+  /* Which row is current has to follow focus however focus got there, not only when
+     an arrow moved it. Tab into a list and click on a row both land here, and both
+     have to be remembered, or the next redraw hands the tab stop back to whichever
+     row the arrows last touched instead of the one you are actually on.
+     e.repeat is not dropped for arrows the way it is for activation. Holding Down to
+     run through a list is what holding Down is for; the thing that must not repeat is
+     a toggle, and none of these move a toggle. */
+  document.addEventListener('focusin',e=>{
+    const c=roveCfgFor(e.target);
+    if(c&&e.target.dataset&&e.target.dataset[c.at]!=null)
+      roveAt[c.list]=e.target.dataset[c.at];
+  });
+}
+/* Escape closes one thing per press, topmost first, and the order is a judgement.
+   The banner goes before the panel because the banner is the only one of the two
+   that arrived uninvited: the panel is open because somebody opened it. If both are
+   up and you wanted the panel gone, this costs a second press and the first press
+   still removed the thing that had just covered what you were reading. The other
+   order loses the panel you were reading and leaves the banner sitting on top.
+   Last comes an overlay tab, closed by clicking the Map tab rather than by reaching
+   into VIEWS and toggling classes, so that the active tab highlight and the poll
+   that comes with it stay on the one code path that owns them.
+   A search field with something typed in it keeps its Escape. Both the stops view
+   and the banner can be up at once, and in a type="search" the browser's Escape
+   clears the box; taking that to close a banner behind it would be a worse trade
+   than the extra press. An empty field has nothing to clear, so it falls through.
+   An armed fold goes ahead of all of it, banner included. Everything else on this
+   list is something covering the screen, and leaving one up for an extra press
+   costs a press. An armed fold is not on the screen at all, it is a change to what
+   a click means on every card in the column, so leaving it armed after somebody
+   pressed Escape to get out of it means their next click folds two unrelated
+   stories together. */
+function escapeOut(e){
+  const a=document.activeElement,tag=a&&a.tagName;
+  if((tag==='INPUT'||tag==='TEXTAREA')&&a.value)return;
+  if(sitState.merge){sitState.merge=null;deskSay('',true);paintSits();e.preventDefault();return;}
+  const ba=document.getElementById('bigAlert');
+  if(ba&&ba.classList.contains('show')){hideBigAlert();e.preventDefault();return;}
+  const d=document.getElementById('detail');
+  if(d&&d.classList.contains('show')){closeDetail();e.preventDefault();return;}
+  const open=Object.keys(VIEWS).some(k=>{
+    const el=document.getElementById(VIEWS[k].el);
+    return el&&el.classList.contains('show');});
+  if(open){const m=document.querySelector('.tab[data-view="map"]');
+    if(m){m.click();e.preventDefault();}}
+}
+
+/* ===================== LAYER: Traffic cameras (MassDOT) =====================
+   306 public cameras statewide. The catalog comes from /api/cameras, which reads a
+   KV key a cron fills, rather than from Mass511 directly: that call is a POST and
+   api/feed.js is a GET-only allowlist proxy, and a newsroom with nine screens open
+   should not be nine clients of an undocumented state endpoint.
+   The pictures are deliberately not proxied. Every camera carries a public JPEG on
+   public.carsprogram.org that an <img> loads directly: no CORS, no signing, no
+   bandwidth on this deployment however many screens are up. Measured against a live
+   camera, those files are about six kilobytes and are replaced roughly once a minute
+   at the source, so 20s of polling is a little faster than the pictures actually
+   change and slow enough to be free. */
+let camsDoc=null,camsLoading=false,camTimer=null;
+const CAM_REFRESH_MS=20000;
+
+/* 23 of the 306 URLs already carry a query string. Appending "?t=" to those makes a
+   URL with two question marks, which S3 answers with a 400, and the newsroom would
+   see broken pictures on exactly those 23 and nowhere else. */
+function camBust(url){return url+(url.indexOf('?')>=0?'&':'?')+'t='+Date.now();}
+
+/* A body-and-lens glyph rather than another coloured dot. Seven layers already draw
+   circles and the whole point of this one is that you can pick it out of a crash
+   cluster and click it. */
+function camIcon(){
+  return L.divIcon({className:'cam-ico',iconSize:[18,18],iconAnchor:[9,9],
+    html:'<svg width="18" height="18" viewBox="0 0 18 18">'
+      +'<rect x="1" y="4.6" width="11.6" height="8.8" rx="2" fill="#94a3b8" stroke="#06090f" stroke-width="1.2"/>'
+      +'<path d="M12.6 8 L16.8 5.7 L16.8 12.3 L12.6 10 Z" fill="#94a3b8" stroke="#06090f" stroke-width="1.2" stroke-linejoin="round"/>'
+      +'<circle cx="4.3" cy="7.3" r="1" fill="#06090f" opacity=".5"/></svg>'});
+}
+
+function camPopupHTML(c){
+  const sub=[c.mm,c.place].filter(Boolean).join(' · ');
+  return '<div class="pop-t" style="color:#cbd5e1">'+esc(c.label)+'</div>'
+    +(sub?'<div class="pop-r">'+esc(sub)+'</div>':'')
+    /* src is left empty and the real URL parked in data-cam. The popupopen handler
+       fills it. Putting the URL in src here would start a download for every popup
+       Leaflet builds, and it builds them at bind time, so turning the layer on would
+       fetch 306 pictures nobody asked to see. */
+    +'<img class="cam-img" alt="" data-cam="'+esc(c.url)+'">'
+    +'<div class="pop-r cam-raw">'+esc(c.raw)+'</div>'
+    +'<div class="pop-src">MassDOT &middot; <span class="cam-state">loading</span></div>';
+}
+
+async function loadCameras(){
+  if(camsLoading||camsDoc)return;          // the catalog is static; once a page-load is enough
+  camsLoading=true;
+  try{
+    const j=await fetchJSON('/api/cameras');
+    if(!j||!Array.isArray(j.cams)||!j.cams.length)throw new Error('no cameras in payload');
+    camsDoc=j;
+    groups.cameras.clearLayers();
+    j.cams.forEach(c=>{
+      /* keyboard:false on purpose. Leaflet's default puts every marker in the tab
+         order, and 306 of them would bury the rest of the page behind 306 stops.
+         The layer row stays reachable and the map still pans by key. */
+      const mk=L.marker([c.lat,c.lon],{icon:camIcon(),keyboard:false,title:c.label});
+      mk.bindPopup(camPopupHTML(c),{maxWidth:340,minWidth:300,className:'cam-pop',autoPanPadding:[24,24]});
+      mk.addTo(groups.cameras);
+    });
+    layerCount('c-cameras',j.cams.length);
+    const row=document.querySelector('.lyr[data-layer="cameras"]');
+    if(row)row.title=j.cams.length+' MassDOT cameras. Click one to see what it is pointed at.';
+  }catch(e){layerFail('c-cameras','MassDOT cameras');}
+  finally{camsLoading=false;}
+}
+
+/* One timer for the whole map, because Leaflet closes the previous popup when it
+   opens the next, so there is never more than one picture on screen. Every other
+   popup handler in this file is bound per marker with mk.on. The webcam layer below
+   adds the only other map-level pair, and the two do not collide: each one looks for
+   its own element inside the popup that just opened and returns immediately when it
+   is not there, so a webcam popup runs the webcam half and this half does nothing. */
+map.on('popupopen',e=>{
+  const el=e.popup.getElement&&e.popup.getElement();
+  const img=el&&el.querySelector('.cam-img');
+  if(!img)return;
+  const base=img.getAttribute('data-cam');
+  if(!base)return;
+  const state=el.querySelector('.cam-state');
+  img.onload=()=>{img.classList.remove('cam-dead');if(state)state.textContent='refreshing every '+(CAM_REFRESH_MS/1000)+'s';};
+  img.onerror=()=>{img.classList.add('cam-dead');if(state)state.textContent='no picture right now';};
+  img.src=camBust(base);
+  if(camTimer)clearInterval(camTimer);
+  camTimer=setInterval(()=>{
+    /* Leaflet takes the popup out of the DOM 200ms after close, and on a slow close
+       this can fire inside that gap. isConnected is the cheap guard: an element that
+       has left the document asks for nothing more. */
+    if(!img.isConnected){clearInterval(camTimer);camTimer=null;return;}
+    img.src=camBust(base);
+  },CAM_REFRESH_MS);
+});
+map.on('popupclose',()=>{if(camTimer){clearInterval(camTimer);camTimer=null;}});
+
+/* ===================== LAYER: Live webcams =====================
+   Twelve YouTube streams a human picked, which is a different thing from the 386
+   MassDOT stills above even though both are called cameras. A traffic camera answers
+   "is 93 moving". These answer "what does it look like out there", which is the shot
+   a desk actually wants when the story is weather, or the harbour, or a crowd.
+   Every decision about the twelve lives in app/webcams.js so it can be tested without
+   a browser: which cameras exist, where they sit, which three share a rooftop and how
+   far apart to draw them, and what a YouTube embed url looks like. What is left here
+   is drawing and the iframe lifecycle.
+   The whole block is guarded on window.BCCWebcams. If that script ever 404s the way
+   all five of them did once, the layer draws nothing and the row says so, rather than
+   throwing partway through init and taking the outage layer down with it. */
+function wcIcon(){
+  return L.divIcon({className:'wc-ico',iconSize:[18,18],iconAnchor:[9,9],
+    html:'<svg width="18" height="18" viewBox="0 0 18 18">'
+      +'<rect x="1.1" y="3" width="15.8" height="12" rx="2.6" fill="#f472b6" stroke="#06090f" stroke-width="1.3"/>'
+      +'<path d="M7.1 6.2 L12.3 9 L7.1 11.8 Z" fill="#06090f"/></svg>'});
+}
+
+/* "Museum of Science, southwest" becomes "southwest" when it is sitting in a row
+   of buttons under a popup already titled Museum of Science. Falls back to the
+   whole name when there is no comma to cut on. */
+function wcShort(name){
+  const i=(name||'').lastIndexOf(',');
+  return i>0?name.slice(i+1).trim():(name||'');
+}
+
+function wcPopupHTML(p){
+  const face=BCCWebcams.facing(p.bearing);
+  const sub=[p.place,p.note].filter(Boolean).join(' · ');
+  const sibs=BCCWebcams.siblings(p.cam);
+  return '<div class="pop-t" style="color:#f9a8d4">'+esc(p.name)+'</div>'
+    +(sub?'<div class="pop-r">'+esc(sub)+'</div>':'')
+    /* src is left empty and the real url parked in data-wc, for the same reason
+       .cam-img is: Leaflet builds every popup at bind time. Twelve YouTube players
+       booting because somebody flipped a switch is a different order of expensive
+       than twelve JPEGs, and unlike the JPEGs they would keep pulling video. */
+    +'<div class="wc-box"><div class="wc-wait">connecting</div>'
+    /* referrerpolicy is load-bearing here, and its absence is what put Error 153
+       in every popup. vercel.json and harden() both set Referrer-Policy:
+       no-referrer on every response, so the frame asked youtube.com for a player
+       without telling it which site was doing the embedding, and YouTube refuses
+       that rather than guessing. An element level referrerpolicy overrides the
+       document one for this element alone, and strict-origin-when-cross-origin
+       sends the bare origin, never a path and never a query string, so the
+       hardening everywhere else on the page is untouched.
+
+       Measured on the deployed origin with four frames side by side: with nothing
+       added the player posts onError 153, with origin= alone it still posts
+       onError 153, and with referrerpolicy it posts onReady followed by repeated
+       infoDelivery, which is a player that is running. So this one attribute is
+       the whole fix and origin= is not part of it. */
+    +'<iframe data-wc="'+esc(BCCWebcams.embedSrc(p.cam))+'" title="'+esc(p.name)+'"'
+    +' referrerpolicy="strict-origin-when-cross-origin"'
+    +' allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>'
+    +(face?'<div class="wc-meta"><span class="wc-face">looking '+esc(face)+'</span></div>':'')
+    /* The cameras sharing this spot, as controls that open them. This is the only
+       thing that makes a stacked pin usable at the zoom the map opens at, where
+       the fan is clamped to about nine pixels and all three still draw as one. */
+    +(sibs.length?'<div class="wc-sibs"><span class="wc-sibl">also here</span>'
+      +sibs.map(function(s){return '<button type="button" class="wc-sib" data-wc-go="'+esc(s.id)+'">'
+        +esc(wcShort(s.name))+'</button>';}).join('')+'</div>':'')
+    /* Shown only on the three that were moved, because a pin that is not where the
+       thing is needs to say so. No distance in the sentence: the fan is sized in
+       pixels now, so the metre figure changes under a popup that is already open.
+       The true coordinate does not change, and it is the part that matters. */
+    +(p.offset?'<div class="wc-off">Pin nudged along the view so the rooftop cameras do not stack. Camera is at '+p.trueLat.toFixed(4)+', '+p.trueLon.toFixed(4)+'.</div>':'')
+    +'<div class="pop-src">YouTube &middot; <a class="wc-out" href="'+esc(BCCWebcams.watchURL(p.cam))+'" target="_blank" rel="noopener">watch it there</a></div>';
+}
+
+/* Every webcam marker, keyed by camera id. Two things need it: the sibling
+   buttons, which have to find a marker from an id a click handler hands them,
+   and wcReflow, which has to move the stacked ones when the zoom changes. */
+const wcMarks={};
+
+function loadWebcams(){
+  if(!window.BCCWebcams){layerFail('c-webcams','Live webcams');return;}
+  /* The zoom goes in because the fan is measured in pixels. Without it placed()
+     falls back to a fixed 110 metres, which is fifteen pixels at z14 and under
+     four at the z12 this map opens at, and the three rooftop cameras draw as one
+     unclickable pin. See spreadFor in webcams.js. */
+  const pins=BCCWebcams.placed(map.getZoom());
+  groups.webcams.clearLayers();
+  Object.keys(wcMarks).forEach(k=>{delete wcMarks[k];});
+  pins.forEach(p=>{
+    /* Keyboard focus left on, which is the opposite of the traffic layer directly
+       above. That one turns it off because 306 markers would bury the rest of the
+       page behind 306 tab stops. Twelve is not 306, and twelve streams somebody can
+       reach without a mouse is worth twelve stops. */
+    const mk=L.marker([p.lat,p.lon],{icon:wcIcon(),title:p.name});
+    mk.bindPopup(wcPopupHTML(p),{maxWidth:420,minWidth:360,className:'wc-pop',autoPanPadding:[24,24]});
+    mk.addTo(groups.webcams);
+    wcMarks[p.id]=mk;
+  });
+  layerCount('c-webcams',pins.length);
+  const row=document.querySelector('.lyr[data-layer="webcams"]');
+  if(row){
+    const c=BCCWebcams.counts();
+    row.title=c.total+' live webcams. '+c.boston+' Boston, '+c.ma+' rest of Massachusetts, '
+      +c.nh+' New Hampshire, '+c.me+' Maine. Click one to watch it here.';
+  }
+}
+
+/* The fan is measured in pixels, so it has to be re-measured when the pixels change.
+   This moves the stacked pins on zoom instead of rebuilding the layer, because a
+   rebuild destroys every popup and with it whatever stream a reporter is watching.
+   setLatLng slides a marker under an open popup and Leaflet carries the popup with
+   it. Only the offset pins move; the nine sitting on their true coordinate are
+   skipped, so a popup open on one of those does not so much as flicker. */
+function wcReflow(){
+  if(!window.BCCWebcams)return;
+  BCCWebcams.placed(map.getZoom()).forEach(p=>{
+    if(!p.offset)return;
+    const mk=wcMarks[p.id];
+    if(mk)mk.setLatLng([p.lat,p.lon]);
+  });
+}
+map.on('zoomend',wcReflow);
+
+/* The sibling buttons, delegated off the document rather than bound inside each
+   popup. Leaflet builds popup content from a string and throws the element away on
+   close, so anything bound per popup has to be rebound on every open and unbound on
+   every close, which is a listener leak with a deadline. One listener outlives all
+   of that.
+   openPopup on the target closes whichever popup was open, which fires popupclose,
+   which blanks the frame that was playing. That is the wanted behaviour: clicking
+   through the three rooftop cameras never leaves two players pulling video. */
+document.addEventListener('click',e=>{
+  const b=e.target&&e.target.closest&&e.target.closest('[data-wc-go]');
+  if(!b)return;
+  e.preventDefault();
+  const mk=wcMarks[b.getAttribute('data-wc-go')];
+  if(mk)mk.openPopup();
+});
+
+map.on('popupopen',e=>{
+  const el=e.popup.getElement&&e.popup.getElement();
+  const f=el&&el.querySelector('.wc-box iframe');
+  if(!f)return;
+  const src=f.getAttribute('data-wc');
+  /* getAttribute rather than the src property, because the property resolves to an
+     absolute url and about:blank comes back as about:blank either way. Comparing the
+     two is what makes this idempotent: a second popupopen on a frame already showing
+     this stream does nothing, and a reopen after a close sees about:blank, which
+     never equals src, so it starts a fresh player. */
+  if(!src||f.getAttribute('src')===src)return;
+  const wait=el.querySelector('.wc-wait');
+  /* This line is only ever legible when the player failed to paint. A working embed
+     covers it a second later, and a stream that has ended or turned embedding off
+     leaves a transparent frame with this showing through. */
+  if(wait)f.onload=()=>{wait.textContent='not playing? use the link below';};
+  f.src=src;
+});
+
+/* Blanking the src is the entire reason this handler exists. Leaflet closing a popup
+   detaches its element, and detaching is a DOM move rather than a stop, so a YouTube
+   player keeps pulling video from inside a popup nobody can see. A reporter who
+   clicked four cameras across a shift would be running four streams. about:blank
+   tears the player down. The data-wc attribute is untouched, so reopening rebuilds. */
+map.on('popupclose',e=>{
+  const el=e.popup.getElement&&e.popup.getElement();
+  const f=el&&el.querySelector('.wc-box iframe');
+  if(!f)return;
+  f.onload=null;
+  f.src='about:blank';
+  const wait=el.querySelector('.wc-wait');
+  if(wait)wait.textContent='connecting';
+});
+
+/* ===================== LAYER: Power outages (MEMA) =====================
+   Customers without power by municipality, from MEMA's aggregation of National Grid,
+   Unitil and Eversource, refreshed every 15 minutes.  The cron reduces each town
+   polygon to a centroid and ships only the towns that have somebody out, so on a calm
+   evening this payload is a few hundred bytes.
+   Loaded at boot and every five minutes whether or not the layer is on, which is the
+   opposite of how Pulse behaves and is deliberate: the count in the Layers panel is
+   the only place in this dashboard that would tell a desk a storm is knocking towns
+   out, and a count that only appears after you already suspected something is a count
+   nobody reads.
+   Size is customers out, on a square root so Worcester at twelve thousand does not
+   swallow the six towns around it. Opacity is the share of the town that is dark,
+   which is the number that decides whether this is an outage or an emergency: two
+   thousand out of forty thousand in Fall River is a bad night, two thousand out of
+   two thousand two hundred in Rowe is the whole town. */
+let outDoc=null;
+function outRadius(n){return Math.max(6,Math.min(30,Math.sqrt(Math.max(n,0))*0.75));}
+function outOpacity(pct){const p=Math.max(0,Math.min(60,+pct||0));return .28+(p/60)*.52;}
+function nfmt(n){return (+n||0).toLocaleString('en-US');}
+
+function outPopupHTML(t,rank,total){
+  const share=(t.pct!=null)?nfmt(Math.round(t.pct*10)/10)+'% of the town':'';
+  const of=(t.total!=null)?' of '+nfmt(t.total):'';
+  return '<div class="pop-t" style="color:#c4b5fd">'+esc(t.town)+'</div>'
+    +'<div class="pop-r"><b>'+nfmt(t.out)+'</b>'+of+' customers without power</div>'
+    +((share||t.utility)?'<div class="pop-r">'+[share,esc(t.utility||'')].filter(Boolean).join(' · ')+'</div>':'')
+    +(t.notes?'<div class="pop-r" style="color:var(--text-faint)">'+esc(t.notes)+'</div>':'')
+    +'<div class="pop-src">MEMA &middot; #'+rank+' of '+total+' communities reporting</div>';
+}
+
+async function loadOutages(){
+  try{
+    const j=await fetchJSON('/api/outages');
+    if(!j||!Array.isArray(j.towns))throw new Error('no towns in payload');
+    outDoc=j;
+    groups.outages.clearLayers();
+    j.towns.forEach((t,i)=>{
+      const mk=L.circleMarker([t.lat,t.lon],{radius:outRadius(t.out),color:'#06090f',weight:1.2,
+        fillColor:'#a78bfa',fillOpacity:outOpacity(t.pct)});
+      mk.bindPopup(outPopupHTML(t,i+1,j.towns.length),{maxWidth:300,autoPanPadding:[24,24]});
+      mk.addTo(groups.outages);
+    });
+    layerCount('c-outages',j.towns.length);
+    const row=document.querySelector('.lyr[data-layer="outages"]');
+    if(row)row.title=j.towns.length
+      ?nfmt(j.totalOut)+' customers without power across '+j.towns.length+' communities. Worst hit: '+j.towns[0].town+'.'
+      :'No reported outages in Massachusetts right now.';
+    return true;
+  }catch(e){layerFail('c-outages','MEMA');return false;}
+}
+
 function init(){
+  keyboardSetup();
+  /* Every control the situations column draws is delegated to one listener bound
+     here. Without this line the chips, the pull controls and the three desk
+     buttons are all inert, and a plain click on a card stops panning the map as
+     well, because paintSits deliberately binds nothing per card. */
+  deskSetup();
   tickClock();setInterval(tickClock,1000);
+  /* The header's own poll, on every view. The backend console reads the same
+     file far faster, but only while somebody is looking at it, and the relay
+     going dark is exactly the thing nobody is looking at. */
+  pullPipeline();setInterval(pullPipeline,CONFIG.refresh.health);
   loadVehicles();setInterval(loadVehicles,CONFIG.refresh.vehicles);
   loadAircraft();setInterval(loadAircraft,12000);
   loadQuakes();
@@ -1700,6 +3597,15 @@ function init(){
      so a map left up all night costs what the map costs. */
   setInterval(()=>{ if(viewing('backend')) pollPipeline(); }, CONFIG.refresh.console);
   setInterval(()=>{ if(viewing('stops')) pollStops(); }, CONFIG.refresh.console);
+  /* The Desk and the Story build their own markup out of state this file
+     already holds, so mounting them costs one pass over two empty divs and no
+     network at all. Mounted at boot rather than on first click so the header
+     measurement that sets --dkhdr happens while the header is at its settled
+     width, and so the first tab press paints instead of building. They follow
+     the same only-while-watched rule as the two above; the two of them share
+     one timer because only one of them can be showing. */
+  if(window.BCCDesk) BCCDesk.mount();
+  setInterval(()=>{ if(viewing('desk')||viewing('story')) deskPaint(); }, CONFIG.refresh.console);
   /* The badge is the exception, because a count nobody can see is useless.
      It reads a sixty byte key, not the log. */
   pollStopsCount();setInterval(pollStopsCount,30000);
@@ -1708,6 +3614,11 @@ function init(){
      minutes and not as whenever the payload was last built. */
   setInterval(stTick,1000);
   const sf=document.getElementById('stFind'); if(sf)sf.oninput=()=>renderStops();
+  /* Mounted before the first poll so the very first board the page sees is
+     already being watched. alerts.js records everything on that first poll as
+     seen without making a sound, which is the point: opening the dashboard at
+     nine in the morning should not replay the night. */
+  if(window.BCCAlert)BCCAlert.mount(document.getElementById('alertMount'));
   pollSituations();setInterval(pollSituations,5000);
   load311();setInterval(load311,180000);
   pulseSetup();
@@ -1722,6 +3633,32 @@ function init(){
      behind reality. */
   loadLiveField();
   setInterval(()=>{if(enabled.pulse)loadLiveField();},60000);
+  /* Both of these are pulled whether or not their layer is on, because in both cases
+     the count in the Layers panel is the only thing on screen saying the layer has
+     anything in it at all.
+     Cameras were lazy in the first cut, on the reasoning that 108KB of catalog is
+     wasted on a session that never turns them on. That was the wrong trade and it
+     showed up the same day it shipped: a row reading "Traffic cameras 0" next to an
+     off switch reads as "there are no traffic cameras", which is the opposite of what
+     it means, and the honest reading requires knowing that the layer is lazy. 108KB
+     once per page load buys a number nobody has to interpret. */
+  loadOutages();setInterval(loadOutages,300000);
+  /* No fetch and no interval. The catalog is twelve rows compiled into the page, so
+     this draws once and is done. Nothing about a webcam goes stale except the stream
+     behind it, and that is the iframe's problem rather than this loader's. */
+  loadWebcams();
+  loadCameras();
+  const camRow=document.querySelector('.lyr[data-layer="cameras"]');
+  if(camRow){
+    /* This doubles as the retry. A failed boot load leaves camsDoc null, and
+       loadCameras only short-circuits on a catalog it actually holds, so turning the
+       layer on after a failure sends it back to ask again.
+       The row's own onclick was assigned earlier in the script and runs first, so
+       enabled.cameras is already flipped by the time this fires. Keyboard activation
+       lands here too, because the Enter and Space handler calls row.click() and that
+       dispatches a real click to both listeners in order. */
+    camRow.addEventListener('click',()=>{if(enabled.cameras)loadCameras();});
+  }
 }
 init();
 </script>
