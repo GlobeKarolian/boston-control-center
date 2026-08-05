@@ -46,8 +46,9 @@ reads as a map of the codebase. Nothing is uncommitted.
 a git integration. Production only changes when someone runs `npm run deploy`
 from the laptop. Merging a PR changes nothing that a user can see.
 
-See `HANDOVER.md` beside this file for the traps that look like bugs, the test
-contract, and the current open work.
+See `HANDOVER.md` beside this file for the traps that look like bugs and the
+test contract. `ROADMAP.md` is the order of work, reset by the editor on
+5 August 2026, and it outranks the open-work lists in both other files.
 
 ## House style, and it is not optional
 
