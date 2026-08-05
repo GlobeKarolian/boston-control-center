@@ -3,6 +3,12 @@ import Foundation
 struct Dispatch: Codable, Equatable {
     var src: String
     var city: String
+    /* The municipalities this feed's transmitter actually covers, comma
+       separated. Every town in Massachusetts has a Main Street, so the server
+       cannot place a street name without knowing which towns are in play. A
+       feed that covers forty towns and never names one gets no pin, on
+       purpose, because a pin in the wrong town is worse than an empty map. */
+    var scope: String = ""
     var text: String
     var at: String
     var seq: Int
@@ -49,9 +55,9 @@ final class Relay {
         timer = nil
     }
 
-    func enqueue(src: String, city: String, text: String) {
+    func enqueue(src: String, city: String, scope: String = "", text: String) {
         lock.lock()
-        queue.append(Dispatch(src: src, city: city, text: text,
+        queue.append(Dispatch(src: src, city: city, scope: scope, text: text,
                               at: ISO8601DateFormatter().string(from: Date()), seq: seq))
         seq += 1
         if queue.count > Self.queueMax { queue.removeFirst(queue.count - Self.queueMax) }
@@ -83,8 +89,8 @@ final class Relay {
         var body: [String: Any] = [
             "machine": machine,
             "at": ISO8601DateFormatter().string(from: Date()),
-            "items": items.map { ["src": $0.src, "city": $0.city, "text": $0.text,
-                                  "at": $0.at, "seq": $0.seq] },
+            "items": items.map { ["src": $0.src, "city": $0.city, "scope": $0.scope,
+                                  "text": $0.text, "at": $0.at, "seq": $0.seq] },
         ]
         body["health"] = healthProvider?() ?? []
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }

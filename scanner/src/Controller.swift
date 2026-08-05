@@ -128,7 +128,7 @@ final class Controller: ObservableObject {
             st.state = "live"
             store.statuses[id] = st
             if let s = store.sources.first(where: { $0.id == id }) {
-                relay.enqueue(src: s.slug, city: s.city, text: text)
+                relay.enqueue(src: s.slug, city: s.city, scope: s.coverage.joined(separator: ", "), text: text)
                 store.note("[\(s.label.isEmpty ? s.slug : s.label)] \(text)")
             }
         case .failed(let id, let reason):
