@@ -41,6 +41,10 @@ const ASSETS = {
   'track.js': 'application/javascript; charset=utf-8',
   'webcams.js': 'application/javascript; charset=utf-8',
   'deskviews.js': 'application/javascript; charset=utf-8',
+  /* Shared with the server: the same file that names clips on upload teaches
+     the browser which URLs to trust and what a download should be called. One
+     law, two readers, zero copies. */
+  'clips.js': 'application/javascript; charset=utf-8',
   /* The first stylesheet to come through here, and the quietest thing on the
      list if it goes missing. A script that 404s leaves a global undefined and
      a column empty. A stylesheet that 404s leaves every rule at its browser

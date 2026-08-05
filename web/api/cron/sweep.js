@@ -13,6 +13,24 @@
 
 const { cronAuth, json } = require('../../lib/http');
 const store_io = require('../../lib/store-io');
+const blob = require('../../lib/blob');
+
+/* Audio retention rides this cron rather than owning one, because a schedule
+   in vercel.json is configuration in a second place and the sweep is already
+   the tick that exists whether or not traffic does. Gated to one hour of the
+   day: deleting week-old clips is daily work, and running it every five
+   minutes would spend list operations discovering an empty window 287 times.
+   Module state means a redeploy inside the hour can run it twice, and the
+   second pass finds nothing, which is the cheap kind of wrong. */
+let blobSweptDay = '';
+function blobDue() {
+  const now = new Date();
+  if (now.getUTCHours() !== 8) return false;      // 4am ET, radio's quietest hour
+  const day = now.toISOString().slice(0, 10);
+  if (blobSweptDay === day) return false;
+  blobSweptDay = day;
+  return true;
+}
 
 module.exports = async (req, res) => {
   if (!cronAuth(req)) return json(res, { error: 'unauthorized' }, { status: 401 });
@@ -26,7 +44,15 @@ module.exports = async (req, res) => {
     }, { waitMs: 4000 });
     after = store.snapshotIncidents().length;
     const counts = await store_io.renderOutputs(store, { extractorLabel: 'sweep' });
-    return json(res, { ok: true, before, after, archived: before - after, ...counts, ms: Date.now() - t0 });
+
+    /* Fire and account, never block: the store sweep above is the work this
+       route owes the board, and a slow Blob listing must not make it late.
+       The result lands in the response for whoever reads cron logs, and a
+       failure is a why string, not a thrown error, per blob.js's contract. */
+    let clips;
+    if (blob.enabled() && blobDue()) clips = await blob.sweep();
+
+    return json(res, { ok: true, before, after, archived: before - after, ...counts, ...(clips ? { clips } : {}), ms: Date.now() - t0 });
   } catch (e) {
     // A busy store means ingests are flowing, which means sweep() is already
     // running on every one of them. Skipping this tick costs nothing.

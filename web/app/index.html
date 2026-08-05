@@ -365,6 +365,13 @@
   .cline.hit{color:var(--text);cursor:pointer}.cline.hit:hover{background:rgba(52,211,153,.08)}
   .cline .csrc{color:var(--scanner);font-weight:700}.cline.clear .csrc{color:#6b7280}
   .cline .ctime{color:var(--text-faint);margin-right:8px}.cline .ctag{color:var(--road)}
+  /* The play control sits inside a one-line row that ellipsizes, so it stays
+     text-sized and text-shaped: no border, no box, just a glyph that changes
+     colour while its clip is the one on the air. */
+  .cline .cplay{background:none;border:0;padding:0 3px;margin-right:2px;cursor:pointer;color:var(--scanner);font-size:9px;line-height:inherit;vertical-align:baseline}
+  .cline .cplay.playing{color:var(--road)}
+  .cline .cdl{color:var(--text-faint);text-decoration:none;margin-right:6px;font-size:10px}
+  .cline .cdl:hover{color:var(--text-dim)}
   .inc-wrap{background:transparent;border:0}
   .inc-ico{width:18px;height:18px;position:relative;display:flex;align-items:center;justify-content:center}
   .inc-ico .dot{width:9px;height:9px;border-radius:50%;background:var(--c);border:1.5px solid #06090f;box-shadow:0 0 6px var(--c)}
@@ -1226,6 +1233,7 @@
      if this file is missing. It owns the sound, the desktop notification and
      the title flash, and nothing else on the page. -->
 <script src="./alerts.js"></script>
+<script src="./clips.js"></script>
 <script src="./freshness.js"></script>
 <script src="./statepolice.js"></script>
 <script src="./threadui.js"></script>
@@ -1788,6 +1796,33 @@ async function loadAircraft(){
 }
 
 /* ===================== Live audio console (speech-to-text stream) ===================== */
+
+/* One shared player for the whole console. Two clips at once is radio salad,
+   and a per-row Audio object is a leak in a list that redraws every few
+   seconds. The URL is re-checked against the trusted host here, not just at
+   render, because innerHTML is a copy machine and the attribute it copies
+   from could be older than the check that produced it. */
+let CLIP_PLAYER=null, CLIP_NOW='';
+function clipStop(){
+  if(CLIP_PLAYER){try{CLIP_PLAYER.pause();}catch(e){}}
+  CLIP_NOW='';
+  document.querySelectorAll('.cplay.playing').forEach(b=>{b.classList.remove('playing');b.innerHTML='&#9654;';});
+}
+function clipToggle(btn){
+  const url=btn.dataset.clip||'';
+  if(!(window.BCCClips&&BCCClips.ok(url)))return;
+  if(CLIP_NOW===url){clipStop();return;}
+  clipStop();
+  if(!CLIP_PLAYER){
+    CLIP_PLAYER=new Audio();
+    CLIP_PLAYER.addEventListener('ended',clipStop);
+    CLIP_PLAYER.addEventListener('error',clipStop);
+  }
+  CLIP_PLAYER.src=url; CLIP_NOW=url;
+  btn.classList.add('playing'); btn.innerHTML='&#9632;';
+  CLIP_PLAYER.play().catch(clipStop);
+}
+
 async function pollConsole(){
   let list=[];
   try{const r=await fetch('./transcripts.json',{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j))list=j;}}catch(e){}
@@ -1810,6 +1845,12 @@ async function pollConsole(){
   const keep=roveKeep();
   el.innerHTML=list.map(t=>{
     const hit=!!t.incidentId, cleared=t.tags&&t.tags.clear;
+    /* Only a URL on the one trusted host gets to become a control. A row
+       without a clip renders exactly as it always has, so a fleet that has
+       not learned to upload audio yet costs this list nothing. */
+    const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
+    const audio=clip?('<button class="cplay'+(CLIP_NOW===clip?' playing':'')+'" data-clip="'+esc(clip)+'" tabindex="-1" title="hear the transmission">'+(CLIP_NOW===clip?'&#9632;':'&#9654;')+'</button>'+
+      '<a class="cdl" href="'+esc(BCCClips.downloadUrl(clip))+'" download tabindex="-1" title="download the clip">&#8595;</a>'):'';
     /* Only a .hit line gets the role and the tabindex, because only a .hit line does
        anything when you press it. The rest are transmissions with no call attached
        yet, and putting them in the arrow sequence would make a keyboard walk through
@@ -1819,9 +1860,23 @@ async function pollConsole(){
        and the two cannot come apart if the hit condition here ever changes. */
     return '<div class="cline'+(hit?' hit':'')+(cleared?' clear':'')+'"'+(hit?' role="button" tabindex="-1" data-id="'+esc(t.incidentId)+'"':'')+'>'+
       '<span class="ctime">'+(t.time?new Date(t.time).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'America/New_York'}):'')+'</span>'+
+      audio+
       '<span class="csrc">'+esc(t.source)+'</span> '+(t.role?roleBadge(t.role)+' ':'')+esc(t.text)+(cleared?' <span class="ctag">[clear]</span>':'')+'</div>';
   }).join('');
   el.querySelectorAll('.cline.hit').forEach(l=>{l.onclick=()=>openDetail(l.dataset.id);});
+  /* Wired once, in the capture phase, because a play button often sits inside
+     a .hit row whose own click opens the incident detail. Capture runs outer
+     first, so the button can claim the click before the row hears it. The
+     download link only needs the row not to hijack it. */
+  if(!el._clipsWired){
+    el._clipsWired=1;
+    el.addEventListener('click',e=>{
+      const b=e.target.closest&&e.target.closest('.cplay');
+      if(b){e.stopPropagation();e.preventDefault();clipToggle(b);return;}
+      const a=e.target.closest&&e.target.closest('.cdl');
+      if(a)e.stopPropagation();
+    },true);
+  }
   keep();
 }
 

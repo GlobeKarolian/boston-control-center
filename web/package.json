@@ -12,5 +12,8 @@
     "test:auth": "node test/auth.js",
     "preflight": "node test/preflight.js",
     "sweep": "node tools/sweep.js"
+  },
+  "dependencies": {
+    "@vercel/blob": "^2.6.1"
   }
 }

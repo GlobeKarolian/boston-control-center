@@ -29,6 +29,8 @@ var STEPS = [
   'tools/test-threadui.js',
   'tools/test-track.js',
   'tools/test-webcams.js',
+  'tools/test-clips.js',
+  'tools/test-blob.js',
   'tools/check-html.js',
   'tools/check-header.js',
   'tools/check-vercel.js',

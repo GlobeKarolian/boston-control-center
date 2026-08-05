@@ -234,8 +234,12 @@ function createStore(geocode, extractFn, opt) {
   let seq = 0;
   const iso = d => (d instanceof Date ? d : new Date(d)).toISOString();
 
-  function pushTranscript(source, text, time, incidentId, tags, role) {
-    transcripts.unshift({ id: 't' + (seq++), source, text, time: iso(time), incidentId: incidentId || null, role: role || null, tags: tags || {} });
+  function pushTranscript(source, text, time, incidentId, tags, role, clip) {
+    /* clip is the audio URL this transmission was born with, when the relay
+       managed to upload one. Undefined the rest of the time, and undefined
+       serialises to nothing, so a board full of clipless rows costs zero
+       extra bytes on the wire. */
+    transcripts.unshift({ id: 't' + (seq++), source, text, time: iso(time), incidentId: incidentId || null, role: role || null, tags: tags || {}, clip: clip || undefined });
     if (transcripts.length > 120) transcripts.length = 120;
   }
   function pushEvent(ev) { events.unshift(ev); if (events.length > 150) events.length = 150; }
@@ -321,7 +325,7 @@ function createStore(geocode, extractFn, opt) {
     return inc.heat;
   }
 
-  async function ingest({ source, city, dept, text, time, pre }) {
+  async function ingest({ source, city, dept, text, time, pre, clip }) {
     time = time ? new Date(time) : new Date();
     text = (text || '').trim();
     if (text.length < 4) return null;
@@ -335,7 +339,7 @@ function createStore(geocode, extractFn, opt) {
     // open an incident on a hallucinated landmark.
     if (ex.noise) {
       stats.transmissions++; stats.noise++;
-      pushTranscript(source, text, time, null, { noise: true }, role);
+      pushTranscript(source, text, time, null, { noise: true }, role, clip);
       pushEvent({
         id: 'e' + (seq++), t: iso(time), feed: source, role: role || null,
         transcript: text, by: ex._by || 'noise', units: [], callType: null,
@@ -531,7 +535,7 @@ function createStore(geocode, extractFn, opt) {
       if (ex.isClear) { inc.status = 'cleared'; inc.clearedAt = iso(time); releaseUnits(inc); }
       if (stop) { stop.incidentId = inc.id; inc.stopId = stop.id; }
       scoreHeat(inc);
-      pushTranscript(source, text, time, inc.id, { clear: ex.isClear, onScene: ex.isOnScene, escalation: escalated, stop: stop ? stop.id : undefined }, role);
+      pushTranscript(source, text, time, inc.id, { clear: ex.isClear, onScene: ex.isOnScene, escalation: escalated, stop: stop ? stop.id : undefined }, role, clip);
       recordEvent(ex.isClear ? 'cleared' : 'append', inc);
       return inc;
     }
@@ -586,7 +590,7 @@ function createStore(geocode, extractFn, opt) {
       scoreHeat(inc);
       incidents[id] = inc;
       ex.units.forEach(u => { unitToIncident[u.toLowerCase()] = id; });
-      pushTranscript(source, text, time, id, { isNew: true, escalation: escalated, stop: stop ? stop.id : undefined }, role);
+      pushTranscript(source, text, time, id, { isNew: true, escalation: escalated, stop: stop ? stop.id : undefined }, role, clip);
       recordEvent(ex.isClear ? 'cleared' : 'new', inc);
       return inc;
     }
@@ -595,7 +599,7 @@ function createStore(geocode, extractFn, opt) {
     //    Most of a stop lands here: a plate read back, a name, a records check.
     //    None of it would ever start a scene, and all of it is already on the
     //    stop record by the time this line runs.
-    pushTranscript(source, text, time, null, { clear: ex.isClear, escalation: escalated, stop: stop ? stop.id : undefined }, role);
+    pushTranscript(source, text, time, null, { clear: ex.isClear, escalation: escalated, stop: stop ? stop.id : undefined }, role, clip);
     recordEvent('none', null);
     return null;
   }

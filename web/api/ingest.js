@@ -26,6 +26,7 @@
 // town in it and nobody said which.
 
 const { ingestAuth, json, harden } = require('../lib/http');
+const clips = require('../app/clips.js');
 const { extractBatch, MODEL } = require('../lib/extractor');
 const { geocodeBatch } = require('../lib/geo');
 const store_io = require('../lib/store-io');
@@ -130,6 +131,11 @@ module.exports = async (req, res) => {
       text: i.text.trim().slice(0, MAX_TEXT),
       at: i.at || new Date().toISOString(),
       seq: i.seq,
+      /* The clip URL the relay got from /api/clip a moment before this POST.
+         Checked against the one host this app will serve rather than taken on
+         faith, because this string ends up as the src of an audio element in
+         the newsroom and the pipe it rode in on is not a credential. */
+      clip: (i.clip && clips.ok(i.clip)) ? String(i.clip).slice(0, 500) : undefined,
     }));
 
   const t0 = Date.now();
@@ -238,6 +244,8 @@ module.exports = async (req, res) => {
             dept: it.dept || undefined,   // undefined, so the store derives it
             text: it.text,
             time: it.at,
+            clip: it.clip,
+
             pre: {
               ex: exs[i],
               geo: geos[i] === undefined ? null : geos[i],

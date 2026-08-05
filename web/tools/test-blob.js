@@ -115,7 +115,12 @@ async function main() {
     ok('enabled() is false', !B.enabled());
     ok('and it says why in words a person can read', /clip storage is off/.test(B.reason()));
     ok('naming the missing piece rather than saying "error"',
-      /token|not installed|no put/.test(B.reason()));
+      /* Case-insensitive because the missing piece is spelled two ways: with
+         the module absent the reason says "not installed", and with the module
+         present but no store attached it names BLOB_READ_WRITE_TOKEN, in the
+         capitals the variable actually wears. This suite runs in both worlds
+         depending on whether npm install has happened on this machine. */
+      /token|not installed|no put/i.test(B.reason()));
   }
 
   head('an upload with the feature off answers, rather than failing');
