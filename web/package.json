@@ -5,10 +5,12 @@
   "description": "Live situational awareness map for the Boston Globe newsroom. Serverless half: the Macs transcribe, this serves.",
   "license": "UNLICENSED",
   "scripts": {
-    "test": "node test/preflight.js && node test/e2e.js",
+    "test": "node test/preflight.js && node test/auth.js && node test/e2e.js",
     "dev": "vercel dev",
     "deploy": "vercel --prod",
     "test:bikes": "node test/bikes-live.js",
-    "preflight": "node test/preflight.js"
+    "test:auth": "node test/auth.js",
+    "preflight": "node test/preflight.js",
+    "sweep": "node tools/sweep.js"
   }
 }
