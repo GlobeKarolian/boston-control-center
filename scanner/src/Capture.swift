@@ -5,7 +5,7 @@ enum CaptureEvent {
     case audio(String, Double)              // sourceID, peak 0...1
     case segment(String)
     case gated(String)
-    case text(String, String)               // sourceID, transcript
+    case text(String, String, Data?)        // sourceID, transcript, m4a clip
     case failed(String, String)             // sourceID, human readable reason
     case log(String)
     case timing(String, Double, Double)     // sourceID, audio seconds, wall seconds
@@ -428,13 +428,34 @@ private extension Capture {
 
         let text = Capture.clean(r.out)
         if text.isEmpty { emit(.gated(s.id)); return }
-        emit(.text(s.id, text))
+        /* The clip rides the same event as its words. The WAV is still on
+           disk here, one line above its deferred delete, and this is the
+           last moment anything holds both the audio and the knowledge that
+           it said something worth keeping. Encoding failure hands up nil,
+           and nil costs the newsroom a play button, not a transmission. */
+        emit(.text(s.id, text, Capture.encodeClip(wav)))
     }
 }
 
 // MARK: - small helpers
 
 extension Capture {
+
+    /* WAV to AAC in an m4a container, via afconvert, which ships on every Mac
+       that has ever existed and needs no bundling. 48kbps on 16kHz mono radio
+       is transparent; a fifteen second transmission comes out near 90KB,
+       which is a tenth of the server's cap. The floor guard rejects the
+       header-only file a failed convert leaves behind, and the ceiling guard
+       means a runaway segment gets no clip rather than a refused upload. */
+    static func encodeClip(_ wav: URL) -> Data? {
+        let out = wav.deletingPathExtension().appendingPathExtension("m4a")
+        defer { try? FileManager.default.removeItem(at: out) }
+        let r = run("/usr/bin/afconvert",
+                    ["-f", "m4af", "-d", "aac", "-b", "48000", wav.path, out.path])
+        guard r.code == 0, let d = try? Data(contentsOf: out),
+              d.count > 800, d.count <= 1_000_000 else { return nil }
+        return d
+    }
 
     /* stderr goes to the void on purpose. Whisper narrates its whole startup
        there, and a pipe nobody drains is a pipe that eventually deadlocks. */

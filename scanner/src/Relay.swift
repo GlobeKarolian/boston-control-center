@@ -9,6 +9,9 @@ struct Dispatch: Codable, Equatable {
        feed that covers forty towns and never names one gets no pin, on
        purpose, because a pin in the wrong town is worse than an empty map. */
     var scope: String = ""
+    /* The URL /api/clip answered with, when it did. Optional and last, so a
+       queue persisted by an older build decodes cleanly into this shape. */
+    var clip: String? = nil
     var text: String
     var at: String
     var seq: Int
@@ -55,15 +58,60 @@ final class Relay {
         timer = nil
     }
 
-    func enqueue(src: String, city: String, scope: String = "", text: String) {
+    func enqueue(src: String, city: String, scope: String = "", text: String, clip: Data? = nil) {
+        let at = ISO8601DateFormatter().string(from: Date())
+        /* The clip goes up before its words go on the queue, because the
+           transmission record is born on the server with its clip URL or
+           without one, and there is no attach-later. The words never wait
+           long: eight seconds is the worst case, and only when the clip
+           store is limping while the dashboard is fine. When the dashboard
+           itself is unreachable the relay is already backing off, and paying
+           the upload tax per clip on top of that would just delay the queue
+           it is trying to drain, so deep backoff skips clips entirely. */
+        if let clip, backoff < 60 {
+            uploadClip(clip, src: src, at: at) { [weak self] url in
+                self?.append(src: src, city: city, scope: scope, text: text, at: at, clip: url)
+            }
+        } else {
+            append(src: src, city: city, scope: scope, text: text, at: at, clip: nil)
+        }
+    }
+
+    private func append(src: String, city: String, scope: String, text: String, at: String, clip: String?) {
         lock.lock()
-        queue.append(Dispatch(src: src, city: city, scope: scope, text: text,
-                              at: ISO8601DateFormatter().string(from: Date()), seq: seq))
+        queue.append(Dispatch(src: src, city: city, scope: scope, clip: clip, text: text,
+                              at: at, seq: seq))
         seq += 1
         if queue.count > Self.queueMax { queue.removeFirst(queue.count - Self.queueMax) }
         let depth = queue.count
         lock.unlock()
         DispatchQueue.main.async { [weak self] in self?.onState?("queued", depth) }
+    }
+
+    /* One clip, one POST, one answer. Anything other than a 2xx with a URL in
+       it resolves to nil, and nil means the transmission ships without audio.
+       No retries: the audio is fifteen seconds old and its words are waiting
+       on this callback, so a second attempt buys little and costs freshness. */
+    private func uploadClip(_ data: Data, src: String, at: String, done: @escaping (String?) -> Void) {
+        guard var url = URL(string: endpoint), !token.isEmpty else { done(nil); return }
+        url.appendPathComponent("api")
+        url.appendPathComponent("clip")
+        var req = URLRequest(url: url)
+        req.httpMethod = "POST"
+        req.timeoutInterval = 8
+        req.setValue("audio/mp4", forHTTPHeaderField: "content-type")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "authorization")
+        req.setValue(machine, forHTTPHeaderField: "x-bcc-machine")
+        req.setValue(src, forHTTPHeaderField: "x-bcc-src")
+        req.setValue(at, forHTTPHeaderField: "x-bcc-at")
+        req.httpBody = data
+        URLSession.shared.dataTask(with: req) { body, resp, err in
+            let code = (resp as? HTTPURLResponse)?.statusCode ?? 0
+            guard err == nil, (200 ..< 300).contains(code), let body,
+                  let obj = try? JSONSerialization.jsonObject(with: body) as? [String: Any],
+                  let u = obj["url"] as? String, !u.isEmpty else { done(nil); return }
+            done(u)
+        }.resume()
     }
 
     private func tick() {
@@ -89,8 +137,12 @@ final class Relay {
         var body: [String: Any] = [
             "machine": machine,
             "at": ISO8601DateFormatter().string(from: Date()),
-            "items": items.map { ["src": $0.src, "city": $0.city, "scope": $0.scope,
-                                  "text": $0.text, "at": $0.at, "seq": $0.seq] },
+            "items": items.map { item -> [String: Any] in
+                var d: [String: Any] = ["src": item.src, "city": item.city, "scope": item.scope,
+                                        "text": item.text, "at": item.at, "seq": item.seq]
+                if let c = item.clip { d["clip"] = c }
+                return d
+            },
         ]
         body["health"] = healthProvider?() ?? []
         guard let data = try? JSONSerialization.data(withJSONObject: body) else { return }

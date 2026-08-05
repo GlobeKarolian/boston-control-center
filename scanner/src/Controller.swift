@@ -119,7 +119,7 @@ final class Controller: ObservableObject {
             store.statuses[id, default: SourceStatus()].segments += 1
         case .gated(let id):
             store.statuses[id, default: SourceStatus()].gated += 1
-        case .text(let id, let text):
+        case .text(let id, let text, let clip):
             var st = store.statuses[id] ?? SourceStatus()
             st.clips += 1
             st.lastText = text
@@ -128,7 +128,7 @@ final class Controller: ObservableObject {
             st.state = "live"
             store.statuses[id] = st
             if let s = store.sources.first(where: { $0.id == id }) {
-                relay.enqueue(src: s.slug, city: s.city, scope: s.coverage.joined(separator: ", "), text: text)
+                relay.enqueue(src: s.slug, city: s.city, scope: s.coverage.joined(separator: ", "), text: text, clip: clip)
                 store.note("[\(s.label.isEmpty ? s.slug : s.label)] \(text)")
             }
         case .failed(let id, let reason):
