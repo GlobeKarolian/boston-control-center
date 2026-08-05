@@ -29,9 +29,47 @@ const { ingestAuth, json, harden } = require('../lib/http');
 const { extractBatch, MODEL } = require('../lib/extractor');
 const { geocodeBatch } = require('../lib/geo');
 const store_io = require('../lib/store-io');
+const threat = require('../lib/threat');
+const baseline = require('../lib/baseline');
 
 const MAX_ITEMS = 200;
 const MAX_TEXT = 4000;
+
+/* ---------------------------------------------------------------- quiet POSTs
+
+   A Mac with nothing to say still POSTs every two seconds, and until now that
+   heartbeat cost seven Redis commands: one HSET for health, one GET to hydrate
+   the store, and five SETs to re-render output keys whose contents had not
+   changed. One idle machine therefore burned about 302,000 commands a day
+   saying nothing, which is the entire Upstash free month in roughly forty
+   hours. That is how this store ran out of requests.
+
+   The two clocks below are the fix. Neither one drops information; both stop
+   paying for the same information twice.
+
+   Module scope is deliberate. A warm Vercel instance keeps these across
+   invocations, and a cold one starts at zero, which means a fresh instance
+   always writes and always renders on its first POST. Several instances in
+   parallel therefore render a little more often than one would, and the
+   failure mode of the whole mechanism is doing the old thing. There is no
+   state here that can go stale in a way that loses a transmission, because a
+   POST that actually carries items never consults these clocks at all.
+
+   HEALTH_MIN_MS has to stay comfortably under store-io's OFFLINE_AFTER_MS of
+   120s, because a feed is called offline on the age of its last health write.
+   Writing at least every 45s keeps that judgement honest with a wide margin;
+   anything approaching 120s would start reporting live feeds as dead. */
+const HEALTH_MIN_MS = 45000;
+const RENDER_MIN_MS = 30000;
+let lastHealthSig = null, lastHealthAt = 0, lastRenderAt = 0;
+
+// Only the fields that change what a reader sees. A record whose only
+// difference is its own timestamp is not a change worth a write.
+function healthSig(records) {
+  if (!Array.isArray(records) || !records.length) return '';
+  return records.map(r => [r && r.id, r && r.state, r && r.status, r && r.error, r && r.up]
+    .map(v => (v === undefined || v === null) ? '' : String(v)).join('~')).sort().join('|');
+}
 
 function parseBody(req) {
   const b = req.body;
@@ -100,9 +138,24 @@ module.exports = async (req, res) => {
   try {
     // Health first: renderOutputs reads the health hash, so writing it now
     // means this POST's own feed status shows up in the same render.
-    const healthWrite = store_io.putHealth(machine, health).catch(e => {
-      warnings.push('health: ' + String(e.message || e).slice(0, 120));
-    });
+    //
+    // Gated on having something new to say. A changed record is written at
+    // once, an unchanged one at least every HEALTH_MIN_MS so the offline
+    // detector still has a fresh timestamp to judge on. `healthNew` is carried
+    // down to the heartbeat branch below, because a feed that just went down
+    // is exactly the case where a re-render must not wait on a clock.
+    const sig = healthSig(health);
+    const nowMs = Date.now();
+    const healthNew = sig !== lastHealthSig;
+    const healthWrite = (health.length && (healthNew || nowMs - lastHealthAt > HEALTH_MIN_MS))
+      ? (lastHealthSig = sig, lastHealthAt = nowMs,
+         store_io.putHealth(machine, health).catch(e => {
+           // Roll back so the next POST retries rather than trusting a write
+           // that never landed and going quiet for another 45 seconds.
+           lastHealthAt = 0;
+           warnings.push('health: ' + String(e.message || e).slice(0, 120));
+         }))
+      : Promise.resolve();
 
     const fresh = await store_io.claimNew(machine, items);
     const duplicates = items.length - fresh.length;
@@ -112,6 +165,24 @@ module.exports = async (req, res) => {
       // status changes reach the dashboard, but do not take the write lock:
       // nothing is changing and a heartbeat must never block a real ingest.
       await healthWrite;
+
+      /* The re-render is what the six of those seven commands were for, and
+         it is worth doing only when the render would come out different.
+         Nothing in the store has changed on this path by definition, so the
+         only input that can differ is the health hash, and a health change
+         renders immediately. Otherwise once every RENDER_MIN_MS is enough to
+         keep the relative timestamps on the page from drifting.
+
+         A quiet heartbeat now costs nothing at all: no read, no write, no
+         command. The agent still gets its 200 and still learns nothing is
+         wrong, which is all a heartbeat was ever asking for. */
+      if (!healthNew && nowMs - lastRenderAt < RENDER_MIN_MS) {
+        return json(res, {
+          ok: true, machine, accepted: 0, duplicates, quiet: true,
+          ms: Date.now() - t0, warnings,
+        });
+      }
+      lastRenderAt = nowMs;
       const store = await store_io.loadStore();
       const counts = await store_io.renderOutputs(store, { extractorLabel: labelFor('none') });
       return json(res, {
@@ -136,6 +207,23 @@ module.exports = async (req, res) => {
       ex: exs[i], city: it.city, towns: it.towns, text: it.text,
     })));
 
+    // Severity and category, straight off the raw transcript. Pure regex, so
+    // it costs microseconds and, unlike the model, cannot invent a fact that
+    // was never said. Computed here rather than inside the store because the
+    // same assessment feeds two consumers: the incident record, which uses it
+    // for scene escalation, and the hourly baseline, which needs a category on
+    // every transmission including the 70% the model leaves unlabelled.
+    const threats = fresh.map((it, i) => threat.assess({
+      text: it.text,
+      units: exs[i] && exs[i].units,
+    }));
+
+    // Deliberately not awaited here. The baseline is a background statistic
+    // and must never be the reason a transmission fails to reach the map.
+    const counted = baseline
+      .observe(fresh.map((it, i) => ({ feed: it.src, category: threats[i].category, at: it.at })))
+      .catch(e => { warnings.push('baseline: ' + String(e.message || e).slice(0, 120)); });
+
     await healthWrite;
 
     // ---- inside the lock: pure computation over pre-resolved inputs ------
@@ -150,7 +238,11 @@ module.exports = async (req, res) => {
             dept: it.dept || undefined,   // undefined, so the store derives it
             text: it.text,
             time: it.at,
-            pre: { ex: exs[i], geo: geos[i] === undefined ? null : geos[i] },
+            pre: {
+              ex: exs[i],
+              geo: geos[i] === undefined ? null : geos[i],
+              threat: threats[i],
+            },
           });
           if (inc) applied.push(inc.id);
         } catch (e) {
@@ -162,7 +254,17 @@ module.exports = async (req, res) => {
       }
     });
 
+    // A real ingest always renders, and resets the heartbeat clock along with
+    // it. Without this line the next quiet POST could render again 30 seconds
+    // after a render that had just happened for a better reason.
+    lastRenderAt = Date.now();
     const counts = await store_io.renderOutputs(store, { extractorLabel: labelFor(by) });
+
+    // Collected now rather than left dangling. A serverless function stops
+    // executing the moment it returns, so an un-awaited KV write is a write
+    // that may simply never land. It ran in parallel with the store work
+    // above, so this costs nothing in the normal case.
+    await counted;
 
     return json(res, {
       ok: true,

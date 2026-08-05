@@ -21,7 +21,7 @@ const kv = require('../lib/kv');
 const { K } = require('../lib/store-io');
 
 module.exports = async (req, res) => {
-  if (!requireRead(req, res)) return;
+  if (!(await requireRead(req, res))) return;
   const fallbacks = ['[]', '[]', '{}', '[]'];
   let vals = fallbacks;
   let error = null;

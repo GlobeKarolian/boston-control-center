@@ -35,7 +35,7 @@ const kv = require('../lib/kv');
 const pulse = require('../activity/pulse.js');
 
 module.exports = async (req, res) => {
-  if (!requireRead(req, res)) return;
+  if (!(await requireRead(req, res))) return;
 
   let metaStr, venuesStr;
   try {
