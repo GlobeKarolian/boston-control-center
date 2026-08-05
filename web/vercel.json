@@ -30,8 +30,6 @@
     "api/cron/sweep.js": { "maxDuration": 30 },
     "api/cron/baseline.js": { "maxDuration": 60 },
     "api/pulse.js": { "maxDuration": 15 },
-    "api/cron/activity.js": { "maxDuration": 60 },
-    "api/cron/livefield.js": { "maxDuration": 300 },
     "api/cron/pulse.js": { "maxDuration": 800 },
     "api/cron/cameras.js": { "maxDuration": 60 },
     "api/cron/outages.js": { "maxDuration": 30 },
@@ -41,9 +39,7 @@
   "crons": [
     { "path": "/api/cron/analyst", "schedule": "* * * * *" },
     { "path": "/api/cron/sweep", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/activity", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/baseline", "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/livefield", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/pulse", "schedule": "0 */3 * * *" },
     { "path": "/api/cron/cameras", "schedule": "0 */6 * * *" },
     { "path": "/api/cron/outages", "schedule": "*/15 * * * *" }

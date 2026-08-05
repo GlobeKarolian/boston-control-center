@@ -133,9 +133,9 @@
   /* The height cap added above is what keeps this panel off the zoom control on a
      short window, but the rule it was written into ended in overflow:hidden, so
      capping the height did not make the panel scroll, it made it swallow the last
-     switches outright. On a 700px window that was Movement, the live one. Same
-     thumb and same resting edge as the other four panels, so a row cut in half
-     reads as a row cut in half here too. */
+     switches outright. On a 700px window that was the bottom rows of this panel.
+     Same thumb and same resting edge as the other four panels, so a row cut in
+     half reads as a row cut in half here too. */
   .layers::-webkit-scrollbar{width:8px}.layers::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
   .layers::-webkit-scrollbar-thumb:hover{background:#4d5b78}
   .layers{background-repeat:no-repeat;
@@ -898,10 +898,10 @@
        and 81px in the right, the 1px being the divider, against 102px when there was
        one column. Measured against that: Traffic, Quakes and Choppers ellipsize,
        where only Choppers did before. All three keep the word that identifies them.
-       Pulse (typical) survives whole at exactly 81px, and Movement (live) spells
-       itself out on the full-width last row, which is the one worth having, because
-       those two are the pair you have to be able to tell apart. Three clipped names
-       beats three rows that are not there. */
+       Pulse (typical) survives whole at exactly 81px. The Movement (live) row this
+       math once shared a panel with left in the 5 August reset, so the row counts
+       above run one high; the argument stands, but re-measure before leaning on any
+       single number. Three clipped names beats three rows that are not there. */
     .lyr{padding:8px 9px;gap:6px;font-size:11.5px;overflow:hidden}
     .lyr .lname{min-width:0}
     .lyr .lcount{min-width:22px}
@@ -1129,7 +1129,6 @@
     <div class="lyr on" data-layer="choppers"><span class="ldot" style="background:#ffd23f"></span><span class="lname">Choppers (ADS-B)</span><span class="lcount" id="c-choppers">0</span><span class="sw"></span></div>
     <div class="lyr" data-layer="civic311"><span class="ldot" style="background:#38bdf8"></span><span class="lname">311 requests</span><span class="lcount" id="c-311">0</span><span class="sw"></span></div>
     <div class="lyr" data-layer="pulse"><span class="ldot" style="background:#f97316"></span><span class="lname">Pulse (typical)</span><span class="lcount" id="c-pulse">0</span><span class="sw"></span></div>
-    <div class="lyr on" data-layer="flow"><span class="ldot" style="background:#22d3ee"></span><span class="lname">Movement (live)</span><span class="lcount" id="c-flow">0</span><span class="sw"></span></div>
     <div class="lyr" data-layer="cameras"><span class="ldot" style="background:#94a3b8"></span><span class="lname">Traffic cameras</span><span class="lcount" id="c-cameras">0</span><span class="sw"></span></div>
     <div class="lyr" data-layer="outages"><span class="ldot" style="background:#a78bfa"></span><span class="lname">Power outages</span><span class="lcount" id="c-outages">0</span><span class="sw"></span></div>
     <div class="lyr" data-layer="webcams"><span class="ldot" style="background:#f472b6"></span><span class="lname">Live webcams</span><span class="lcount" id="c-webcams">0</span><span class="sw"></span></div>
@@ -1285,11 +1284,11 @@ function layerCount(elId,n){
   t.el.textContent=n;
   if(!t.row||!t.row.classList.contains('failed'))return;
   t.row.classList.remove('failed');
-  /* Pulse and Movement write their own explanatory titles into these rows, so what
-     was there is put back rather than removed. Neither of them comes through here
-     today. The cost of being careful is two lines, and the cost of not being careful
-     is a row that silently loses its description the first time its feed hiccups,
-     which is not something anyone would catch for months. */
+  /* Pulse writes its own explanatory title into its row, so what was there is put
+     back rather than removed. It does not come through here today. The cost of
+     being careful is two lines, and the cost of not being careful is a row that
+     silently loses its description the first time its feed hiccups, which is not
+     something anyone would catch for months. */
   const was=t.row.getAttribute('data-title-was');
   if(was!==null){t.row.title=was;t.row.removeAttribute('data-title-was');}
   else t.row.removeAttribute('title');
@@ -1343,7 +1342,7 @@ window.baseMapTheme=function(t){
   baseLayer.setUrl(BASE_TILES[want]);
 };
 
-const groups={traffic:L.layerGroup(),transit:L.layerGroup(),scanner:L.layerGroup(),alerts:L.layerGroup(),quakes:L.layerGroup(),choppers:L.layerGroup(),civic311:L.layerGroup(),pulse:L.layerGroup(),flow:L.layerGroup(),cameras:L.layerGroup(),outages:L.layerGroup(),webcams:L.layerGroup()};
+const groups={traffic:L.layerGroup(),transit:L.layerGroup(),scanner:L.layerGroup(),alerts:L.layerGroup(),quakes:L.layerGroup(),choppers:L.layerGroup(),civic311:L.layerGroup(),pulse:L.layerGroup(),cameras:L.layerGroup(),outages:L.layerGroup(),webcams:L.layerGroup()};
 /* Cameras and outages both start off. 306 camera pins over the metro would bury
    the incidents this map exists to show, and the outage layer is a storm tool
    that is empty most nights. Both announce themselves through the count in the
@@ -1355,7 +1354,7 @@ const groups={traffic:L.layerGroup(),transit:L.layerGroup(),scanner:L.layerGroup
    386 and because eight of the twelve sit outside the default view anyway. The
    argument for shipping cameras off does not transfer: it was about burying the
    incidents, and twelve cannot. */
-const enabled={traffic:true,transit:true,scanner:true,alerts:true,quakes:false,choppers:true,civic311:false,pulse:false,flow:true,cameras:false,outages:false,webcams:true};
+const enabled={traffic:true,transit:true,scanner:true,alerts:true,quakes:false,choppers:true,civic311:false,pulse:false,cameras:false,outages:false,webcams:true};
 Object.keys(groups).forEach(k=>{if(enabled[k])groups[k].addTo(map);});
 const markerIndex={}; // feed id -> marker
 
@@ -2738,7 +2737,7 @@ async function refreshCivic(){
    layer shows on a game night is the bars and restaurants AROUND the ballpark, not
    the ballpark. See PULSE-LANDMARKS.md.
 */
-let pulseDoc=null,pulseHeat=null,pulseHour=new Date().getHours(),pulseTimer=null,pulseLoading=false,flowDoc=null,
+let pulseDoc=null,pulseHeat=null,pulseHour=new Date().getHours(),pulseTimer=null,pulseLoading=false,
     pulseMax=1,pulsePeakHour=null,pulseScaleZoom=null;
 const PB={bar:null,slider:null,hour:null,play:null,now:null,note:null};
 const DAYNAMES=['Monday','Tuesday','Wednesday','Thursday','Friday','Saturday','Sunday'];
@@ -2771,99 +2770,23 @@ function radiusForZoom(z){
   if(z<=10)return 10; if(z<=11)return 13; if(z<=12)return 16;
   if(z<=13)return 20; if(z<=14)return 26; if(z<=15)return 34; return 44;
 }
-/* ---- the live correction field ----
-   The heatmap underneath is a weekly forecast, which is why this app had to
-   admit in its own footer that a game night and a quiet night look identical.
-   These next few functions are what fixes that.
-
-   We measured the ceiling before designing against it. BestTime has no bulk live
-   endpoint, and of the venues open at the time only about 8% report live
-   busyness at all: three around Fenway, one near the Garden, none in the Seaport
-   or Harvard Square. That is nowhere near enough points to draw a live surface,
-   so we do not pretend to. Instead each live reading becomes an ANCHOR that
-   bends the forecast surface near it, and the bend decays to nothing over
-   ANCHOR radius metres. Beyond that, what you are looking at is still a
-   forecast, and the readout says so.
-
-   Bluebikes docks are the second anchor source and the denser one: 564 docks
-   inside the map box at a median 272m spacing, all reporting inside 60 seconds.
-   A dock is also the only sensor here that measures movement rather than
-   presence, which is exactly the Fenway-lets-out signal. They are weighted
-   lighter per point because nine riders is not nine hundred people, but the
-   direction they encode is measured fact. */
-let liveField=null,liveGrid=null;
-const LIVE_CELL_M=250;
-
-function buildLiveGrid(doc){
-  // Bucket anchors into a coarse grid so a 3,400 venue redraw does not do
-  // 3,400 x N distance checks on every frame.
-  if(!doc||!Array.isArray(doc.anchors)||!doc.anchors.length){liveGrid=null;return;}
-  const g=new Map(),R=doc.radiusM||500;
-  const cell=a=>Math.floor(a.lat*111320/LIVE_CELL_M)+','+Math.floor(a.lng*111320*Math.cos(a.lat*Math.PI/180)/LIVE_CELL_M);
-  for(const a of doc.anchors){
-    if(typeof a.lat!=='number'||typeof a.lng!=='number')continue;
-    const k=cell(a);if(!g.has(k))g.set(k,[]);g.get(k).push(a);
-  }
-  liveGrid={g,R,span:Math.ceil(R/LIVE_CELL_M)};
-}
-
-/* Inverse-distance blend toward 1.0. An anchor right on top of a venue applies
-   its full multiplier; one at the edge of its radius applies none. Weight is
-   per-source, so a venue reading outranks a single dock delta. */
-function liveMultAt(lat,lng){
-  if(!liveGrid)return 1;
-  const {g,R,span}=liveGrid;
-  const cy=Math.floor(lat*111320/LIVE_CELL_M);
-  const cx=Math.floor(lng*111320*Math.cos(lat*Math.PI/180)/LIVE_CELL_M);
-  let num=0,den=0;
-  for(let dy=-span;dy<=span;dy++)for(let dx=-span;dx<=span;dx++){
-    const bucket=g.get((cy+dy)+','+(cx+dx));
-    if(!bucket)continue;
-    for(const a of bucket){
-      const y=(a.lat-lat)*111320,x=(a.lng-lng)*111320*Math.cos(lat*Math.PI/180);
-      const d=Math.hypot(x,y);
-      if(d>=R)continue;
-      const w=(1-d/R)*(a.weight||1);
-      num+=w*(a.mult||1);den+=w;
-    }
-  }
-  if(den<=0)return 1;
-  const m=(num+1*Math.max(0,1-den))/(den+Math.max(0,1-den));   // decay toward 1.0 on thin evidence
-  return Math.max(0.25,Math.min(3,m));
-}
+/* Movement and its live correction field left the tool on 5 August 2026, by
+   editorial order in the reset. Pulse is a forecast, says so in its readout,
+   and no longer pretends eight percent live coverage is a live surface. */
 
 function pointsForHour(h){
   const pts=[];
-  // Only correct the CURRENT hour. Scrubbing to 4pm and applying a live reading
-  // taken at 1am would be a straightforward lie about the past.
-  const applyLive=liveGrid&&h===new Date().getHours();
   for(const v of pulseDoc.venues){
     if(!v||!v.hours||typeof v.lat!=='number'||typeof v.lng!=='number')continue;
     const busy=+v.hours[h];
     if(!(busy>0))continue;
-    let i=(busy/100)*(v._w||venueWeight(v));
-    if(applyLive)i*=liveMultAt(v.lat,v.lng);
+    const i=(busy/100)*(v._w||venueWeight(v));
     if(i<0.015)continue;   // near-dead venues, dropped to keep the point count down
     pts.push([v.lat,v.lng,i]);
   }
   return pts;
 }
 
-async function loadLiveField(){
-  try{
-    const r=await fetch('/api/livefield',{cache:'no-store'});
-    if(!r.ok)return;
-    const j=await r.json();
-    if(!j||!Array.isArray(j.anchors))return;
-    liveField=j;buildLiveGrid(j);
-    if(pulseDoc){
-      // Rescale as well as redraw. The scale is anchored to the peak hour, and
-      // if live pushes the current hour above that peak the whole city clamps
-      // to white and the map stops ranking anything.
-      pulsePeakHour=null;refreshScale();renderPulse();pulseMeta();
-    }
-  }catch(e){/* stale field is a degraded map, not a broken one */}
-}
 function peakHourOfDay(){
   let bestH=12,best=-1;
   for(let h=0;h<24;h++){
@@ -2951,30 +2874,11 @@ function pulseMeta(){
   meta.innerHTML=s+liveMeta();
 }
 
-/* The one place the map admits how much of what you are looking at is measured.
-   Anyone reading this bar should be able to tell, without asking, whether the
-   bright patch they are pointing at is a live reading or a historical average. */
+/* The one place the map admits what you are looking at. Since the reset took
+   the live correction field out, that is one sentence with no branches: this
+   layer is a historical average, whatever hour the scrubber is on. */
 function liveMeta(){
-  const h=((pulseHour%24)+24)%24;
-  if(h!==new Date().getHours()){
-    return ' <b style="color:var(--road)">Scrubbed off the current hour, so live'
-      +' corrections are off and this is pure forecast.</b>';
-  }
-  if(!liveField||!Array.isArray(liveField.anchors)||!liveField.anchors.length){
-    return ' <b style="color:var(--road)">No live readings right now, so this is'
-      +' pure forecast.</b>';
-  }
-  const ageM=Math.round((Date.now()-new Date(liveField.generatedAt||Date.now()).getTime())/60000);
-  const cov=liveField.coverage||{},bt=cov.besttime||{},bk=cov.bikes||{};
-  const parts=[];
-  if(bt.liveAvailable)parts.push(bt.liveAvailable+' venues reporting live');
-  if(bk.anchors)parts.push(bk.anchors+' bike docks moving');
-  let s=' <b style="color:var(--scanner)">Live: '+liveField.anchors.length+' corrections</b>';
-  if(parts.length)s+=' ('+parts.join(', ')+')';
-  s+=ageM>=12?' <b style="color:var(--road)">'+ageM+' min stale.</b>'
-            : ', '+(ageM<=1?'under a minute':ageM+' min')+' old.';
-  if(bk.warmingUp)s+=' Bike flow still warming up.';
-  return s;
+  return ' <b style="color:var(--road)">Typical for this hour, not a live reading.</b>';
 }
 async function loadPulse(force){
   if(pulseLoading||(pulseDoc&&!force))return;   // 1.4MB payload, so fetch on demand, not at boot
@@ -3025,57 +2929,6 @@ function pulseSetup(){
   }
   map.on('zoomend',()=>{if(enabled.pulse&&pulseDoc)renderPulse();});
   syncPulsebar();
-}
-
-/* ---- FLOW: live directional movement ---- */
-function flowPopup(p,win){
-  const n=+p.net||0,mag=Math.abs(n),head=esc(p.name||'Bluebikes dock');
-  if(p.suspect){
-    return '<div class="pop-t">'+head+'</div>'
-      +'<div class="pop-r">'+mag+' bikes moved here in '+win+' min. A clump that size is a rebalancing '
-      +'van, not a crowd, so it is excluded from the rider totals.</div>'
-      +'<div class="pop-src">Bluebikes GBFS &middot; not counted</div>';
-  }
-  return '<div class="pop-t">'+head+'</div>'
-    +'<div class="pop-r"><b>'+mag+'</b> rider'+(mag===1?'':'s')+' '+(n>0?'arrived at':'left from')
-    +' this corner in the last '+win+' minutes.</div>'
-    +'<div class="pop-r" style="color:var(--text-faint)">'+(n>0?'Solid dot: people arriving.':'Hollow dot: people leaving.')+'</div>'
-    +'<div class="pop-src">Bluebikes dock inventory &middot; counted, not estimated</div>';
-}
-function renderFlow(){
-  groups.flow.clearLayers();
-  const cov=flowDoc&&flowDoc.coverage&&flowDoc.coverage.bikes;
-  const pts=(cov&&cov.flowPoints)||[],win=(cov&&cov.windowMin)||0;
-  let shown=0;
-  for(const p of pts){
-    if(!p||typeof p.lat!=='number'||typeof p.lon!=='number')continue;
-    const n=+p.net||0,mag=Math.abs(n);
-    if(!mag)continue;
-    const rad=4+Math.min(9,mag*1.5);
-    let m;
-    if(p.suspect)      m=L.circleMarker([p.lat,p.lon],{radius:rad,color:'#64748b',weight:1.4,fillColor:'#64748b',fillOpacity:.18,dashArray:'2 3'});
-    else if(n>0)       m=L.circleMarker([p.lat,p.lon],{radius:rad,color:'#22d3ee',weight:1.4,fillColor:'#22d3ee',fillOpacity:.78});
-    else               m=L.circleMarker([p.lat,p.lon],{radius:rad,color:'#22d3ee',weight:2.2,fillColor:'#22d3ee',fillOpacity:.08,dashArray:'3 3'});
-    m.bindPopup(flowPopup(p,win));groups.flow.addLayer(m);shown++;
-  }
-  layerCount('c-flow',shown);
-  const row=document.querySelector('.lyr[data-layer="flow"]');
-  if(row){
-    const f=(flowDoc&&flowDoc.summary&&flowDoc.summary.flow)||null;
-    row.title=cov&&cov.warmingUp
-      ? 'Warming up. Needs a few minutes of dock history before it can measure movement.'
-      : f?(f.ridersOut+' riders left and '+f.ridersIn+' arrived across '+shown+' docks in the last '+win+' minutes. Solid dot arriving, hollow dot leaving.')
-         :'Live Bluebikes dock movement.';
-  }
-}
-async function loadActivity(){
-  try{
-    const r=await fetch('/api/activity',{cache:'no-store'});
-    if(!r.ok)throw new Error('HTTP '+r.status);
-    const j=await r.json();
-    if(!j||typeof j!=='object')throw new Error('bad payload');
-    flowDoc=j;renderFlow();
-  }catch(e){/* keep the last good render rather than blanking the map */}
 }
 
 /* ------------------------------ the long lists ------------------------------
@@ -3677,17 +3530,11 @@ function init(){
   pollSituations();setInterval(pollSituations,5000);
   load311();setInterval(load311,180000);
   pulseSetup();
-  loadActivity();setInterval(loadActivity,45000);
+
   // pulse.json is refreshed by the worker every 15 min; only re-pull if the layer is on
   setInterval(()=>{if(enabled.pulse)loadPulse(true);},900000);
   if(enabled.pulse)loadPulse();
-  /* The live correction field. Pulled once at boot regardless of layer state so
-     the coverage line is honest the moment someone turns the layer on, then
-     every 60s while it is on. The daemon rebuilds it every 5 min, so a minute
-     of polling costs 9KB and buys us a field that is never more than one cycle
-     behind reality. */
-  loadLiveField();
-  setInterval(()=>{if(enabled.pulse)loadLiveField();},60000);
+
   /* Both of these are pulled whether or not their layer is on, because in both cases
      the count in the Layers panel is the only thing on screen saying the layer has
      anything in it at all.
