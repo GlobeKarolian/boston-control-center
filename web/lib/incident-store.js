@@ -39,11 +39,37 @@
    its own store fed from the same transmission. */
 const { createStops, deptOf } = require('./stops.js');
 const { read: readSpoken } = require('./spoken.js');
+/* Threat assessment runs per transmission and knows nothing about scenes. The
+   store is where the two meet: a scene keeps the highest tier anyone reached
+   on it, the union of the signals that got it there, and the alarm level,
+   because a fire that goes to three alarms says so once and every later
+   transmission on that scene is about hydrants. */
+const threat = require('./threat.js');
 
 const ADDRESS_MATCH_WINDOW_MS = 120 * 60 * 1000; // correlate to a scene up to 2h old
 const STALE_AUTOCLEAR_MS      = 90 * 60 * 1000;  // no chatter for 90m -> auto-clear
 const ARCHIVE_AFTER_CLEAR_MS  = 3  * 60 * 60 * 1000; // drop 3h after clearing
 const SAME_SCENE_METERS       = 200;             // a city block plus the corner
+
+/* The alerting bar, and the ceiling that makes it safe to have one.
+
+   Heat used to be built entirely out of volume: units, transmissions, and how
+   fast they were arriving. Volume is exactly what a busy routine call looks
+   like, so a three car disturbance with a lot of chatter scored level with a
+   working fire, and the one lever that could tell those apart, the words
+   somebody actually said, was worth twelve points out of a hundred.
+
+   Now volume describes intensity and language describes newsworthiness, and
+   the second governs the first through a ceiling per threat tier. Whatever
+   volume a scene piles up, a scene where nobody has said anything above
+   routine cannot reach the bar. That is a structural guarantee rather than a
+   tuning result, which is what makes the weights safe to tune at all: getting
+   one wrong costs accuracy and cannot cost a false alarm.
+
+   A false alarm in front of a reporter costs far more than a missed one. */
+const HEAT_BAR           = 55;                   // at or above this the desk is told
+const TIER_CEILING       = [50, 62, 80, 100];    // max heat by peak threat tier
+const TYPICAL_SCENE_MINS = 20;                   // past this a scene is running long
 
 const CLEAR_RE   = /\b(clear(ed)?|clearing|in service|back in service|available|resuming patrol|cancel(l?ed)?|call complete|complete|no further|unfounded|returning|all set|scene is clear|all units clear|10-?8)\b/i;
 const ONSCENE_RE = /\b(on scene|arriv(ed|ing)|on location|out at|10-?23|staging)\b/i;
@@ -57,6 +83,32 @@ const FIELD_RE    = /\b(on scene|on location|arriv(ed|ing)|out at|show (?:me|us)
 /* Phrases that mean a routine call just became a story. These are what a
    newsroom would want to be told about, so they are scored, not just logged. */
 const ESCALATION_RE = /\b(working fire|fully involved|second alarm|2nd alarm|third alarm|3rd alarm|multiple alarm|mayday|man down|officer down|firefighter down|shots fired|active shooter|mass casualty|multiple (?:victims|patients)|start (?:me|us) (?:another|a second)|strike (?:a|the) (?:second|third)|heavy smoke|people trapped|entrapment|extricat|evacuat|command post|stage (?:all|additional))\b/i;
+
+/* An alarm level is the fire service's own severity number, said out loud, and
+   it is the only escalation signal on the air that carries a magnitude rather
+   than a yes or no. It is read here rather than in threat.js because a scene
+   accumulates it and a single transmission cannot: the second alarm and the
+   third are struck minutes apart, on lines that mention nothing else. */
+const ALARM_RE  = /\b(second|third|fourth|fifth|2nd|3rd|4th|5th|two|three|four|five|multiple)[- ]?alarm\b/i;
+const ALARM_NEG = /\b(no|not|negative|disregard|cancel(?:l?ed)?|don'?t|do not|hold (?:off|on)|without|never)\b[^.!?]*$/i;
+const ALARM_LEVEL = { second: 2, '2nd': 2, two: 2, multiple: 2, third: 3, '3rd': 3, three: 3, fourth: 4, '4th': 4, four: 4, fifth: 5, '5th': 5, five: 5 };
+function alarmLevel(text) {
+  const t = String(text || '');
+  const m = ALARM_RE.exec(t);
+  if (!m) return 0;
+  // "we do not need a second alarm" is not a second alarm. Same sentence only,
+  // for the same reason the negation window in threat.js is.
+  if (ALARM_NEG.test(t.slice(Math.max(0, m.index - 60), m.index))) return 0;
+  return ALARM_LEVEL[m[1].toLowerCase()] || 0;
+}
+
+/* Set union over small arrays, insertion ordered so the first signal a scene
+   showed stays first when it is rendered. */
+function union(list, add) {
+  const out = Array.isArray(list) ? list.slice() : [];
+  for (const v of add || []) if (v && !out.includes(v)) out.push(v);
+  return out;
+}
 
 function roleFor(text) {
   if (ONSCENE_RE.test(text) || CLEAR_RE.test(text)) return 'field'; // status change = a unit in the field
@@ -191,22 +243,81 @@ function createStore(geocode, extractFn, opt) {
   function releaseUnits(inc) { (inc.units || []).forEach(u => { if (unitToIncident[u.toLowerCase()] === inc.id) delete unitToIncident[u.toLowerCase()]; }); }
 
   /* Heat: how much this scene looks like a story rather than a call.
-     Units on scene and sustained traffic are the two signals that separate a
-     working fire from an alarm that resets itself. Escalation phrases are worth
-     more than either, because a dispatcher saying "working fire" is the ground
-     truth the rest of this is approximating. */
+
+     The shape of this score is the comment on HEAT_BAR at the top of the file;
+     what follows is only the weights. Read that one first.
+
+     Everything that contributed is written into inc.why, because a desk that
+     cannot see why a scene scored 78 has no way to decide whether to believe
+     it, and a score nobody believes gets ignored inside a week. */
   function scoreHeat(inc) {
-    const mins = Math.max(1, (new Date(inc.lastUpdate) - new Date(inc.firstHeard)) / 60000);
+    const first = +new Date(inc.firstHeard);
+    const mins = Math.max(1, (+new Date(inc.lastUpdate) - first) / 60000);
     const rate = inc.timeline.length / mins;                  // transmissions per minute
+    const tier = inc.tier || 0;
+    const why = [];
     let h = 0;
-    h += Math.min(30, (inc.units || []).length * 6);          // a multi-unit response
-    h += Math.min(20, inc.timeline.length * 2);               // sustained chatter
-    h += Math.min(15, Math.round(rate * 6));                  // and how fast it is coming
-    if (inc.priority === 'high') h += 20;
-    h += Math.min(25, (inc.escalations || 0) * 12);           // somebody said the words
-    inc.heat = Math.min(100, h);
-    // Growing fast and already loud. This is the flag worth a newsroom alert.
-    inc.escalating = inc.status === 'active' && inc.heat >= 55 && rate >= 0.8;
+
+    /* Volume: how busy this is. Capped as a block and well under the bar,
+       because every one of these is something a routine call can produce on a
+       Friday night without anything being wrong. */
+    let vol = 0;
+    vol += Math.min(14, Math.max(0, (inc.units || []).length - 1) * 4); // one unit is not a response
+    vol += Math.min(10, inc.timeline.length * 1.5);           // sustained chatter
+    vol += Math.min(6, rate * 4);                             // and how fast it is coming
+    h += Math.min(30, vol);
+    if ((inc.units || []).length > 2) why.push((inc.units || []).length + ' units');
+
+    /* Growth. The initial dispatch sends whatever the call type calls for, all
+       at once, so how many units are on a scene says less than when they got
+       there. What separates a working scene from a busy one is the engine
+       special called four minutes in, so only late arrivals score. */
+    const late = (inc.unitJoins || []).filter(t => t - first > 90000).length;
+    if (late) {
+      h += Math.min(14, late * 5);
+      why.push(late + (late > 1 ? ' units' : ' unit') + ' added after dispatch');
+    }
+
+    /* Two departments correlated to one place means each of them independently
+       decided to be there. Hard to fake and cheap to count. */
+    const depts = (inc.depts || []).length;
+    if (depts > 1) { h += Math.min(12, (depts - 1) * 8); why.push(depts + ' departments'); }
+
+    // The fire service's own severity number, said out loud.
+    if (inc.alarm > 1) { h += Math.min(25, (inc.alarm - 1) * 12); why.push(inc.alarm + ' alarms'); }
+
+    if (mins > TYPICAL_SCENE_MINS) {
+      h += Math.min(10, (mins - TYPICAL_SCENE_MINS) / 6);
+      why.push(Math.round(mins) + ' minutes');
+    }
+
+    /* Language: the highest tier anybody reached on this scene. Hedged evidence
+       is discounted rather than dropped, because "report of shots fired" is
+       worth acting on and is not the same claim as an officer saying it. */
+    const TIER_POINTS = [0, 6, 22, 45];
+    if (tier) {
+      h += TIER_POINTS[tier] * (inc.hedged ? 0.7 : 1);
+      why.push((inc.tierName || 'tier ' + tier) + (inc.hedged ? ' (reported)' : '') +
+        ((inc.signals || []).length ? ': ' + inc.signals.slice(0, 4).join(', ') : ''));
+    }
+    /* A named specialist unit is dispatch's own severity assessment, made by
+       people with more information than this system will ever have. */
+    if ((inc.specialists || []).length) {
+      h += Math.min(10, inc.specialists.length * 6);
+      why.push(inc.specialists.slice(0, 3).join(', ') + ' assigned');
+    }
+    if (inc.escalations) h += Math.min(8, inc.escalations * 4);
+    if (inc.priority === 'high') h += 8;
+
+    const ceiling = TIER_CEILING[tier] === undefined ? 100 : TIER_CEILING[tier];
+    inc.heat = Math.max(0, Math.min(ceiling, Math.round(h)));
+    inc.why = why;
+
+    /* The flag worth an alert, making two different claims. Either somebody
+       said a tier 3 thing on the air, which is a story on one transmission, or
+       the scene is loud and still growing, which is a story because of its
+       shape. A cleared scene is neither. */
+    inc.escalating = inc.status === 'active' && (tier >= 3 || (inc.heat >= HEAT_BAR && rate >= 0.8));
     return inc.heat;
   }
 
@@ -309,6 +420,14 @@ function createStore(geocode, extractFn, opt) {
 
     const escalated = ESCALATION_RE.test(text);
 
+    /* The per-transmission threat read. api/ingest computes this outside the
+       mutex and hands it over on pre.threat, the same way it already does the
+       extraction and the geocode. The fallback is not decoration: the analyst
+       cron, the test harness and corpus replay all drive the store directly
+       and none of them fill pre. */
+    const th = (pre && pre.threat) || threat.assess({ text, units: ex.units });
+    const alarm = alarmLevel(text);
+
     // record a full pipeline trace (audio -> transcript -> extract -> geocode -> incident)
     const recordEvent = (action, incident) => {
       stats.transmissions++;
@@ -324,11 +443,32 @@ function createStore(geocode, extractFn, opt) {
         escalation: escalated || undefined,
         inherited: inherited || undefined,
         hallucinated: ex._hallucinated || undefined,
+        /* What the threat read made of this one line, sitting next to the
+           correlation and the stop, so the "under the hood" tab shows the
+           working out for all three rather than only for the parts that were
+           cheap to show. Labels, for the same reason as on the incident. */
+        threat: {
+          tier: th.tier, tierName: th.tierName, category: th.category,
+          signals: th.signals.length ? th.signals.map(s => s.label) : undefined,
+          units: th.units.length ? th.units.map(u => u.label) : undefined,
+          hedged: th.hedged || undefined,
+          why: th.why || undefined,
+        },
+        alarm: alarm || undefined,
         geo: geo
           ? { ok: true, lat: geo.lat, lon: geo.lon, matched: geo.matched, via: geo.src || null, precision, town: geo.town || null }
           : { ok: false, why: ex.address || ex.street || ex.landmark || ex.crossStreet ? 'no match' : 'nothing to geocode' },
         incident: incident
-          ? { action, id: incident.id, type: incident.type, location: incident.location, status: incident.status, heat: incident.heat, joinedBy }
+          ? {
+              action, id: incident.id, type: incident.type, location: incident.location,
+              status: incident.status, heat: incident.heat, joinedBy,
+              // Why this scene scores what it scores, beside the correlation
+              // that put the transmission on it.
+              tier: incident.tier || 0, tierName: incident.tierName || 'routine',
+              alarm: incident.alarm || undefined,
+              escalating: incident.escalating || undefined,
+              why: incident.why && incident.why.length ? incident.why : undefined,
+            }
           : { action: 'none' },
         // What the stop tracker made of the same line, so the "under the hood"
         // tab shows a stop opening and closing next to the scene correlation
@@ -347,7 +487,29 @@ function createStore(geocode, extractFn, opt) {
       inc.lastUpdate = iso(time);
       if (ex.priority === 'high') inc.priority = 'high';
       if (escalated) inc.escalations = (inc.escalations || 0) + 1;
-      ex.units.forEach(u => { if (!inc.units.includes(u)) inc.units.push(u); unitToIncident[u.toLowerCase()] = inc.id; });
+
+      /* Accumulate the scene's threat picture. Max for the tier and the alarm,
+         because a scene does not get better once somebody has said the words;
+         union for the signals and the specialists, because they arrive one
+         transmission at a time and the desk wants the whole list rather than
+         whatever the last line happened to mention.
+
+         Labels rather than ids, because this list is rendered. threat.js
+         exports SIGNALS for anything that needs to match on identity. */
+      if (th.tier > (inc.tier || 0)) { inc.tier = th.tier; inc.tierName = th.tierName; inc.hedged = !!th.hedged; }
+      else if (th.tier && th.tier === inc.tier && !th.hedged) inc.hedged = false;
+      inc.signals = union(inc.signals, th.signals.map(s => s.label));
+      inc.specialists = union(inc.specialists, th.units.map(u => u.label));
+      if (department) inc.depts = union(inc.depts, [department]);
+      if (alarm > (inc.alarm || 0)) inc.alarm = alarm;
+
+      /* When each unit arrived, not only how many. A scene that pulled its
+         fourth engine six minutes in is a different thing from one dispatched
+         four engines at once, and a count cannot tell those apart. */
+      ex.units.forEach(u => {
+        if (!inc.units.includes(u)) { inc.units.push(u); (inc.unitJoins = inc.unitJoins || []).push(+new Date(time)); }
+        unitToIncident[u.toLowerCase()] = inc.id;
+      });
       if (ex.callType && (!inc.type || inc.type === 'unclassified' || rankOf(ex.callType) > rankOf(inc.type))) {
         if (inc.type && inc.type !== 'unclassified' && inc.type !== ex.callType) {
           // Worth keeping, because "when did this become a working fire" is the
@@ -411,6 +573,13 @@ function createStore(geocode, extractFn, opt) {
         status: ex.isClear ? 'cleared' : 'active', priority: ex.priority, verified: false,
         firstHeard: iso(time), lastUpdate: iso(time), clearedAt: ex.isClear ? iso(time) : null,
         escalations: escalated ? 1 : 0,
+        // The same fields the append branch accumulates, so a scene that never
+        // gets a second transmission still has the shape scoreHeat reads. A
+        // shooting is frequently one transmission and then silence.
+        tier: th.tier, tierName: th.tierName, hedged: th.tier ? !!th.hedged : false,
+        signals: th.signals.map(s => s.label), specialists: th.units.map(u => u.label),
+        depts: department ? [department] : [], alarm,
+        unitJoins: ex.units.map(() => +new Date(time)),
         units: [...ex.units], timeline: [{ t: iso(time), source, text, onScene: ex.isOnScene, clear: ex.isClear, role }],
       };
       if (stop) { stop.incidentId = id; inc.stopId = stop.id; }
@@ -535,4 +704,10 @@ function createStore(geocode, extractFn, opt) {
   };
 }
 
-module.exports = { createStore, extract, roleFor, metersBetween, deptOf, ESCALATION_RE };
+module.exports = {
+  createStore, extract, roleFor, metersBetween, deptOf, ESCALATION_RE,
+  // The alerting bar and the ceiling belong to the score, so anything that
+  // decides whether to tell somebody reads them from here rather than
+  // hard-coding 55 a second time and drifting away from it.
+  alarmLevel, HEAT_BAR, TIER_CEILING,
+};

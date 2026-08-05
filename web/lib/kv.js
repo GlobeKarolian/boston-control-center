@@ -28,6 +28,58 @@ const LIVE  = !!(BASE && TOKEN);
 const CHUNK    = 400000;
 const SENTINEL = '@@bcc-chunks@@:';
 
+/* ---- the meter ------------------------------------------------------------
+   Upstash bills and caps by command, not by request, so a pipeline of five
+   SETs is five. The free tier is 500,000 a month, which is 11 a minute for the
+   whole system, and nothing anywhere told us how close we were until writes
+   started failing and the newsroom board went blank.
+
+   Counting per process only sees one warm container's slice of the traffic, so
+   the projection below is a floor and not a bill. That is still the difference
+   between a number somebody can watch and a wall nobody saw. */
+const METER = { commands: 0, calls: 0, since: Date.now(), errors: 0, capped: 0 };
+
+/* When the cap is hit, every further command is refused for this long. Two
+   reasons. The obvious one is that a request which cannot succeed should not
+   be paid for. The load-bearing one is what happens at the reset: four crons
+   on * * * * * plus a relay retrying on a short backoff will drain a freshly
+   refilled quota in a couple of days flat, and it will do it while everything
+   looks fine. Failing fast and locally also means a blown cap costs one round
+   trip per handler instead of one per command. */
+const CAP_COOLOFF_MS = 60000;
+let cappedUntil = 0;
+
+function quotaError(detail) {
+  const e = new Error('redis: ' + detail);
+  /* 503, not 500. Scanner Relay holds its batch and lengthens its backoff on a
+     503; on a 500 it says "dashboard unreachable" and keeps knocking, which is
+     the behaviour that turns a quota problem into a quota spiral. */
+  e.status = 503;
+  e.quota = true;
+  return e;
+}
+
+const isQuota = msg => /max requests limit exceeded|max daily request limit|quota/i.test(String(msg || ''));
+
+function meter() {
+  const mins = Math.max(1, (Date.now() - METER.since) / 60000);
+  const perMin = METER.commands / mins;
+  return {
+    commands: METER.commands,
+    calls: METER.calls,
+    errors: METER.errors,
+    capped: METER.capped,
+    upMin: Math.round(mins),
+    perMin: Math.round(perMin * 10) / 10,
+    /* What this one container would spend in a month at its current rate. The
+       real bill is the sum across every warm container plus every cold start,
+       so read this as "at least this much". */
+    projectedMonthly: Math.round(perMin * 60 * 24 * 30),
+    freeTier: 500000,
+    coolingOff: Date.now() < cappedUntil,
+  };
+}
+
 /* ---- raw transport -------------------------------------------------------- */
 
 /* Everything goes through /pipeline, including single commands. Arguments
@@ -36,6 +88,13 @@ const SENTINEL = '@@bcc-chunks@@:';
 async function pipe(commands, timeoutMs = 10000) {
   if (!commands.length) return [];
 
+  /* Test seam, and the only one that lives on the hot path. tools/test-sitlink
+     sets `kv.raw.fail` to a message and every command throws it, because "what
+     does the board do when the store is gone" is the behaviour most worth a
+     test and the hardest to arrange any other way. Unset in production, where
+     the cost is one property read per pipeline. */
+  if (pipe.fail) throw new Error('redis: ' + pipe.fail);
+
   /* No credentials: run the same commands against the process Map instead.
      This branch is load-bearing. `raw` is the transport every other helper is
      built on, and those helpers each guard on LIVE while `raw` is exported
@@ -43,7 +102,18 @@ async function pipe(commands, timeoutMs = 10000) {
      keys, claiming a transcript sequence, a health PING) would otherwise build
      the relative URL "/pipeline" and throw on a machine that has no Redis yet,
      which is every machine before `vercel install upstash` runs. */
-  if (!LIVE) return memPipe(commands);
+  if (!LIVE) { METER.calls++; METER.commands += commands.length; return memPipe(commands); }
+
+  /* Refuse locally while cooling off. Nothing here can succeed and every
+     attempt is another command billed against a quota that is already gone. */
+  if (Date.now() < cappedUntil) {
+    METER.capped++;
+    throw quotaError('command quota exhausted, holding for '
+      + Math.ceil((cappedUntil - Date.now()) / 1000) + 's');
+  }
+
+  METER.calls++;
+  METER.commands += commands.length;
 
   const ctrl = new AbortController();
   const to = setTimeout(() => ctrl.abort(), timeoutMs);
@@ -54,11 +124,30 @@ async function pipe(commands, timeoutMs = 10000) {
       body: JSON.stringify(commands.map(c => c.map(x => (x === null || x === undefined ? '' : String(x))))),
       signal: ctrl.signal,
     });
-    if (!r.ok) throw new Error('redis http ' + r.status + ' ' + (await r.text()).slice(0, 200));
+    if (!r.ok) {
+      const body = (await r.text()).slice(0, 200);
+      /* Upstash answers 429 for the cap, but has also been seen returning it
+         inside a 200 body, so both shapes are checked. */
+      if (r.status === 429 || isQuota(body)) {
+        cappedUntil = Date.now() + CAP_COOLOFF_MS;
+        METER.capped++;
+        throw quotaError(body || ('http ' + r.status));
+      }
+      METER.errors++;
+      throw new Error('redis http ' + r.status + ' ' + body);
+    }
     const j = await r.json();
-    if (!Array.isArray(j)) throw new Error('redis: unexpected response shape');
+    if (!Array.isArray(j)) { METER.errors++; throw new Error('redis: unexpected response shape'); }
     return j.map(x => {
-      if (x && x.error) throw new Error('redis: ' + x.error);
+      if (x && x.error) {
+        if (isQuota(x.error)) {
+          cappedUntil = Date.now() + CAP_COOLOFF_MS;
+          METER.capped++;
+          throw quotaError(x.error);
+        }
+        METER.errors++;
+        throw new Error('redis: ' + x.error);
+      }
       return x ? x.result : null;
     });
   } finally { clearTimeout(to); }
@@ -86,6 +175,28 @@ function mem(key) {
 function memPut(key, v, ttlSec) {
   memWarn();
   M.set(key, { v, exp: ttlSec ? Date.now() + ttlSec * 1000 : 0 });
+}
+
+/* ---- test seams -----------------------------------------------------------
+   tools/test-sitlink.js and tools/race-check.js drive the real route handlers
+   against the Map above. They need to seed a board and read it back without
+   going through the route under test, because a test that checks a write by
+   calling the same code that did the writing is a test of nothing.
+
+   Values go in and come out as JSON, which is what every real caller stores,
+   so a test that seeds an array reads back an array while the handler in the
+   middle sees exactly the string it would see in production. */
+function _reset() { M.clear(); }
+
+function _put(key, value, ttlSec) {
+  memPut(String(key), typeof value === 'string' ? value : JSON.stringify(value), ttlSec);
+}
+
+function _get(key) {
+  const e = mem(String(key));
+  if (!e) return null;
+  if (typeof e.v !== 'string') return e.v;
+  try { return JSON.parse(e.v); } catch (err) { return e.v; }
 }
 
 /* The subset of Redis this app actually speaks, served from the Map above.
@@ -351,4 +462,15 @@ module.exports = {
   getBig, setBig, getJSON, setJSON,
   hset, hgetall, hdel, lpushCapped, lrange,
   lock, unlock, raw: pipe,
+  meter, isQuota,
+
+  /* Test seams, all underscored so nothing in api/ or lib/ is tempted.
+
+     cron-cost drives the real handlers with fake credentials and a stubbed
+     fetch rather than through the memory fallback, because thirteen of the
+     helpers below short-circuit on !LIVE and never reach pipe(), where the
+     meter lives. Measuring through the fallback reported zero commands for
+     exactly the handlers the crons lean on hardest. */
+  _meterReset: () => { METER.commands = 0; METER.calls = 0; METER.errors = 0; METER.capped = 0; METER.since = Date.now(); cappedUntil = 0; },
+  _reset, _put, _get,
 };

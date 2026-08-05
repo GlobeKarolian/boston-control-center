@@ -11,7 +11,7 @@ const store_io = require('./store-io');
 
 function readRoute(key, fallback = '[]', { priv = 2 } = {}) {
   return async (req, res) => {
-    if (!requireRead(req, res)) return;
+    if (!(await requireRead(req, res))) return;
     try {
       const body = await store_io.readOut(key, fallback);
       return json(res, body, { priv });
@@ -40,7 +40,7 @@ function readRoute(key, fallback = '[]', { priv = 2 } = {}) {
    answers than a confident zero. */
 function liveRoute(key, { priv = 2, hint = '' } = {}) {
   return async (req, res) => {
-    if (!requireRead(req, res)) return;
+    if (!(await requireRead(req, res))) return;
     let body = null;
     try {
       body = await store_io.readOut(key, '');

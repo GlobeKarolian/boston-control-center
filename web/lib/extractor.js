@@ -444,4 +444,4 @@ async function extract(text) {
 
 // mapFields and carriesFact are exported for the test harness only. Nothing in
 // the running app calls them from outside this file.
-module.exports = { extract, extractBatch, regexExtract, roleFor, isNoise, heardIn, mapFields, carriesFact, MODEL };
+module.exports = { extract, extractBatch, regexExtract, roleFor, isNoise, heardIn, mapFields, carriesFact, SYSTEM, SCHEMA, MODEL };
