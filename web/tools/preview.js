@@ -1,0 +1,295 @@
+// tools/preview.js
+//
+// Serves app/ at the root with a fabricated newsroom behind it, so a view can
+// be looked at without a deploy and without the password.
+//
+// Why this and not `vercel dev`: vercel dev wants a login, a network and the
+// real Redis, and what it hands back is whatever the scanners happen to be
+// doing at that moment, which at four in the afternoon on a Tuesday is one
+// car stop. A layout question needs a board with a working fire on it, a
+// story that closed twenty minutes ago, forty routine calls and a wire with
+// words in it, on demand, the same way every time.
+//
+// Nothing here is real. Every timestamp is minted relative to the moment the
+// request lands, so the clocks tick and the freshness pill reads live rather
+// than reading dark on a fixture that was written last week. The layers that
+// go out to the open internet are left alone and will fill in for real if the
+// machine has a network, which is the point: the fake data is only the part
+// that normally needs a password.
+//
+//   node tools/preview.js          → http://127.0.0.1:8787
+//   node tools/preview.js 9000     → somewhere else
+//   node tools/preview.js 8787 dark
+//
+// The third argument seeds nothing but a mood: pass "quiet" for an empty
+// board, "dark" for a relay that stopped talking forty minutes ago. Both are
+// states the views have to have an answer for and neither is easy to catch in
+// the wild, because you cannot ask the scanners to stop.
+//
+// Not registered in tools/sweep.js. This is a thing you look at, not a thing
+// that passes or fails.
+
+var http = require('http');
+var fs = require('fs');
+var path = require('path');
+var url = require('url');
+
+var PORT = Number(process.argv[2]) || 8787;
+var MOOD = String(process.argv[3] || 'busy').toLowerCase();
+var DIR = path.join(__dirname, '..', 'app');
+
+var TYPE = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+  '.mp3': 'audio/mpeg',
+  '.wav': 'audio/wav',
+  '.woff2': 'font/woff2',
+};
+
+/* Minutes back from right now, as the ISO string every reader in the app
+   parses. Computed per request rather than once at boot so a preview left
+   open for an hour does not slide into the stale branch on its own. */
+function ago(min) { return new Date(Date.now() - min * 60000).toISOString(); }
+function id(s) { return 'pv-' + s; }
+
+/* ---- the board ----
+   Six situations chosen to put every treatment in the two views on screen at
+   once: one high priority and running, one high priority that closed, three
+   ordinary, and one with no coordinates at all, because a situation the
+   geocoder could not place is common and is the case a map-centred layout is
+   most likely to have forgotten. */
+var CAST = [
+  { at: 2, up: 0, pri: 'high', status: 'active', type: 'structure fire',
+    head: 'Working fire in a three-decker on Hancock Street',
+    sum: 'Heavy smoke from the second floor with a second alarm struck. Ladder 4 is on the roof and the street is shut between Bowdoin and Quincy.',
+    loc: 'Hancock St at Bowdoin St, Dorchester', lat: 42.3105, lon: -71.0698,
+    matched: 'street', feeds: ['Boston Fire'],
+    beats: ['Box alarm struck for smoke in the building.',
+      'Second alarm. Companies are going in from the Bowdoin side.',
+      'All companies out, going defensive. Ladder pipe in operation.'] },
+
+  { at: 74, up: 21, pri: 'high', status: 'closed', type: 'pursuit',
+    head: 'Pursuit out of Chelsea ends on the Tobin',
+    sum: 'A stolen vehicle ran from Chelsea police onto the Tobin Bridge and stopped at the toll gantry. Two in custody, no injuries reported.',
+    loc: 'Tobin Bridge, Chelsea', lat: 42.3862, lon: -71.0523,
+    matched: 'landmark', feeds: ['State Police', 'Chelsea Police'],
+    beats: ['Vehicle failed to stop, heading north on Broadway.',
+      'Onto the Tobin, speeds are coming down.',
+      'Vehicle stopped at the gantry. Two out, both in custody.',
+      'All units clear. Scene is being turned over to the barracks.'] },
+
+  { at: 12, up: 3, pri: 'normal', status: 'developing', type: 'crash',
+    head: 'Two-car crash blocking the Storrow eastbound',
+    sum: 'Left lane blocked past the Fenway exit with one vehicle facing the wrong way. Fire and EMS on scene, no extrication.',
+    loc: 'Storrow Dr eastbound at Fenway, Boston', lat: 42.3521, lon: -71.1005,
+    matched: 'street', feeds: ['Boston Fire', 'Boston EMS'],
+    beats: ['Two cars, one on its side. Send EMS.',
+      'One transported, minor. Left lane still blocked for the tow.'] },
+
+  { at: 34, up: 9, pri: 'normal', status: 'active', type: 'water main',
+    head: 'Water main break floods Centre Street',
+    sum: 'A main let go outside the fire station and the northbound side is under several inches. BWSC is on the way and the 39 bus is detouring.',
+    loc: 'Centre St at Burroughs St, Jamaica Plain', lat: 42.3172, lon: -71.1148,
+    matched: 'street', feeds: ['Boston Fire', 'MBTA'],
+    beats: ['Water in the street, looks like a main.',
+      'BWSC notified. Shut the northbound side.',
+      'Bus detour is up, 39 running via South Huntington.'] },
+
+  { at: 51, up: 44, pri: 'normal', status: 'winding down', type: 'medical',
+    head: 'Person struck crossing Massachusetts Avenue',
+    sum: 'One pedestrian down at the Newbury Street crossing, transported to a Boston hospital. The driver stayed. Intersection reopened.',
+    loc: 'Massachusetts Ave at Newbury St, Boston', lat: 42.3487, lon: -71.0863,
+    matched: 'street', feeds: ['Boston EMS', 'Boston Police'],
+    beats: ['Pedestrian struck, one down in the roadway.',
+      'One transported priority one.',
+      'Intersection back open, units clearing.'] },
+
+  /* No lat, no lon, on purpose. The geocoder gets a place name it cannot
+     resolve several times an hour, and a card with nowhere to sit on the map
+     is the one every map-first layout forgets to draw. */
+  { at: 8, up: 1, pri: 'normal', status: 'developing', type: 'search',
+    head: 'Search underway for a missing swimmer off the harbor islands',
+    sum: 'The Coast Guard and State Police Marine are working a reported swimmer in the water. The location on the air has changed twice and has not been pinned down.',
+    loc: 'Boston Harbor, near the islands', lat: null, lon: null,
+    matched: null, feeds: ['State Police', 'Coast Guard'],
+    beats: ['Report of a swimmer in the water off the channel.',
+      'Marine unit is underway, aircraft requested.'] },
+];
+
+/* One radio voice per situation, plus the routine chatter underneath. The
+   sources are named the way the real payload names them, because a column
+   that lines its labels up in a fixed width has to be tested against real
+   label lengths and not against three-letter placeholders. */
+var ROUTINE = [
+  ['Boston Police', 'C-11 units, motor vehicle stop, Dorchester Ave and Freeport.'],
+  ['Boston Police', 'Well-being check requested, third floor, no answer at the door.'],
+  ['Boston Fire', 'Engine 33 responding, box alarm, commercial smoke detector.'],
+  ['Boston EMS', 'A-6 transporting one to Beth Israel, stable, no lights.'],
+  ['Boston Police', 'Alarm company reporting an interior motion, keyholder en route.'],
+  ['Boston Fire', 'Engine 7 on scene, nothing showing, investigating.'],
+  ['State Police', 'Disabled vehicle in the breakdown lane, 93 south past Columbia.'],
+  ['Boston Police', 'Party in the lobby reporting a lost wallet, non-emergency.'],
+  ['Boston EMS', 'A-2 clear from the hospital, back in service.'],
+  ['Boston Fire', 'Engine 33 clear, faulty detector, no incident.'],
+];
+
+function cast() { return MOOD === 'quiet' ? [] : CAST; }
+
+function situations() {
+  return cast().map(function (c, i) {
+    var firstSeen = ago(c.at), updated = ago(c.up);
+    /* Beats are laid out backwards from the update, one every few minutes, so
+       a thread reads in the order it was heard and the newest beat carries the
+       same stamp as the card. threadui counts these, so a card with four of
+       them has to actually have four. */
+    var step = c.at > c.up ? (c.at - c.up) / Math.max(1, c.beats.length - 1) : 3;
+    var events = c.beats.map(function (t, n) {
+      return {
+        kind: n === 0 ? 'opened' : (n === c.beats.length - 1 && c.status === 'closed' ? 'closed' : 'update'),
+        text: t, type: c.type, at: ago(c.at - step * n),
+      };
+    });
+    return {
+      id: id('sit' + i), headline: c.head, summary: c.sum, type: c.type,
+      priority: c.pri, confidence: c.matched ? 'confirmed' : 'reported',
+      location: c.loc, lat: c.lat, lon: c.lon, matched: c.matched, approx: true,
+      status: c.status, feeds: c.feeds, firstSeen: firstSeen, updated: updated,
+      events: events, alertKey: id('sit' + i) + ':' + c.status,
+    };
+  });
+}
+
+function transcripts() {
+  var out = [];
+  /* Newest first, which is the order the real endpoint answers in and the
+     order every reader here assumes. Getting this backwards would show up as
+     a wire that scrolls the wrong way and a freshness pill that never leaves
+     stale, and both would look like bugs in the view. */
+  cast().forEach(function (c, i) {
+    c.beats.slice().reverse().forEach(function (t, n) {
+      out.push({ time: ago(c.up + n * 2 + i), source: c.feeds[0], text: t,
+        role: n === 0 ? 'field' : 'dispatch', incidentId: id('sit' + i), tags: {} });
+    });
+  });
+  ROUTINE.forEach(function (r, i) {
+    out.push({ time: ago(i * 4 + 1), source: r[0], text: r[1], role: 'dispatch' });
+  });
+  out.sort(function (a, b) { return Date.parse(b.time) - Date.parse(a.time); });
+  return MOOD === 'dark' ? [] : out;
+}
+
+/* incidents.json is the scanner layer, and every record in it comes back out
+   of pollScanner flagged isScanner. That flag is the whole basis of the split
+   the Desk makes between a routine call and something worth a row, so the
+   preview has to produce both kinds out of this one file or the routine
+   counter is always zero and the finding it demonstrates goes untested. */
+function incidents() {
+  var out = [];
+  cast().forEach(function (c, i) {
+    out.push({
+      id: id('inc' + i), cat: 'scanner', type: c.type, title: c.head,
+      units: c.feeds, location: c.loc, lat: c.lat, lon: c.lon,
+      source: c.feeds[0] + ' scanner', status: c.status === 'closed' ? 'cleared' : 'active',
+      priority: c.pri, firstHeard: ago(c.at), lastUpdate: ago(c.up),
+      timeline: c.beats.map(function (t) { return { at: ago(c.up), text: t }; }),
+    });
+  });
+  if (MOOD === 'quiet') return out;
+  /* Forty of them, spread over the last hour and a half. Thirty-one land
+     inside the hour the routine counter looks at and nine fall outside it,
+     which is the only way to see that the cutoff is doing anything. */
+  for (var n = 0; n < 40; n++) {
+    var r = ROUTINE[n % ROUTINE.length];
+    out.push({
+      id: id('rt' + n), cat: 'scanner', type: 'routine', title: r[1],
+      units: [], location: '', lat: null, lon: null, source: r[0] + ' scanner',
+      status: n % 5 === 0 ? 'cleared' : 'active', priority: 'normal',
+      firstHeard: ago(2 + n * 2.2), lastUpdate: ago(2 + n * 2.2), timeline: [],
+    });
+  }
+  return out;
+}
+
+var FEEDS = ['Boston Fire', 'Boston Police', 'Boston EMS', 'State Police', 'Chelsea Police', 'MBTA Transit'];
+
+function pipeline() {
+  /* The dark mood pushes every clock past DARK_MS, which is the branch that
+     matters most and the one you cannot produce on purpose in production
+     without unplugging a Mac in a closet somewhere. */
+  var quietMin = MOOD === 'dark' ? 52 : 1;
+  return {
+    extractor: MOOD === 'dark' ? 'stalled' : 'claude-fable-5',
+    builtAt: ago(0),
+    feeds: FEEDS.map(function (name, i) {
+      var off = MOOD === 'dark';
+      return {
+        name: name, status: off ? 'offline' : (i === 4 ? 'connected' : 'live'),
+        segs: off ? 0 : 40 - i * 3, clips: off ? 0 : 120 - i * 8,
+        lastAudioAt: ago(quietMin + i * 0.2),
+        lastSegAt: ago(quietMin + (i === 4 ? 22 : i * 0.4)),
+      };
+    }),
+  };
+}
+
+function stops() {
+  if (MOOD === 'quiet') return [];
+  return [
+    { id: id('st1'), unit: 'C-11 41', plate: 'MA 8XK230', location: 'Dorchester Ave at Freeport St',
+      lat: 42.3169, lon: -71.0553, openedAt: ago(6), status: 'open' },
+    { id: id('st2'), unit: 'D-4 62', plate: 'MA 1LP884', location: 'Tremont St at Berkeley St',
+      lat: 42.3452, lon: -71.0708, openedAt: ago(41), status: 'open' },
+  ];
+}
+
+/* Everything the page asks for by a relative name, answered here. The real
+   deployment routes these through vercel.json to a function apiece; the names
+   have to match that list or the preview is testing a page nobody ships. */
+var ROUTES = {
+  '/situations.json': situations,
+  '/transcripts.json': transcripts,
+  '/incidents.json': incidents,
+  '/pipeline.json': pipeline,
+  '/stops.json': stops,
+  '/stops-count.json': function () { return { open: stops().length }; },
+};
+
+function send(res, code, type, body) {
+  res.writeHead(code, { 'Content-Type': type, 'Cache-Control': 'no-store' });
+  res.end(body);
+}
+
+http.createServer(function (req, res) {
+  var p = url.parse(req.url).pathname;
+  if (p === '/') p = '/index.html';
+
+  if (ROUTES[p]) return send(res, 200, TYPE['.json'], JSON.stringify(ROUTES[p](), null, 2));
+
+  /* The page tries the backend proxy first and falls back to public ones on a
+     404, so answering 404 here is not a gap. It is the branch that sends the
+     open-internet layers out to fetch themselves, which is what makes the
+     weather alerts and the quakes on a preview real. */
+  if (p.indexOf('/api/') === 0) return send(res, 404, 'text/plain', 'not in preview');
+
+  /* One join and one check that the result is still inside app/, because this
+     binds to a port and a request is a string from outside. Nobody is going to
+     attack a preview server, and that is exactly the reasoning that puts a
+     path traversal in something that later grows a second user. */
+  var file = path.join(DIR, p.replace(/^\/+/, ''));
+  if (file.indexOf(DIR) !== 0) return send(res, 403, 'text/plain', 'no');
+
+  fs.readFile(file, function (err, buf) {
+    if (err) return send(res, 404, 'text/plain', 'no ' + p);
+    send(res, 200, TYPE[path.extname(file).toLowerCase()] || 'application/octet-stream', buf);
+  });
+}).listen(PORT, '127.0.0.1', function () {
+  console.log('preview  http://127.0.0.1:' + PORT + '   mood: ' + MOOD +
+    '   (' + cast().length + ' situations, ' + incidents().length + ' scanner records)');
+  console.log('moods    busy | quiet | dark        stop with ctrl-c');
+});
