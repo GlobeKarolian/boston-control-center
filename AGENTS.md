@@ -21,23 +21,33 @@ desk editor. Three halves in one git repo:
 | `agent/` | Packaged installer for the scanner half (`pkg/build/`). |
 
 `LAUNCH.md` at the repo root is the runbook for bringing both halves up. Read
-it before touching deployment. Neither half has ever been live.
+it before touching deployment.
+
+**Correction, 4 August 2026.** This file used to say "Neither half has ever been
+live." That is no longer true. `boston-control-center.vercel.app` was serving
+real transcribed radio with 83 open situations on the board and audio arriving
+about once a minute. Treat anything you change in `web/` as production.
 
 ## Read this before you write anything
 
-**There is no git remote.** `git remote -v` is empty. This repo exists on one
-laptop and nowhere else.
+**Both of the warnings that used to sit here are resolved.** This file said
+there was no git remote and a large uncommitted pile. On 4 August 2026 the repo
+got a remote and everything was committed:
 
-**There is a large amount of uncommitted work.** As of the last session, 14
-tracked files were modified and 8 paths were untracked, all of it since commit
-`936dd9f`. The untracked set includes entire subsystems: `web/lib/threat.js`,
-`web/lib/baseline.js`, `web/lib/users.js`, `web/api/admin.js`,
-`web/api/cron/baseline.js`, `web/lib/extract-local.js`, `web/test/auth.js` and
-`web/tools/`.
+```
+https://github.com/GlobeKarolian/boston-control-center     private
+```
 
-Those two facts together are the biggest risk in this project, well ahead of
-any open ticket. The first useful thing any agent can do here is get this
-committed and pushed to a remote. Do not start a refactor on top of it.
+Private on purpose. It carries feed URLs, the auth design and a deploy target.
+History is grouped by subsystem rather than squashed, so `git log --oneline`
+reads as a map of the codebase. Nothing is uncommitted.
+
+**A GitHub push does not deploy.** `web/.vercel/project.json` is a CLI link, not
+a git integration. Production only changes when someone runs `npm run deploy`
+from the laptop. Merging a PR changes nothing that a user can see.
+
+See `HANDOVER.md` beside this file for the traps that look like bugs, the test
+contract, and the current open work.
 
 ## House style, and it is not optional
 
