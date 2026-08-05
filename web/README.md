@@ -33,6 +33,12 @@ vercel --prod
 Then open `/api/status` with the viewer password. It reports which secrets are
 present, never their values, and it names what is missing.
 
+To give somebody else access, open `/admin` with that same login rather than
+handing over the `AUTH_PASS`. See **Logins** below. Share the plain project URL.
+Any Vercel URL with a deployment hash in it, or with `-yourteam` on the end, is
+behind Vercel SSO and will ask a guest for a Vercel password they do not have,
+which looks exactly like the site being broken.
+
 Per-minute cron needs Pro or Enterprise. On Hobby the schedules in `vercel.json`
 fail at deploy time, because Hobby cron fires once a day.
 
@@ -40,8 +46,10 @@ fail at deploy time, because Hobby cron fires once a day.
 
 | Variable | Required | What it does |
 | --- | --- | --- |
-| `AUTH_PASS` | yes | Viewer password. HTTP Basic on every page and read route. With this unset the whole site is open, and `/api/status` says so. |
-| `AUTH_USER` | no | Viewer username, defaults to `newsroom`. |
+| `AUTH_PASS` | yes | The fallback viewer password. HTTP Basic on every page and read route. With this unset **and** no stored logins, the whole site is open and `/api/status` says so. |
+| `AUTH_USER` | no | The name that goes with it, defaults to `newsroom`. |
+| `AUTH_USERS` | no | More than one env login, `{"newsroom":"abc","desk":"def"}` or `newsroom:abc,desk:def`. Set but unparseable locks the site rather than opening it. |
+| `ADMIN_USERS` | no | Comma-separated names allowed to reach `/admin`. Unset, it is `AUTH_USER` alone, which is why the admin page works on an existing deploy without setting anything. |
 | `INGEST_SECRET` | one of | A single bearer token any Mac may use. Fine for the first install. |
 | `INGEST_TOKENS` | one of | Per-machine tokens, `{"studio-mac":"abc","spare-air":"def"}` or `studio-mac:abc,spare-air:def`. Use this once you have more than one Mac: a laptop that walks out of the building gets revoked without touching the others. |
 | `ANTHROPIC_API_KEY` | yes | Extraction and the analyst pass. Without it extraction silently falls back to regex, which finds units and street addresses but not much else. |
@@ -56,6 +64,57 @@ fail at deploy time, because Hobby cron fires once a day.
 | `NOMINATIM_ENABLED` | no | `0` turns off the OpenStreetMap geocode fallback. |
 | `NOMINATIM_QPS` | no | Global rate limit across all instances, default 1. |
 | `GEO_USER_AGENT` | no | Sent to Nominatim. Their terms want a real contact address. |
+
+## Logins
+
+There are two places a login can live, and the store wins for any name it lists.
+
+The environment half is the table above. It is read-only to the code that reads
+it, which is the whole reason for the other half: a function on Vercel can read
+the environment it was started with and cannot write to it, so an admin screen
+backed by env vars could never save anything anybody typed into it.
+
+The stored half is a Redis hash. Each record holds a scrypt hash with its
+parameters embedded, an optional expiry, an admin flag and a note. No plaintext
+is written anywhere, which also means a forgotten password is replaced, never
+recovered.
+
+Two ways in:
+
+**`/admin`**, signed in as an admin. Add somebody, generate a secret in the
+browser, set an expiry, revoke. The secret is shown once, on the machine that
+made it, and is never sent back by the server afterwards.
+
+**`node tools/user.js`**, from a checkout with `.env.local` present:
+
+```
+node tools/user.js doctor              what is configured and what is missing
+node tools/user.js list                who can get in, and when they last did
+node tools/user.js add RedSox --generate --expires 30
+node tools/user.js set RedSox          replace a secret, prompted, echo off
+node tools/user.js remove RedSox
+```
+
+`--generate` makes the secret on your machine and prints it once. Passing a
+secret as an argument is not supported on purpose: arguments land in shell
+history and are visible to `ps` for the life of the process.
+
+Three things worth knowing:
+
+A stored record shadows the env login of the same name, so once `newsroom`
+exists in the store the `AUTH_PASS` in Vercel stops working. That is also the
+escape hatch. Removing the stored record hands the name back to the
+environment, which is why removing the last stored admin is allowed while
+demoting it is refused: one leaves a way in and the other does not.
+
+Redis being unreachable does not lock anybody out. The env login still works,
+because a store that cannot be read must not cost somebody the credential they
+already had. Nothing configured anywhere means the site is open, deliberately;
+nothing readable means 503, because those two must never answer the same way.
+
+Adding a login writes to Redis immediately, but the live site will not honour
+it until the deploy carrying `lib/users.js` is out. `tools/user.js doctor` says
+which state you are in under "The live site".
 
 ## Layout
 
@@ -72,6 +131,7 @@ api/pulse.js         the forecast field itself, assembled from two keys
 api/app.js           serves app/index.html behind the password
 api/feed.js          allowlisted proxy for public upstreams (ADS-B, MBTA, 311)
 api/status.js        config truth, presence only, never values
+api/admin.js         the login table, page and JSON API, admins only
 api/healthz.js       open, and deliberately boring
 
 api/cron/analyst.js    desk editor pass, every minute, skipped when nothing changed
@@ -97,8 +157,11 @@ lib/store-io.js      load, mutate under a mutex, save, render
 lib/incident-store.js  correlation: transmissions into scenes
 lib/extractor.js     transmission text into structured fields
 lib/geo.js           Census first, Nominatim second, both cached in Redis
-lib/http.js          two doors: Basic for people, Bearer for Macs
+lib/http.js          three doors: Basic for people, Bearer for Macs, CRON_SECRET for crons
+lib/users.js         the login table: scrypt hashes, expiry, admin flag, throttle
 lib/read-route.js    readRoute for incidents, liveRoute for the crowd layer
+
+tools/user.js        add, change and revoke logins from a terminal
 ```
 
 ## The crowd layer
@@ -166,8 +229,9 @@ last good render, and `loadPulse()` prints the status code.
 ## Test
 
 ```
-npm test           # preflight + 59 checks, no network beyond the geocoders
+npm test           # preflight + auth + the main suite, no network beyond the geocoders
 npm run preflight  # structural only, sub-second
+npm run test:auth  # the login door on its own, 103 checks, no Redis needed
 npm run test:bikes # live, hits the real GBFS feed
 ```
 
@@ -179,6 +243,17 @@ fetches is a route that exists. None of that is behaviour, which is exactly why
 it needs its own pass. A cron pointing at a renamed file fails no assertion, it
 simply never runs, and the only place you would see it is as an absence in
 production three hours later.
+
+`npm run test:auth` is the login door, and most of it is aimed at the quiet
+failures rather than the loud one. A route that forgets to `await requireRead`
+returns a Promise, every Promise is truthy, and that route is then open to the
+internet while reading exactly like the routes that are not, so the call sites
+are checked by reading the sources. Then: a cross-site form post arriving with
+the browser's own Basic credentials already attached, a username chosen by
+somebody else ending up inside a `<script>` block, an unknown name being
+answered faster than a known one, the admin door answering a read-only login,
+the last way in being closed by an admin demoting themselves, and Redis going
+down without taking the newsroom's env login with it.
 
 The main suite runs the real handlers against fake request and response objects:
 auth, a five transmission shift, dedupe on replay, correlation of one fire scene
