@@ -386,6 +386,8 @@
      one press away from sound. */
   .sit-listen{background:#0d1f19;border-color:var(--scanner);color:var(--scanner);margin-top:8px;padding:4px 11px;font-size:10px}
   .sit-listen:hover{box-shadow:0 0 12px rgba(52,211,153,.2)}
+  .ba-listen{margin-top:10px;background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.35);color:#fff;padding:5px 13px;font-size:11px}
+  .ba-listen:hover{background:rgba(255,255,255,.16)}
   .thr-beat .cplay{width:20px;height:20px;background:#0b0f16;border:1px solid var(--border);border-radius:50%;padding:0;margin:0 6px 0 0;cursor:pointer;color:var(--scanner);font-size:7px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
   .thr-beat .cplay:hover{border-color:var(--scanner)}
   .thr-beat .cplay.playing{background:var(--scanner);color:#06090f}
@@ -2467,10 +2469,14 @@ function paintBoard(list){
      here, just now". */
   const SIT_CIRCLE_MS=20*60*1000,sitNow=Date.now();
   list.forEach(s=>{if(s.lat!=null&&s.lon!=null){
+    /* A closed story keeps its card as a record but loses its ring at once:
+       the circle only ever meant "something is happening near here", and a
+       closed scene is the one thing that is not. */
+    if(s.status==='closed')return;
     let last=0;
     try{const bs=(window.BCCThread&&BCCThread.beats)?BCCThread.beats(s):[];
       for(const b of bs){const t=b&&b.at?new Date(b.at).getTime():0;if(t>last)last=t;}}catch(e){}
-    if(!last&&s.updatedAt)last=new Date(s.updatedAt).getTime()||0;
+    if(!last)last=new Date(s.updated||s.updatedAt||0).getTime()||0;
     if(last&&sitNow-last>SIT_CIRCLE_MS)return;
     const c=sitColor(s);
     const clips=sitClips(s);
@@ -2859,10 +2865,15 @@ function showBigAlert(s){
      what a reader is handed if you do not give it something else to say. It is also
      inside an aria-atomic banner, so without the label the announcement ends up
      reading the glyph as part of the sentence. */
+  /* The banner is the loudest thing the room ever shows, and a reporter who
+     sees it wants to hear it before reading a word. So it carries the story's
+     chain when there is one. */
+  const baClips=sitClips(s);
+  const baListen=baClips.length?'<button class="dchain ba-listen" data-chain="'+esc(JSON.stringify(baClips))+'" title="Play this story\'s transmissions in order">&#9654; hear it ('+baClips.length+')</button>':'';
   el.innerHTML='<span class="ba-x" role="button" tabindex="0" aria-label="Dismiss alert" onclick="hideBigAlert(event)">&times;</span>'+
     '<div class="ba-k"'+tip(kicker)+'>'+esc(kicker)+'</div>'+
     '<div class="ba-h"'+tip(s.headline||'')+'>'+esc(s.headline||'')+'</div>'+
-    (s.location?'<div class="ba-l"'+tip(s.location)+'>'+esc(s.location)+'</div>':'');
+    (s.location?'<div class="ba-l"'+tip(s.location)+'>'+esc(s.location)+'</div>':'')+baListen;
   el.classList.add('show');
   el.onclick=()=>{if(s.lat!=null)map.setView([s.lat,s.lon],13,{animate:true});};
   if(bigAlertTimer)clearTimeout(bigAlertTimer);

@@ -27,8 +27,14 @@ const crypto = require('crypto');
 // being news. Forty-five minutes of silence closes it; another forty-five
 // removes it. A fire from an hour ago is still on the board, which is what a
 // desk coming back from lunch needs.
-const QUIET_MS = 45 * 60 * 1000;
-const DROP_MS = 90 * 60 * 1000;
+/* Tightened 6 August by editor's order: the board was carrying 84 situations
+   at once, which is not a board anyone can read, and the map underneath it
+   turned solid. A situation with no new radio for 20 minutes closes, and one
+   silent for 40 leaves the board entirely. The card was always the memory;
+   the point of the board is what is happening now, not what happened within
+   the last hour and a half. */
+const QUIET_MS = 20 * 60 * 1000;
+const DROP_MS = 40 * 60 * 1000;
 
 // A model-proposed link is checked against these before it is believed.
 const LINK_WINDOW_MS = 3 * 60 * 60 * 1000;

@@ -140,17 +140,20 @@ ok('the split thing is its own story', stuck.situations.some(s => /Backpack/.tes
 
 console.log('\ngoing quiet');
 
+/* Ages picked against the 20-minute-close, 40-minute-drop policy set on
+   6 August. 30 minutes of silence is closed but still on the board; an hour
+   is gone. */
 const old = [
   { id: 'fire-aaa111', headline: 'Working fire, Dorchester', type: 'fire', priority: 'high',
-    status: 'active', lat: 42.29, lon: -71.08, firstSeen: ago(70 * 60000), updated: ago(60 * 60000), events: [] },
+    status: 'active', lat: 42.29, lon: -71.08, firstSeen: ago(35 * 60000), updated: ago(30 * 60000), events: [] },
   { id: 'crash-bbb222', headline: 'Crash cleared, Route 1', type: 'crash', priority: 'normal',
-    status: 'active', lat: 42.4, lon: -71.0, firstSeen: ago(200 * 60000), updated: ago(120 * 60000), events: [] },
+    status: 'active', lat: 42.4, lon: -71.0, firstSeen: ago(200 * 60000), updated: ago(60 * 60000), events: [] },
   { id: 'pursuit-ccc333', headline: 'Pursuit on 93 north', type: 'pursuit', priority: 'high',
     status: 'active', lat: 42.36, lon: -71.06, firstSeen: ago(5 * 60000), updated: ago(60000), events: [] },
 ];
 const aged = reconcile(old, []);
-ok('an hour of silence closes a story', aged.situations.find(s => s.id === 'fire-aaa111').status === 'closed');
-ok('two hours of silence drops it', !aged.situations.find(s => s.id === 'crash-bbb222'));
+ok('half an hour of silence closes a story', aged.situations.find(s => s.id === 'fire-aaa111').status === 'closed');
+ok('an hour of silence drops it', !aged.situations.find(s => s.id === 'crash-bbb222'));
 ok('a live story is untouched', aged.situations.find(s => s.id === 'pursuit-ccc333').status === 'active');
 ok('open and high sorts to the top', aged.situations[0].id === 'pursuit-ccc333');
 ok('closed sorts to the bottom', aged.situations[aged.situations.length - 1].status === 'closed');
