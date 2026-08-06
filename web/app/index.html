@@ -365,24 +365,39 @@
   .cline.hit{color:var(--text);cursor:pointer}.cline.hit:hover{background:rgba(52,211,153,.08)}
   .cline .csrc{color:var(--scanner);font-weight:700}.cline.clear .csrc{color:#6b7280}
   .cline .ctime{color:var(--text-faint);margin-right:8px}.cline .ctag{color:var(--road)}
-  /* The play control sits inside a one-line row that ellipsizes, so it stays
-     text-sized and text-shaped: no border, no box, just a glyph that changes
-     colour while its clip is the one on the air. */
-  .cline .cplay{background:none;border:0;padding:0 3px;margin-right:2px;cursor:pointer;color:var(--scanner);font-size:9px;line-height:inherit;vertical-align:baseline}
-  .cline .cplay.playing{color:var(--road)}
+  /* A pill, not a glyph. The 9px triangle was the whole audio feature to a
+     reader who did not know to look for it, and it was a 9px click target to
+     one who did. The pill is text-height, so the one-line row still ellipsizes
+     the same, but it reads as a control and clicks like one. */
+  .cline .cplay{background:#0b0f16;border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin-right:5px;cursor:pointer;color:var(--scanner);font-size:9px;line-height:1.5;vertical-align:baseline}
+  .cline .cplay:hover{border-color:var(--scanner)}
+  .cline .cplay.playing{background:#0d1f19;border-color:var(--scanner)}
   .cline .cdl{color:var(--text-faint);text-decoration:none;margin-right:6px;font-size:10px}
   .cline .cdl:hover{color:var(--text-dim)}
   .radiobtn{background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-family:var(--mono);font-size:9px;padding:1px 8px;margin-left:10px;cursor:pointer;letter-spacing:.4px}
   .radiobtn.on{color:var(--scanner);border-color:var(--scanner)}
   .radiobtn:hover{color:var(--text)}
   /* The chain control, in the detail header and at the pin. Same voice as the
-     radio toggle so the two audio controls on this page read as one family. */
+     radio toggle so the audio controls on this page read as one family. */
   .dchain{background:none;border:1px solid var(--border);border-radius:4px;color:var(--scanner);font-family:var(--mono);font-size:9.5px;padding:2px 9px;margin-top:7px;cursor:pointer;letter-spacing:.4px;display:inline-block}
   .dchain:hover{border-color:var(--scanner)}
-  .tl-item .cplay{background:none;border:0;padding:0 3px 0 0;cursor:pointer;color:var(--scanner);font-size:9px}
-  .tl-item .cplay.playing{color:var(--road)}
-  .tl-item .cdl{color:var(--text-faint);text-decoration:none;margin-right:5px;font-size:10px}
+  /* The Deck. The big control earns its size: it is the one thing the desk
+     asked for by name, and it should not have to be hunted. */
+  .dchain-big{display:flex;align-items:center;gap:11px;background:#0d1f19;border:1px solid var(--scanner);border-radius:8px;padding:8px 13px;margin-top:11px;cursor:pointer}
+  .dchain-big:hover{box-shadow:0 0 14px rgba(52,211,153,.18)}
+  .dcb-ico{width:30px;height:30px;border-radius:50%;background:var(--scanner);color:#06090f;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex:0 0 auto}
+  .dcb-t{display:block;font-family:var(--mono);font-size:11px;color:var(--scanner);font-weight:700;letter-spacing:.07em}
+  .dcb-s{display:block;font-family:var(--mono);font-size:9.5px;color:var(--text-dim);margin-top:1px}
+  .tl-item .cplay{width:22px;height:22px;background:#0b0f16;border:1px solid var(--border);border-radius:50%;padding:0;margin-right:4px;cursor:pointer;color:var(--scanner);font-size:8px;display:inline-flex;align-items:center;justify-content:center;vertical-align:-6px}
+  .tl-item .cplay:hover{border-color:var(--scanner)}
+  .tl-item .cplay.playing{background:var(--scanner);color:#06090f;border-color:var(--scanner)}
+  .tl-item.playing{background:rgba(52,211,153,.07);border-left-color:var(--scanner)}
+  .tl-item .tlprog{height:2px;background:var(--border-soft);margin-top:5px;border-radius:1px;overflow:hidden}
+  .tl-item .tlprog span{display:block;height:100%;width:0;background:var(--scanner)}
+  .tl-item .tnoclip{display:inline-flex;align-items:center;justify-content:center;width:22px;height:14px;border:1px dashed var(--border);border-radius:7px;color:var(--text-faint);font-size:7px;margin-right:4px;vertical-align:-2px}
+  .tl-item .cdl{color:var(--text-faint);text-decoration:none;margin-left:5px;font-size:10px}
   .tl-item .cdl:hover{color:var(--text-dim)}
+  .cline.playing{background:rgba(52,211,153,.08)}
   .inc-wrap{background:transparent;border:0}
   .inc-ico{width:18px;height:18px;position:relative;display:flex;align-items:center;justify-content:center}
   .inc-ico .dot{width:9px;height:9px;border-radius:50%;background:var(--c);border:1.5px solid #06090f;box-shadow:0 0 6px var(--c)}
@@ -1236,6 +1251,26 @@
     <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);white-space:nowrap">monitoring the situation</span>
   </div>
 
+  <!-- The Dial. The radio's face, floating above every tab, because the Desk
+       and the Story have no audio surface of their own and a control that
+       lives inside one panel of one tab is a control nobody can find. The
+       big button is the radio's power. The words are whatever is speaking,
+       and clicking them scrolls the console to that row when it is on screen.
+       Painted entirely by dialPaint(); nothing here is static but the shell. -->
+  <div id="dial" style="position:fixed;right:286px;bottom:150px;z-index:1600;display:flex;align-items:center;gap:11px;background:rgba(14,18,26,.92);border:1px solid var(--border);border-radius:34px;padding:7px 16px 7px 8px;box-shadow:0 10px 32px rgba(0,0,0,.6);backdrop-filter:blur(8px);cursor:default">
+    <span id="dialBtn" role="button" tabindex="0" aria-label="Radio on or off" onclick="radioToggle()" style="position:relative;width:40px;height:40px;border-radius:50%;background:#0b0f16;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:13px;cursor:pointer;flex:0 0 auto">&#9654;</span>
+    <span id="dialBody" style="min-width:0">
+      <span id="dialTop" style="display:flex;align-items:center;gap:8px;font-family:var(--mono);white-space:nowrap">
+        <span id="dialState" style="font-size:9.5px;color:var(--text-faint);font-weight:700;letter-spacing:.12em">RADIO OFF</span>
+        <span id="dialFeed" style="font-size:11px;color:var(--scanner);font-weight:700"></span>
+        <span id="dialTime" style="font-size:9.5px;color:var(--text-faint)"></span>
+      </span>
+      <span id="dialLine" onclick="dialJump()" style="display:block;font-size:11px;color:var(--text-dim);max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;cursor:pointer">press play, hear the radio</span>
+    </span>
+    <span id="dialQ" style="display:none;font-family:var(--mono);font-size:9.5px;color:var(--road);border:1px solid #4d3a10;background:#1d1608;border-radius:10px;padding:1px 8px"></span>
+    <span id="dialSkip" role="button" tabindex="0" aria-label="Skip to the next clip" onclick="dialSkip()" style="display:none;width:24px;height:24px;border:1px solid var(--border);border-radius:50%;align-items:center;justify-content:center;color:var(--text-dim);font-size:10px;cursor:pointer">&#8677;</span>
+  </div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.heat/0.2.0/leaflet-heat.js"></script>
 <!-- Local and tiny, and every call into it is guarded, so the page still runs
@@ -1659,12 +1694,23 @@ function renderDetail(inc){
      rows carry, and the header gets the one the desk actually asked for: play
      the chain, oldest first, so the room hears the call the way it happened. */
   const chain=(inc.timeline||[]).map(e=>e.clip).filter(u=>u&&window.BCCClips&&BCCClips.ok(u));
-  const chainBtn=chain.length?'<button class="dchain" onclick="chainPlay(JSON.parse(this.dataset.chain))" data-chain="'+esc(JSON.stringify(chain))+'" title="Play every transmission this call has audio for, in order">&#9654; play the chain ('+chain.length+')</button>':'';
+  /* The Deck's head: one fat control that plays the whole call, oldest first.
+     It earns its size. This is the single thing the desk asked for by name. */
+  const chainBtn=chain.length?('<div class="dchain-big" role="button" tabindex="0" onclick="chainPlay(JSON.parse(this.dataset.chain))" data-chain="'+esc(JSON.stringify(chain))+'" title="Every transmission this call has audio for, in order">'+
+      '<span class="dcb-ico">&#9654;</span>'+
+      '<span><span class="dcb-t">PLAY THE CHAIN</span>'+
+      '<span class="dcb-s">'+chain.length+' transmission'+(chain.length===1?'':'s')+' &middot; oldest first</span></span>'+
+    '</div>'):'';
   const tl=(inc.timeline||[]).slice().reverse().map(e=>{
     const clip=(e.clip&&window.BCCClips&&BCCClips.ok(e.clip))?e.clip:'';
-    const audio=clip?('<button class="cplay'+(CLIP_NOW===clip?' playing':'')+'" data-clip="'+esc(clip)+'" tabindex="-1" title="hear the transmission">'+(CLIP_NOW===clip?'&#9632;':'&#9654;')+'</button>'+
-      '<a class="cdl" href="'+esc(BCCClips.downloadUrl(clip))+'" download tabindex="-1" title="download the clip">&#8595;</a>'):'';
-    return '<div class="tl-item'+(e.clear?' clear':(e.onScene?' onscene':''))+'"><div class="tlt">'+audio+new Date(e.t).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'America/New_York'})+'</div><div class="tlx">'+esc(e.text)+'</div><div class="tlsrc">'+esc(e.source)+' '+roleBadge(e.role)+'</div></div>';
+    const on=clip&&CLIP_NOW===clip;
+    const audio=clip?('<button class="cplay'+(on?' playing':'')+'" data-clip="'+esc(clip)+'" tabindex="-1" title="hear the transmission">'+(on?'&#9632;':'&#9654;')+'</button>'):
+      '<span class="tnoclip" title="recorded before audio, or the upload missed">txt</span>';
+    const dl=clip?'<a class="cdl" href="'+esc(BCCClips.downloadUrl(clip))+'" download tabindex="-1" title="download the clip">&#8595;</a>':'';
+    return '<div class="tl-item'+(e.clear?' clear':(e.onScene?' onscene':''))+(on?' playing':'')+'">'+
+      '<div class="tlt">'+audio+new Date(e.t).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'America/New_York'})+' '+dl+'</div>'+
+      '<div class="tlx">'+esc(e.text)+(clip?'<div class="tlprog"><span></span></div>':'')+'</div>'+
+      '<div class="tlsrc">'+esc(e.source)+' '+roleBadge(e.role)+'</div></div>';
   }).join('');
   /* The panel re-renders on every scanner poll and not only when it is opened: the
      branch at the end of pollScanner() feeds the selected incident back through here
@@ -1853,26 +1899,90 @@ function clipPlayer(){
        whole broadcast. */
     CLIP_PLAYER.addEventListener('ended',()=>{clipStop();clipNext();});
     CLIP_PLAYER.addEventListener('error',()=>{clipStop();clipNext();});
+    CLIP_PLAYER.addEventListener('timeupdate',dialTick);
   }
   return CLIP_PLAYER;
+}
+/* What a clip is, read off its own URL. The filename carries the feed and the
+   Eastern wall clock by design (see app/clips.js), so the Dial can name what
+   is speaking even when the row that owns it has scrolled out of the ring. */
+function clipMeta(url){
+  const m=String(url||'').match(/\/clips\/\d{4}-\d{2}-\d{2}\/([a-z0-9-]+)\/.*-(\d{2})(\d{2})(\d{2})-et\.m4a/i);
+  const row=(lastTx||[]).find(t=>t.clip===url);
+  return {
+    feed:(row&&row.source)||(m?m[1]:''),
+    at:m?(m[2]+':'+m[3]+':'+m[4]+' ET'):'',
+    text:(row&&row.text)||'',
+  };
 }
 function clipStop(){
   if(CLIP_PLAYER){try{CLIP_PLAYER.pause();}catch(e){}}
   CLIP_NOW='';
   document.querySelectorAll('.cplay.playing').forEach(b=>{b.classList.remove('playing');b.innerHTML='&#9654;';});
+  document.querySelectorAll('.tl-item.playing,.cline.playing').forEach(r=>r.classList.remove('playing'));
+  dialPaint();
 }
 function clipPlay(url){
   if(!(window.BCCClips&&BCCClips.ok(url)))return false;
   clipStop();
   const p=clipPlayer();
   p.src=url; CLIP_NOW=url;
-  /* Light every control that points at this clip: the console row and the
-     detail timeline can both be showing the same transmission. */
+  /* Light every control that points at this clip, and the row around it: the
+     console and the detail timeline can both be showing the same transmission. */
   document.querySelectorAll('.cplay').forEach(b=>{
-    if(b.dataset.clip===url){b.classList.add('playing');b.innerHTML='&#9632;';}
+    if(b.dataset.clip===url){
+      b.classList.add('playing');b.innerHTML='&#9632;';
+      const r=b.closest('.tl-item,.cline');if(r)r.classList.add('playing');
+    }
   });
   p.play().catch(()=>{clipStop();clipNext();});
+  dialPaint();
   return true;
+}
+/* ---- the Dial ---- */
+function dialPaint(){
+  const btn=document.getElementById('dialBtn');if(!btn)return;
+  const st=document.getElementById('dialState'),fd=document.getElementById('dialFeed'),
+        tm=document.getElementById('dialTime'),ln=document.getElementById('dialLine'),
+        q=document.getElementById('dialQ'),sk=document.getElementById('dialSkip'),
+        dial=document.getElementById('dial');
+  const playing=!!CLIP_NOW;
+  btn.innerHTML=RADIO_ON?'&#9632;':'&#9654;';
+  btn.style.borderColor=RADIO_ON||playing?'var(--scanner)':'var(--border)';
+  btn.style.color=RADIO_ON||playing?'var(--scanner)':'var(--text-dim)';
+  btn.style.background=RADIO_ON||playing?'#0d1f19':'#0b0f16';
+  dial.style.borderColor=playing?'var(--scanner)':'var(--border)';
+  if(playing){
+    const meta=clipMeta(CLIP_NOW);
+    st.textContent='ON AIR';st.style.color='var(--wire)';
+    fd.textContent=meta.feed;
+    ln.textContent=meta.text||('transmission at '+meta.at);
+  }else{
+    st.textContent=RADIO_ON?'RADIO ON':'RADIO OFF';
+    st.style.color=RADIO_ON?'var(--scanner)':'var(--text-faint)';
+    fd.textContent='';tm.textContent='';
+    ln.textContent=RADIO_ON?'quiet, waiting for the air':'press play, hear the radio';
+  }
+  q.style.display=CLIP_Q.length?'inline':'none';
+  q.textContent=CLIP_Q.length?CLIP_Q.length+' queued':'';
+  sk.style.display=(playing||CLIP_Q.length)?'inline-flex':'none';
+}
+function dialTick(){
+  const tm=document.getElementById('dialTime');
+  if(tm&&CLIP_PLAYER&&CLIP_NOW){
+    const f=s=>isFinite(s)?Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'):'';
+    tm.textContent=f(CLIP_PLAYER.currentTime)+(isFinite(CLIP_PLAYER.duration)?' / '+f(CLIP_PLAYER.duration):'');
+  }
+  const pr=document.querySelector('.tl-item.playing .tlprog span');
+  if(pr&&CLIP_PLAYER&&isFinite(CLIP_PLAYER.duration)&&CLIP_PLAYER.duration>0){
+    pr.style.width=Math.min(100,(CLIP_PLAYER.currentTime/CLIP_PLAYER.duration)*100)+'%';
+  }
+}
+function dialSkip(){const had=CLIP_Q.length;clipStop();if(had)clipNext();}
+function dialJump(){
+  if(!CLIP_NOW)return;
+  const b=document.querySelector('#clog .cplay.playing');
+  if(b)b.scrollIntoView({block:'nearest'});
 }
 function clipNext(){
   while(CLIP_Q.length){ if(clipPlay(CLIP_Q.shift())) return; }
@@ -1905,6 +2015,7 @@ function radioToggle(){
   }else{
     CLIP_Q=[]; clipStop();
   }
+  dialPaint();
 }
 
 async function pollConsole(){
@@ -1935,7 +2046,7 @@ async function pollConsole(){
     }
     for(let i=fresh.length-1;i>=0;i--)CLIP_Q.push(fresh[i]);
     if(RADIO_SEEN.size>600)RADIO_SEEN=new Set(list.map(t=>t.id));
-    if(!CLIP_NOW&&CLIP_Q.length)clipNext();
+    if(!CLIP_NOW&&CLIP_Q.length)clipNext();else if(fresh.length)dialPaint();
   }
   if(!list.length){ if(sub)sub.textContent='waiting for audio'; return; }
   const newest=list[0]&&list[0].time?new Date(list[0].time):null;
