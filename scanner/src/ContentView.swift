@@ -215,6 +215,10 @@ struct ContentView: View {
 
                 Divider().padding(.vertical, 2)
 
+                extractionSection
+
+                Divider().padding(.vertical, 2)
+
                 Text("Broadcastify Premium").font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.secondary).tracking(0.6)
                 Text("Only needed for broadcastify.com feeds. Other stream URLs play without it.")
@@ -321,6 +325,116 @@ struct ContentView: View {
                     downloads.delete(m) { line in store.note(line) }
                 }
                 .buttonStyle(.borderless)
+            }
+        }
+        .padding(.vertical, 3)
+    }
+
+    /* -------------------------------------------------------- extraction --- */
+
+    /* Where the reading happens. The cloud spends the dashboard's model
+       budget, which ran the account dry once already; this Mac spends
+       electricity. Same row grammar as the speech models above, because to
+       the person at this window they are the same kind of decision. */
+    private var extractionSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("EXTRACTION MODEL").font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(.secondary).tracking(0.6)
+            Text("Every transmission is read into units, addresses and severity. "
+                 + "The cloud does this against a paid daily budget; a model on this Mac "
+                 + "does it for free, next to Whisper. The dashboard checks either way, "
+                 + "and a transmission the local model fumbles just falls back to the cloud ladder.")
+                .font(.system(size: 11)).foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            cloudRow
+            ForEach(LocalModel.all) { m in localRow(m) }
+
+            if store.extractMode == "local" {
+                if ctl.ollama.reachable == false {
+                    Text("Ollama is not running on this Mac. Open the Ollama app, or install it from ollama.com, then start capture again.")
+                        .font(.system(size: 11)).foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                } else if let v = ctl.ollama.contractVersion {
+                    Text("contract v\(v) · judgment stays on the dashboard")
+                        .font(.system(size: 10)).foregroundStyle(.secondary)
+                }
+            }
+        }
+        .onAppear { ctl.ollama.refresh() }
+    }
+
+    private var cloudRow: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Button {
+                store.extractMode = "cloud"; store.save()
+                store.note("extraction set to cloud")
+            } label: {
+                Image(systemName: store.extractMode == "cloud" ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(store.extractMode == "cloud" ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text("Cloud, Claude Haiku").font(.system(size: 12, weight: .medium))
+                    Text("default").font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 5).padding(.vertical, 1)
+                        .background(Color.primary.opacity(0.08), in: Capsule())
+                }
+                Text("The dashboard reads every transmission against its daily budget, "
+                     + "500 calls, then regex. Nothing to install.")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+        }
+        .padding(.vertical, 3)
+    }
+
+    private func localRow(_ m: LocalModel) -> some View {
+        let chosen = store.extractMode == "local" && store.extractModel == m.id
+        let have = ctl.ollama.installed.contains(m.id)
+        let working = ctl.ollama.progress[m.id]
+
+        return HStack(alignment: .top, spacing: 10) {
+            Button {
+                store.extractMode = "local"; store.extractModel = m.id; store.save()
+                store.note("extraction set to \(m.label) on this Mac; takes effect when capture starts")
+                ctl.ollama.refresh()
+            } label: {
+                Image(systemName: chosen ? "largecircle.fill.circle" : "circle")
+                    .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
+            }
+            .buttonStyle(.borderless)
+            .disabled(!have)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(m.label).font(.system(size: 12, weight: .medium))
+                    Text(String(format: "%.1f GB", m.gigabytes)).font(.system(size: 11)).foregroundStyle(.secondary)
+                    if m.id == LocalModel.recommendedID {
+                        Text("recommended").font(.system(size: 9, weight: .semibold))
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.primary.opacity(0.08), in: Capsule())
+                    }
+                }
+                Text(m.note).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let f = working {
+                    ProgressView(value: f).frame(width: 240)
+                }
+                if let e = ctl.ollama.failure[m.id], !e.isEmpty {
+                    Text(e).font(.system(size: 11)).foregroundStyle(.red)
+                }
+            }
+
+            Spacer()
+
+            if working != nil {
+                Button("Cancel") { ctl.ollama.cancel(m) }.buttonStyle(.borderless)
+            } else if !have {
+                Button("Download") { ctl.ollama.pull(m) { line in store.note(line) } }
+                    .disabled(ctl.ollama.reachable == false)
             }
         }
         .padding(.vertical, 3)

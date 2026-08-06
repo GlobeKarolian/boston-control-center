@@ -27,7 +27,7 @@
 
 const { ingestAuth, json, harden } = require('../lib/http');
 const clips = require('../app/clips.js');
-const { extractBatch, MODEL } = require('../lib/extractor');
+const { extractBatch, mapFields, MODEL } = require('../lib/extractor');
 const { geocodeBatch } = require('../lib/geo');
 const store_io = require('../lib/store-io');
 const threat = require('../lib/threat');
@@ -136,6 +136,12 @@ module.exports = async (req, res) => {
          faith, because this string ends up as the src of an audio element in
          the newsroom and the pipe it rode in on is not a credential. */
       clip: (i.clip && clips.ok(i.clip)) ? String(i.clip).slice(0, 500) : undefined,
+      /* The relay's own extraction, raw and unmapped. Object only, size
+         capped, and never trusted further than mapFields is willing to take
+         it. A relay that sends garbage here has bought its transmission a
+         trip through the same ladder as everyone else, nothing worse. */
+      ex: (i.ex && typeof i.ex === 'object' && !Array.isArray(i.ex)
+           && JSON.stringify(i.ex).length <= 4000) ? i.ex : undefined,
     }));
 
   const t0 = Date.now();
@@ -205,8 +211,33 @@ module.exports = async (req, res) => {
     // can find its call. One cheap read of a key the dashboard already polls.
     const prior = await store_io.recentBySource().catch(() => ({}));
 
-    const { results: exs, by, errors, skipped, hallucinated } =
-      await extractBatch(fresh.map(i => ({ text: i.text, src: i.src })), { priorBySrc: prior });
+    /* The mini's own extraction, when the relay did it. The raw model output
+       rides the item and every guardrail runs HERE: mapFields owns the
+       landmark hallucination check, the records-answer guard, the noise
+       rescue, and it does not care which machine ran the model. An item the
+       mini judged costs this server zero model budget; an item it did not,
+       or judged into garbage, falls into the batch below exactly as if the
+       relay had never learned to think. */
+    const exs = new Array(fresh.length);
+    let mini = 0;
+    for (let i = 0; i < fresh.length; i++) {
+      const raw = fresh[i].ex;
+      if (!raw) continue;
+      try {
+        const mapped = mapFields(raw, 'mini', fresh[i].text);
+        if (mapped && typeof mapped === 'object') { exs[i] = mapped; mini++; }
+      } catch (e) { /* fall through to the batch */ }
+    }
+
+    const need = [];
+    for (let i = 0; i < fresh.length; i++) if (!exs[i]) need.push(i);
+    let by = 'mini', errors = [], skipped = 0, hallucinated = 0;
+    if (need.length) {
+      const batch = await extractBatch(need.map(i => ({ text: fresh[i].text, src: fresh[i].src })), { priorBySrc: prior });
+      need.forEach((idx, k) => { exs[idx] = batch.results[k]; });
+      by = mini ? 'mini+' + batch.by : batch.by;
+      errors = batch.errors; skipped = batch.skipped; hallucinated = batch.hallucinated;
+    }
     for (const e of errors.slice(0, 2)) warnings.push('extract: ' + e);
 
     const geos = await geocodeBatch(fresh.map((it, i) => ({

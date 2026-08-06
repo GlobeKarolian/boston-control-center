@@ -23,6 +23,7 @@ WHISPER="${WHISPER:-$(command -v whisper-cli || true)}"
 SOURCES=(
   "$HERE/src/Model.swift"
   "$HERE/src/Models.swift"
+  "$HERE/src/Ollama.swift"
   "$HERE/src/MP3Framer.swift"
   "$HERE/src/HLS.swift"
   "$HERE/src/SystemAudio.swift"

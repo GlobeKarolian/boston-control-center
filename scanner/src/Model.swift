@@ -164,13 +164,19 @@ private struct Persisted: Codable {
     var segmentSeconds: Double = 15
     var silenceGate: Double = 0.01
     var modelID = SpeechModel.bundledID
+    /* Where the reading happens: "cloud" spends the dashboard's model budget,
+       "local" spends this Mac's electricity. Two fields, same decode-tolerant
+       story as modelID: configs written before they existed read as cloud. */
+    var extractMode = "cloud"
+    var extractModel = LocalModel.recommendedID
 }
 
 /* Same reason as Source: a file written before the model picker existed has no
    modelID in it, and that must not read as a corrupt config. */
 extension Persisted {
     enum CodingKeys: String, CodingKey {
-        case sources, endpoint, machine, segmentSeconds, silenceGate, modelID
+        case sources, endpoint, machine, segmentSeconds, silenceGate, modelID,
+             extractMode, extractModel
     }
 
     init(from decoder: Decoder) throws {
@@ -183,6 +189,8 @@ extension Persisted {
         segmentSeconds = try c.decodeIfPresent(Double.self, forKey: .segmentSeconds) ?? 15
         silenceGate = try c.decodeIfPresent(Double.self, forKey: .silenceGate) ?? 0.01
         modelID = try c.decodeIfPresent(String.self, forKey: .modelID) ?? SpeechModel.bundledID
+        extractMode = try c.decodeIfPresent(String.self, forKey: .extractMode) ?? "cloud"
+        extractModel = try c.decodeIfPresent(String.self, forKey: .extractModel) ?? LocalModel.recommendedID
     }
 }
 
@@ -194,6 +202,8 @@ final class Store: ObservableObject {
     @Published var segmentSeconds: Double = 15
     @Published var silenceGate: Double = 0.01
     @Published var modelID = SpeechModel.bundledID
+    @Published var extractMode = "cloud"
+    @Published var extractModel = LocalModel.recommendedID
 
     /// What the transcriber is costing right now. Filled in by the controller.
     @Published var load = LoadReading()
@@ -232,6 +242,8 @@ final class Store: ObservableObject {
         segmentSeconds = p.segmentSeconds
         silenceGate = p.silenceGate
         modelID = p.modelID
+        extractMode = p.extractMode
+        extractModel = p.extractModel
         machine = p.machine.isEmpty ? Self.defaultMachineName() : p.machine
         ingestToken = Secrets.get("ingest")
         bfUser = Secrets.get("bf-user")
@@ -281,7 +293,7 @@ final class Store: ObservableObject {
     func save() {
         let p = Persisted(sources: sources, endpoint: endpoint, machine: machine,
                           segmentSeconds: segmentSeconds, silenceGate: silenceGate,
-                          modelID: modelID)
+                          modelID: modelID, extractMode: extractMode, extractModel: extractModel)
         if let d = try? JSONEncoder().encode(p) { try? d.write(to: Self.configURL) }
     }
 

@@ -12,6 +12,12 @@ struct Dispatch: Codable, Equatable {
     /* The URL /api/clip answered with, when it did. Optional and last, so a
        queue persisted by an older build decodes cleanly into this shape. */
     var clip: String? = nil
+    /* The local model's raw reading of this transmission, as the JSON string
+       Ollama produced. A string rather than a parsed object because Codable
+       wants a type and the server is the only party that should be parsing
+       judgment anyway. nil in cloud mode, and whenever the model was slow,
+       wrong-shaped, or off. */
+    var ex: String? = nil
     var text: String
     var at: String
     var seq: Int
@@ -58,7 +64,7 @@ final class Relay {
         timer = nil
     }
 
-    func enqueue(src: String, city: String, scope: String = "", text: String, clip: Data? = nil) {
+    func enqueue(src: String, city: String, scope: String = "", text: String, clip: Data? = nil, ex: String? = nil) {
         let at = ISO8601DateFormatter().string(from: Date())
         /* The clip goes up before its words go on the queue, because the
            transmission record is born on the server with its clip URL or
@@ -70,16 +76,16 @@ final class Relay {
            it is trying to drain, so deep backoff skips clips entirely. */
         if let clip, backoff < 60 {
             uploadClip(clip, src: src, at: at) { [weak self] url in
-                self?.append(src: src, city: city, scope: scope, text: text, at: at, clip: url)
+                self?.append(src: src, city: city, scope: scope, text: text, at: at, clip: url, ex: ex)
             }
         } else {
-            append(src: src, city: city, scope: scope, text: text, at: at, clip: nil)
+            append(src: src, city: city, scope: scope, text: text, at: at, clip: nil, ex: ex)
         }
     }
 
-    private func append(src: String, city: String, scope: String, text: String, at: String, clip: String?) {
+    private func append(src: String, city: String, scope: String, text: String, at: String, clip: String?, ex: String?) {
         lock.lock()
-        queue.append(Dispatch(src: src, city: city, scope: scope, clip: clip, text: text,
+        queue.append(Dispatch(src: src, city: city, scope: scope, clip: clip, ex: ex, text: text,
                               at: at, seq: seq))
         seq += 1
         if queue.count > Self.queueMax { queue.removeFirst(queue.count - Self.queueMax) }
@@ -141,6 +147,11 @@ final class Relay {
                 var d: [String: Any] = ["src": item.src, "city": item.city, "scope": item.scope,
                                         "text": item.text, "at": item.at, "seq": item.seq]
                 if let c = item.clip { d["clip"] = c }
+                /* Parsed here at the wire, not upstream, so the queue stays
+                   Codable and a malformed reading dies quietly at the door. */
+                if let x = item.ex,
+                   let o = try? JSONSerialization.jsonObject(with: Data(x.utf8)),
+                   o is [String: Any] { d["ex"] = o }
                 return d
             },
         ]

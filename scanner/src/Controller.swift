@@ -15,6 +15,17 @@ final class Controller: ObservableObject {
     private let capture = Capture()
     private let relay = Relay()
     private let health = HealthBox()
+    let ollama = Ollama()
+
+    /* Local extraction state. The contract comes from the dashboard at start;
+       the prior ring gives the model the same three lines of channel context
+       the cloud extractor gets; the serial queue keeps transmissions in the
+       order the radio said them, because extraction takes a second or three
+       and two finishing out of order would swap history. */
+    private var contract: ExtractContract?
+    private var exPrior: [String: [String]] = [:]
+    private let exQueue = DispatchQueue(label: "relay.extract")
+    private var exWarned = false
 
     @Published var testResult: String?
     @Published var testOK = false
@@ -54,6 +65,24 @@ final class Controller: ObservableObject {
         relay.token = store.ingestToken.trimmingCharacters(in: .whitespaces)
         relay.machine = store.machine
         relay.start()
+
+        /* The extraction contract, fetched fresh at every capture start and
+           cached against the dashboard being unreachable. Local mode with no
+           contract at all degrades to plain relaying, which the server treats
+           exactly like a relay that never learned to think. */
+        exWarned = false
+        if store.extractMode == "local" {
+            Ollama.fetchContract(endpoint: relay.endpoint, token: relay.token) { [weak self] c in
+                DispatchQueue.main.async {
+                    self?.contract = c
+                    self?.ollama.contractVersion = c?.version
+                    self?.store.note(c != nil
+                        ? "extraction contract v\(c!.version), reading locally with \(self?.store.extractModel ?? "?")"
+                        : "no extraction contract reachable, transmissions ship raw and the dashboard reads them")
+                }
+            }
+            ollama.refresh()
+        }
 
         var o = Capture.Options()
         o.sources = store.sources
@@ -128,7 +157,7 @@ final class Controller: ObservableObject {
             st.state = "live"
             store.statuses[id] = st
             if let s = store.sources.first(where: { $0.id == id }) {
-                relay.enqueue(src: s.slug, city: s.city, scope: s.coverage.joined(separator: ", "), text: text, clip: clip)
+                dispatch(source: s, text: text, clip: clip)
                 store.note("[\(s.label.isEmpty ? s.slug : s.label)] \(text)")
             }
         case .failed(let id, let reason):
@@ -142,6 +171,43 @@ final class Controller: ObservableObject {
             record(audio: audio, wall: wall)
         }
         pushHealth()
+    }
+
+    /* One transmission leaves this Mac. In cloud mode it goes straight onto
+       the relay queue and the dashboard does the reading. In local mode it
+       stops at Ollama first, ten seconds at most, and ships with whatever the
+       model understood; a slow or dead Ollama costs the words nothing but the
+       wait, because the server's ladder is directly below. */
+    private func dispatch(source s: Source, text: String, clip: Data?) {
+        let mode = store.extractMode, model = store.extractModel
+        guard mode == "local", let c = contract else {
+            if mode == "local" && !exWarned {
+                exWarned = true
+                store.note("local extraction has no contract, shipping raw until the next start")
+            }
+            relay.enqueue(src: s.slug, city: s.city, scope: s.coverage.joined(separator: ", "), text: text, clip: clip)
+            return
+        }
+        let prior = exPrior[s.slug] ?? []
+        exPrior[s.slug] = Array((prior + [String(text.prefix(220))]).suffix(3))
+        let relay = self.relay
+        exQueue.async {
+            let sem = DispatchSemaphore(value: 0)
+            var got: String?
+            Ollama.extract(text: text, prior: prior, contract: c, model: model, timeout: 10) {
+                got = $0; sem.signal()
+            }
+            _ = sem.wait(timeout: .now() + 11)
+            if got == nil {
+                DispatchQueue.main.async { [weak self] in
+                    guard let self, !self.exWarned else { return }
+                    self.exWarned = true
+                    self.store.note("Ollama did not answer, transmissions ship raw and the dashboard reads them")
+                }
+            }
+            relay.enqueue(src: s.slug, city: s.city, scope: s.coverage.joined(separator: ", "),
+                          text: text, clip: clip, ex: got)
+        }
     }
 
     /* The dashboard already understands this shape, so the new app reports the
