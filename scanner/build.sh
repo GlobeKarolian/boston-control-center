@@ -142,6 +142,15 @@ cp "$MODEL" "$MDIR/ggml-small.en.bin"
 echo "    $(du -h "$MDIR/ggml-small.en.bin" | awk '{print $1}')"
 
 echo "==> bundle"
+# The face on the Dock. Committed as a finished .icns rather than rebuilt from
+# the master every run, because iconutil's output is deterministic and nobody
+# should need the source PNG on disk to ship a build. Chief belongs to Disney,
+# which is fine for a tool that never leaves the building and would not be for
+# anything that does.
+if [ -f "$HERE/icon/AppIcon.icns" ]; then
+  cp "$HERE/icon/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
+fi
+
 cat > "$APP/Contents/Info.plist" <<PLISTEOF
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -155,6 +164,7 @@ cat > "$APP/Contents/Info.plist" <<PLISTEOF
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
   <key>CFBundleVersion</key>           <string>$VERSION</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
+  <key>CFBundleIconFile</key>          <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>    <string>$MINOS</string>
   <key>LSApplicationCategoryType</key> <string>public.app-category.news</string>
   <key>NSHighResolutionCapable</key>   <true/>
