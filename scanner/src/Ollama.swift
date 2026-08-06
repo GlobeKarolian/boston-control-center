@@ -19,15 +19,22 @@ struct LocalModel: Identifiable, Hashable {
     let gigabytes: Double
     let note: String
 
+    /* Chosen in August 2026, for this task on this hardware, not from a
+       leaderboard. The job is schema-constrained JSON off noisy radio, beside
+       a 1.6GB Whisper on a Mac that may have 8GB total. Qwen3 4B instruct is
+       the strongest reader that leaves Whisper room on 8GB. Gemma 4 is the
+       steadiest structured output going but its smallest honest build (E4B
+       QAT) is a 6GB tenant, a 16GB machine's choice. The old Qwen 2.5 7B
+       stays for whoever already pulled it. */
     static let all: [LocalModel] = [
-        LocalModel(id: "qwen2.5:3b-instruct", label: "Qwen 2.5, 3B", gigabytes: 1.9,
-                   note: "The light one. Fits an 8GB Mac beside Whisper, and misses more."),
+        LocalModel(id: "qwen3:4b-instruct", label: "Qwen 3, 4B", gigabytes: 2.5,
+                   note: "The 8GB pick. The best reader at this weight, and it leaves Whisper its room."),
+        LocalModel(id: "gemma4:e4b-it-qat", label: "Gemma 4, E4B", gigabytes: 6.1,
+                   note: "Google's, and the steadiest JSON of the small models. Wants 16GB beside Whisper."),
         LocalModel(id: "qwen2.5:7b-instruct", label: "Qwen 2.5, 7B", gigabytes: 4.7,
-                   note: "The balance. Wants 16GB alongside a big Whisper model."),
-        LocalModel(id: "llama3.1:8b", label: "Llama 3.1, 8B", gigabytes: 4.9,
-                   note: "The alternative at the same weight, if Qwen reads Boston badly."),
+                   note: "The previous pick, kept for continuity. Qwen 3 reads better at half the weight."),
     ]
-    static let recommendedID = "qwen2.5:7b-instruct"
+    static let recommendedID = "qwen3:4b-instruct"
 }
 
 /* The contract, verbatim from the server. Kept as raw JSON blobs because the
