@@ -381,6 +381,16 @@
      radio toggle so the audio controls on this page read as one family. */
   .dchain{background:none;border:1px solid var(--border);border-radius:4px;color:var(--scanner);font-family:var(--mono);font-size:9.5px;padding:2px 9px;margin-top:7px;cursor:pointer;letter-spacing:.4px;display:inline-block}
   .dchain:hover{border-color:var(--scanner)}
+  /* The story's own listen control on the situation card. Filled, not
+     outlined, because on the rail it is the primary verb and should read as
+     one press away from sound. */
+  .sit-listen{background:#0d1f19;border-color:var(--scanner);color:var(--scanner);margin-top:8px;padding:4px 11px;font-size:10px}
+  .sit-listen:hover{box-shadow:0 0 12px rgba(52,211,153,.2)}
+  .thr-beat .cplay{width:20px;height:20px;background:#0b0f16;border:1px solid var(--border);border-radius:50%;padding:0;margin:0 6px 0 0;cursor:pointer;color:var(--scanner);font-size:7px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .thr-beat .cplay:hover{border-color:var(--scanner)}
+  .thr-beat .cplay.playing{background:var(--scanner);color:#06090f}
+  .sp-rad .cplay{background:none;border:0;padding:0 5px 0 0;cursor:pointer;color:var(--scanner);font-size:8px}
+  .sp-rad .cplay.playing{color:var(--road)}
   /* The Deck. The big control earns its size: it is the one thing the desk
      asked for by name, and it should not have to be hunted. */
   .dchain-big{display:flex;align-items:center;gap:11px;background:#0d1f19;border:1px solid var(--scanner);border-radius:8px;padding:8px 13px;margin-top:11px;cursor:pointer}
@@ -1626,7 +1636,7 @@ function incPopupHTML(inc){
   /* The chain, at the pin. Two dozen taps of context without leaving the map:
      everything this call has audio for, oldest first, one press. */
   const chain=(inc.timeline||[]).map(e=>e.clip).filter(u=>u&&window.BCCClips&&BCCClips.ok(u));
-  const listen=chain.length?'<button class="dchain" style="margin-top:6px" onclick="chainPlay(JSON.parse(this.dataset.chain))" data-chain="'+esc(JSON.stringify(chain))+'" title="Play every transmission this call has audio for, in order">&#9654; listen ('+chain.length+')</button>':'';
+  const listen=chain.length?'<button class="dchain" style="margin-top:6px" data-chain="'+esc(JSON.stringify(chain))+'" title="Play every transmission this call has audio for, in order">&#9654; listen ('+chain.length+')</button>':'';
   return '<div class="pop-t" style="color:var(--scanner)">'+esc(inc.type)+'</div>'+
     '<div class="pop-r">'+esc(inc.location||'')+'</div>'+
     '<div class="pop-meta">'+badge+hi+'</div>'+units+
@@ -1696,7 +1706,7 @@ function renderDetail(inc){
   const chain=(inc.timeline||[]).map(e=>e.clip).filter(u=>u&&window.BCCClips&&BCCClips.ok(u));
   /* The Deck's head: one fat control that plays the whole call, oldest first.
      It earns its size. This is the single thing the desk asked for by name. */
-  const chainBtn=chain.length?('<div class="dchain-big" role="button" tabindex="0" onclick="chainPlay(JSON.parse(this.dataset.chain))" data-chain="'+esc(JSON.stringify(chain))+'" title="Every transmission this call has audio for, in order">'+
+  const chainBtn=chain.length?('<div class="dchain-big" role="button" tabindex="0" data-chain="'+esc(JSON.stringify(chain))+'" title="Every transmission this call has audio for, in order">'+
       '<span class="dcb-ico">&#9654;</span>'+
       '<span><span class="dcb-t">PLAY THE CHAIN</span>'+
       '<span class="dcb-s">'+chain.length+' transmission'+(chain.length===1?'':'s')+' &middot; oldest first</span></span>'+
@@ -1726,18 +1736,6 @@ function renderDetail(inc){
     document.activeElement.classList.contains('dclose');
   el.innerHTML='<div class="dh"><span class="dclose" role="button" tabindex="0" aria-label="Close call detail" onclick="closeDetail()">&times;</span><div class="dtype">'+esc(inc.type)+'</div><div class="dloc">'+esc(inc.location||'')+'</div><div class="dmeta">'+badge+hi+'<span class="dunits">'+esc((inc.units||[]).join(', '))+'</span></div>'+cl+chainBtn+'</div><div class="dtl">'+(tl||'<div class="dunits" style="padding:10px 14px">no transmissions yet</div>')+'</div>';
   if(keepClose){const c=el.querySelector('.dclose');if(c)c.focus();}
-  /* Same capture-phase claim the console uses, wired once. Without it a press
-     on a timeline play control would also count as a press on whatever sits
-     under it, and the panel re-render would eat the playing state. */
-  if(!el._clipsWired){
-    el._clipsWired=1;
-    el.addEventListener('click',e=>{
-      const b=e.target.closest&&e.target.closest('.cplay');
-      if(b){e.stopPropagation();e.preventDefault();clipToggle(b);return;}
-      const a=e.target.closest&&e.target.closest('.cdl');
-      if(a)e.stopPropagation();
-    },true);
-  }
 }
 function showToast(inc){
   const w=document.getElementById('toastWrap');
@@ -2002,6 +2000,39 @@ function chainPlay(urls){
   CLIP_Q=good.slice(1);
   clipPlay(good[0]);
 }
+/* A story's soundtrack: every clip its beats carry, oldest first. Beats grew
+   clips on 6 August when the analyst learned to cite its evidence; boards
+   older than that simply produce an empty list and no button. */
+function sitClips(s){
+  const out=[];
+  try{
+    const bs=(window.BCCThread&&BCCThread.beats)?BCCThread.beats(s):[];
+    for(const b of bs){
+      const cl=(b&&b.clips)||[];
+      for(const c of cl){
+        const u=typeof c==='string'?c:(c&&c.u);
+        if(u&&window.BCCClips&&BCCClips.ok(u))out.push(u);
+      }
+    }
+  }catch(e){}
+  return out.slice(-12);
+}
+/* ONE audio delegate for the whole page, in the capture phase so a control
+   inside a clickable row claims the press before the row hears it. Every
+   surface, the console, the detail panel, the situation rail, the popups,
+   the Desk, emits the same three classes and none of them wires a handler:
+   .cplay plays one clip, .dchain with data-chain plays a list, .cdl is a
+   download that just needs the row not to hijack it. */
+document.addEventListener('click',e=>{
+  const t=e.target;if(!t||!t.closest)return;
+  const b=t.closest('.cplay');
+  if(b&&b.dataset.clip){e.stopPropagation();e.preventDefault();clipToggle(b);return;}
+  const ch=t.closest('.dchain');
+  if(ch&&ch.dataset.chain){e.stopPropagation();e.preventDefault();
+    try{chainPlay(JSON.parse(ch.dataset.chain));}catch(x){}return;}
+  const a=t.closest('.cdl');
+  if(a)e.stopPropagation();
+},true);
 function radioToggle(){
   RADIO_ON=!RADIO_ON;
   const rb=document.getElementById('radioBtn');
@@ -2074,19 +2105,6 @@ async function pollConsole(){
       '<span class="csrc">'+esc(t.source)+'</span> '+(t.role?roleBadge(t.role)+' ':'')+esc(t.text)+(cleared?' <span class="ctag">[clear]</span>':'')+'</div>';
   }).join('');
   el.querySelectorAll('.cline.hit').forEach(l=>{l.onclick=()=>openDetail(l.dataset.id);});
-  /* Wired once, in the capture phase, because a play button often sits inside
-     a .hit row whose own click opens the incident detail. Capture runs outer
-     first, so the button can claim the click before the row hears it. The
-     download link only needs the row not to hijack it. */
-  if(!el._clipsWired){
-    el._clipsWired=1;
-    el.addEventListener('click',e=>{
-      const b=e.target.closest&&e.target.closest('.cplay');
-      if(b){e.stopPropagation();e.preventDefault();clipToggle(b);return;}
-      const a=e.target.closest&&e.target.closest('.cdl');
-      if(a)e.stopPropagation();
-    },true);
-  }
   keep();
 }
 
@@ -2441,9 +2459,24 @@ function paintBoard(list){
   if(sitState.merge&&!sitState.byId[sitState.merge])sitState.merge=null;
   paintSits();
   sitLayer.clearLayers();
-  list.forEach(s=>{if(s.lat!=null&&s.lon!=null){const c=sitColor(s);
-    const circ=L.circle([s.lat,s.lon],{radius:s.priority==='high'?2600:1600,color:c,weight:1.5,opacity:.6,fillColor:c,fillOpacity:.12});
-    circ.bindPopup('<div class="pop-t" style="color:'+c+'">'+esc(s.headline||'')+'</div><div class="pop-r">'+esc(s.summary||'')+'</div><div class="pop-src">approx &middot; '+esc(s.location||'')+'</div>');
+  /* Smaller, and mortal. Editor's order, 6 August: the circles were 1600 and
+     2600 metres and lived as long as their situation did, and one busy night
+     painted greater Boston solid. Now 700 and 1150, and a circle outlives its
+     situation's last word by twenty minutes, then leaves the map to the pins.
+     The card on the rail keeps the story; the circle only ever meant "near
+     here, just now". */
+  const SIT_CIRCLE_MS=20*60*1000,sitNow=Date.now();
+  list.forEach(s=>{if(s.lat!=null&&s.lon!=null){
+    let last=0;
+    try{const bs=(window.BCCThread&&BCCThread.beats)?BCCThread.beats(s):[];
+      for(const b of bs){const t=b&&b.at?new Date(b.at).getTime():0;if(t>last)last=t;}}catch(e){}
+    if(!last&&s.updatedAt)last=new Date(s.updatedAt).getTime()||0;
+    if(last&&sitNow-last>SIT_CIRCLE_MS)return;
+    const c=sitColor(s);
+    const clips=sitClips(s);
+    const listen=clips.length?'<button class="dchain" style="margin-top:6px" data-chain="'+esc(JSON.stringify(clips))+'" title="Play this story\'s transmissions in order">&#9654; hear it unfold ('+clips.length+')</button>':'';
+    const circ=L.circle([s.lat,s.lon],{radius:s.priority==='high'?1150:700,color:c,weight:1.5,opacity:.6,fillColor:c,fillOpacity:.12});
+    circ.bindPopup('<div class="pop-t" style="color:'+c+'">'+esc(s.headline||'')+'</div><div class="pop-r">'+esc(s.summary||'')+'</div><div class="pop-src">approx &middot; '+esc(s.location||'')+'</div>'+listen);
     circ.addTo(sitLayer);}});
   renderStatePolice(list);
   const hi=list.find(s=>s.priority==='high'&&!sitState.seenHigh.has(s.id));
@@ -2501,6 +2534,12 @@ function sitCard(s){
   h+='<div class="sit-head-line">'+esc(s.headline||'')+'</div>';
   h+='<div class="sit-sum">'+esc(s.summary||'')+'</div>';
   if(s.location)h+='<div class="sit-loc">'+esc(s.location)+'</div>';
+  /* The tick tock. Every clip this story's beats carry, oldest first, one
+     press. The card is where the desk reads a story, so the card is where
+     the desk should be able to hear it. */
+  {const sc=sitClips(s);
+   if(sc.length)h+='<button class="dchain sit-listen" data-chain="'+esc(JSON.stringify(sc))+'"'+
+     ' title="Play this story\'s transmissions in order, oldest first">&#9654; hear it unfold ('+sc.length+')</button>';}
   /* The one line a collapsed thread owes the room: what has happened on it
      since the headline was written. */
   if(n>1&&!open&&last)h+='<div class="thr-last">then '+esc(last.text)+'</div>';
@@ -2522,8 +2561,13 @@ function threadBody(s,id){
   /* pDate rather than new Date, because ago() of an unparseable string is not an
      error, it is the string "0m ago" sitting on a beat nobody can date. A beat
      with a timestamp the browser cannot read should say so. */
-  h+=sh.rows.map(b=>{const w=pDate(b.at);return '<div class="thr-beat">'+
+  h+=sh.rows.map(b=>{const w=pDate(b.at);
+    /* A beat that knows its evidence carries the same play control as a
+       console row. One clip per press: the first the beat cites. */
+    const bu=(b.clips||[]).map(c=>typeof c==='string'?c:(c&&c.u)).filter(u=>u&&window.BCCClips&&BCCClips.ok(u));
+    return '<div class="thr-beat">'+
     '<span class="thr-when">'+esc(w?ago(w):'no time')+'</span>'+
+    (bu.length?'<button class="cplay" data-clip="'+esc(bu[0])+'" tabindex="-1" title="hear this beat">&#9654;</button>':'')+
     '<span class="thr-text">'+esc(b.text)+'</span>'+
     (b.canPull
       ? '<button class="thr-pull" data-thr="pull" data-id="'+esc(id)+'" data-at="'+esc(b.at)+'"'+
@@ -2776,10 +2820,12 @@ function renderSPRadio(list){
       '<span class="sp-rad-n">'+spState.radio.length+' heard</span></div>'+
     spState.radio.map(t=>{
       const hit=!!t.incidentId;
+      const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
       return '<div class="sp-rad'+(hit?' hit':'')+'"'+
         (hit?' role="button" tabindex="-1" data-id="'+esc(t.incidentId)+'"':'')+'>'+
         '<span class="sp-rad-t">'+(t.time?new Date(t.time).toLocaleTimeString('en-US',
           {hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}):'')+'</span>'+
+        (clip?'<button class="cplay" data-clip="'+esc(clip)+'" tabindex="-1" title="hear the transmission">&#9654;</button>':'')+
         '<span class="sp-rad-x">'+esc(t.text||'')+'</span></div>';
     }).join('');
   el.querySelectorAll('.sp-rad.hit').forEach(l=>{l.onclick=()=>openDetail(l.dataset.id);});

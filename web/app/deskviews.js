@@ -269,8 +269,14 @@
     if (!list.length) { swap(box, '<div class="dk-empty">No transmissions yet.</div>'); return; }
     swap(box, list.map(function (t) {
       var clear = !!(t.tags && t.tags.clear);
+      /* The play control, same class the whole page shares. deskviews owns no
+         audio logic: the page-level capture-phase delegate hears .cplay here
+         exactly as it does on the map console. A row with no clip renders as
+         it always did. */
+      var ok = t.clip && root.BCCClips && root.BCCClips.ok(t.clip);
+      var play = ok ? '<button class="cplay" data-clip="' + esc(t.clip) + '" tabindex="-1" title="hear the transmission">&#9654;</button>' : '';
       return '<div class="a-row' + (clear ? ' clear' : '') + '">' +
-        '<span class="src">' + esc(t.source || '') + ' ' + esc(clock(t.time)) + '</span>' +
+        '<span class="src">' + play + esc(t.source || '') + ' ' + esc(clock(t.time)) + '</span>' +
         '<span class="t">' + esc(t.text || '') + '</span></div>';
     }).join(''));
   }

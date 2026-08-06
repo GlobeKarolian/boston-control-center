@@ -29,7 +29,7 @@ const { cronAuth, json } = require('../../lib/http');
 const kv = require('../../lib/kv');
 const { K } = require('../../lib/store-io');
 const { geocode, nominatim } = require('../../lib/geo');
-const { reconcile, alertKey } = require('../../lib/threads');
+const { reconcile, alertKey, normWords } = require('../../lib/threads');
 
 const ANALYST_MODEL = process.env.ANALYST_MODEL || 'claude-sonnet-5';
 
@@ -272,6 +272,31 @@ module.exports = async (req, res) => {
     const batch = tr.slice(0, 70);
     const lines = batch.reverse().map(t => '[' + t.source + '] ' + t.text).join('\n');
 
+    /* The evidence, kept so a situation can be heard and not only read. Each
+       transcript row already carries the clip URL the relay uploaded; the
+       model never sees the URLs (they are noise to it and a place to
+       hallucinate), so the clip for a situation is recovered afterwards by
+       matching the model's summary and beats back to the transmissions that
+       produced them. A situation that quotes "20 teams physically fighting"
+       finds the row that said it and inherits its audio. Text-similarity, not
+       exact, because the model paraphrases; good enough to attach a play
+       button to the right thirty seconds. */
+    const clipRows = batch
+      .filter(t => t && t.clip && t.text)
+      .map(t => ({ clip: t.clip, at: t.time || t.at || null, words: normWords(t.text) }));
+    const clipsForText = (s) => {
+      const want = normWords(s);
+      if (want.length < 3 || !clipRows.length) return [];
+      const scored = clipRows.map(r => {
+        const set = new Set(r.words);
+        let hit = 0; for (const w of want) if (set.has(w)) hit++;
+        return { clip: r.clip, at: r.at, score: hit / Math.max(6, want.length) };
+      }).filter(x => x.score >= 0.34).sort((a, b) => b.score - a.score).slice(0, 4);
+      // Oldest first, so a chain plays in the order it was said.
+      return scored.sort((a, b) => String(a.at).localeCompare(String(b.at)))
+        .map(x => ({ u: x.clip, at: x.at }));
+    };
+
     /* The same tags the model is about to be shown, as a lookup. Anything it
        hands back that is not in here was invented, and an invented feed name
        is worse than an empty list: the state police column reads this field to
@@ -349,6 +374,11 @@ module.exports = async (req, res) => {
         matched: geo ? geo.matched : null,
         updates: ref(s.updates), relatedTo: ref(s.relatedTo),
         feeds: feedsHeard(s.feeds, heard),
+        /* The audio behind the words. Matched off headline and summary
+           together, since between them they quote the transmissions that
+           mattered. Empty when nothing rings a bell, which reads on the
+           board as a card with no play button, exactly right. */
+        clips: clipsForText((s.headline || '') + ' ' + (s.summary || '')),
       };
       /* The handle a human correction hangs on before this thing has an id of
          its own. If the desk splits a beat out of a thread on Tuesday, the

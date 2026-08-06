@@ -215,6 +215,8 @@
   text-transform:uppercase;color:var(--t3);margin-right:var(--x2)}
 #deskview .a-row .t{color:var(--t1)}
 #deskview .a-row.clear .t{color:var(--t3)}
+#deskview .a-row .cplay{background:none;border:0;padding:0 5px 0 0;cursor:pointer;color:var(--accent,#34d399);font-size:8px}
+#deskview .a-row .cplay.playing{color:var(--road,#ffb020)}
 
 /* Audit finding 7. The shortcuts were built and then never written down
    anywhere a person could find them. */

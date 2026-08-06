@@ -100,8 +100,24 @@ function alertKey(s) {
   return slug(s.type) + '|nowhere|' + words;
 }
 
-function ev(kind, text, type, at) {
-  return { at: at || new Date().toISOString(), kind, text: String(text || '').slice(0, 400), type: type || null };
+function ev(kind, text, type, at, clips) {
+  const e = { at: at || new Date().toISOString(), kind, text: String(text || '').slice(0, 400), type: type || null };
+  /* The audio behind this beat, when the analyst found it. A small capped
+     list of {u, at}, and absent entirely when there is none, so a board from
+     before audio existed serialises exactly as it always did. */
+  if (Array.isArray(clips) && clips.length) e.clips = clips.slice(0, 4);
+  return e;
+}
+
+/* Words worth matching on: lowercased, letters and digits only, the tiny
+   function words that ring true everywhere dropped so a match means shared
+   content and not shared grammar. Lives here so the analyst and any future
+   caller share one definition of "these two lines are about the same thing". */
+const STOP_ = new Set(('the a an and or of to in on at for is are was were be been '
+  + 'this that with from it its they them he she we you i as by up out').split(' '));
+function normWords(s) {
+  return String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/).filter(w => w.length > 2 && !STOP_.has(w));
 }
 
 /* Every radio that has carried this scene, ever. It only ever grows, and that
@@ -264,11 +280,11 @@ function reconcile(prev, fresh, overrides = {}) {
            water", and the bag becomes a line inside it carrying its own type,
            so a reader can see that a suspicious package was called in without
            the board claiming a suspicious package is happening. */
-        parent.events.push(ev('linked', f.headline, f.type));
+        parent.events.push(ev('linked', f.headline, f.type, null, f.clips));
       } else {
         // Same story, moved on. The newest telling is the best telling,
         // because the model has heard more radio than it had last time.
-        if (f.headline && f.headline !== parent.headline) parent.events.push(ev('update', f.headline, f.type));
+        if (f.headline && f.headline !== parent.headline) parent.events.push(ev('update', f.headline, f.type, null, f.clips));
         parent.headline = f.headline || parent.headline;
         parent.summary = f.summary || parent.summary;
         parent.status = f.status || parent.status;
@@ -302,7 +318,7 @@ function reconcile(prev, fresh, overrides = {}) {
       status: f.status || 'developing',
       feeds: mergeFeeds(f.feeds, null),
       firstSeen, updated: nowIso,
-      events: [ev('opened', f.headline, f.type, firstSeen)],
+      events: [ev('opened', f.headline, f.type, firstSeen, f.clips)],
     };
     s.alertKey = alertKey(s);
     byId.set(id, s);
@@ -332,4 +348,4 @@ function reconcile(prev, fresh, overrides = {}) {
   return { situations: out, opened, touched: [...touched] };
 }
 
-module.exports = { reconcile, alertKey, mintId, haversine, QUIET_MS, DROP_MS };
+module.exports = { reconcile, alertKey, mintId, haversine, normWords, QUIET_MS, DROP_MS };
