@@ -8,7 +8,18 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 NAME="Scanner Relay"
 EXEC="ScannerRelay"
 IDENT="com.bostonglobe.scanner-relay"
+# Marketing version, bumped by hand when something big changes. The BUILD
+# NUMBER below is what actually has to move every single build: macOS keys the
+# app's identity on CFBundleVersion, so a build number that never changes is
+# why every rebuild reads as a brand new app and re-asks for screen recording,
+# and why the DMG kept overwriting itself with the same name. The build number
+# is the count of commits that touch scanner/, so it climbs on its own, is the
+# same on any machine that checks out this commit, and never needs a file to
+# scribble state into.
 VERSION="1.0.0"
+BUILDNUM="$(git -C "$HERE" rev-list --count HEAD -- "$HERE" 2>/dev/null || echo 1)"
+[ -z "$BUILDNUM" ] && BUILDNUM=1
+FULLVERSION="$VERSION.$BUILDNUM"
 MINOS="14.0"
 BUILD="$HERE/build"
 APP="$BUILD/$NAME.app"
@@ -163,7 +174,7 @@ cat > "$APP/Contents/Info.plist" <<PLISTEOF
   <key>CFBundleIdentifier</key>        <string>$IDENT</string>
   <key>CFBundlePackageType</key>       <string>APPL</string>
   <key>CFBundleShortVersionString</key><string>$VERSION</string>
-  <key>CFBundleVersion</key>           <string>$VERSION</string>
+  <key>CFBundleVersion</key>           <string>$BUILDNUM</string>
   <key>CFBundleInfoDictionaryVersion</key><string>6.0</string>
   <key>CFBundleIconFile</key>          <string>AppIcon</string>
   <key>LSMinimumSystemVersion</key>    <string>$MINOS</string>
@@ -199,7 +210,7 @@ echo "==> installer"
 # there is nothing for a package receipt to verify and nothing to uninstall
 # later. Drag it across, approve it once, done.
 STAGE="$BUILD/dmg"
-DMG="$BUILD/Scanner Relay $VERSION.dmg"
+DMG="$BUILD/Scanner Relay $FULLVERSION.dmg"
 rm -rf "$STAGE" "$DMG"
 mkdir -p "$STAGE"
 cp -R "$APP" "$STAGE/"
@@ -273,7 +284,7 @@ fi
 rm -rf "$STAGE"
 
 echo
-echo "Built $APP"
+echo "Built $APP  (version $VERSION, build $BUILDNUM)"
 du -sh "$APP" | awk '{print "Size " $1}'
 echo "Install it here with:  cp -R \"$APP\" /Applications/"
 [ -f "$DMG" ] && echo "Ship this to another Mac:  $DMG"
