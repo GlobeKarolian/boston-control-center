@@ -39,6 +39,32 @@
 const MODEL = process.env.EXTRACT_MODEL || 'claude-haiku-4-5';
 const KEY = () => (process.env.ANTHROPIC_API_KEY || '').trim();
 
+/* The daily budget, learned the hard way: the account ran its whole credit
+   balance dry in ten days and the board spent an evening on regex without
+   anyone deciding that. The editor's ceiling is $100 a month for everything,
+   so the model spend gets a hard daily allowance and the fallback ladder gets
+   one more rung: over budget goes to regex exactly like the API being down,
+   loudly labelled, instead of a silent 400 at the end of the month.
+
+   Counted in Redis so every warm container shares one meter. One INCRBY per
+   POST, not per item. Fail-open on a meter error, because Redis being down
+   already means the board is down, and a broken meter should not be the thing
+   that silences a working radio. */
+const EXTRACT_DAILY_CAP = Math.max(0, parseInt(process.env.EXTRACT_DAILY_CAP || '500', 10) || 500);
+async function extractAllowance(want) {
+  if (!want) return 0;
+  try {
+    const kv = require('./kv');
+    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    const key = 'bcc:spend:extract:' + day;
+    const [n] = await kv.raw([['INCRBY', key, want], ['EXPIRE', key, 172800]], 5000);
+    const used = Number(n) || 0;
+    return Math.max(0, Math.min(want, EXTRACT_DAILY_CAP - (used - want)));
+  } catch (e) {
+    return want;
+  }
+}
+
 // The stop phrasing lives in one place. The regex fallback path uses the same
 // patterns the stop tracker does, so a night when the API is down still gets
 // stops, and the two never drift apart into two different ideas of what "clear"
@@ -404,8 +430,15 @@ async function extractBatch(items, { concurrency = 6, timeoutMs = 20000, priorBy
     return { results: out, by: 'regex', errors: ['ANTHROPIC_API_KEY not set'], skipped };
   }
 
-  let down = false;
+  /* The budget rung. Ask the meter for this batch's allowance in one round
+     trip; items past the allowance take the regex path and say why. Ordering
+     means the freshest transmissions in the batch get the model first. */
+  const wantApi = rows.filter((r, i) => !out[i]).length;
+  let allow = await extractAllowance(wantApi);
   const errors = [];
+  if (allow < wantApi) errors.push('daily extraction budget spent: ' + EXTRACT_DAILY_CAP + ' model calls, regex until midnight UTC');
+
+  let down = false;
   let cursor = 0;
   const worker = async () => {
     for (;;) {
@@ -414,6 +447,8 @@ async function extractBatch(items, { concurrency = 6, timeoutMs = 20000, priorBy
       if (out[i]) continue;                                   // noise, already handled
       const { text, src } = rows[i];
       if (down) { out[i] = regexExtract(text); continue; }
+      if (allow <= 0) { out[i] = regexExtract(text); remember(src, text); continue; }
+      allow--;
       const prior = priorFor(src);
       try {
         out[i] = await callAnthropic(text, timeoutMs, prior);

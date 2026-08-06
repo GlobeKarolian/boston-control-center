@@ -292,6 +292,22 @@ module.exports = async (req, res) => {
     const sig = crypto.createHash('sha1').update(lines).digest('hex').slice(0, 20);
     if (prevSig === sig) return await ageOnly('no new traffic since last run', { transcripts: tr.length });
 
+    /* The budget rung, same shape as the extractor's. Sonnet is the single
+       most expensive call in this system and the account has already been
+       run dry once. Over the daily allowance the board keeps aging on the
+       ageOnly path, situations close on schedule, and nothing new is judged
+       until midnight UTC. The response says so in words, because a budget
+       that silences a system without saying why is how tonight happened. */
+    const CAP = Math.max(0, parseInt(process.env.ANALYST_DAILY_CAP || '40', 10) || 40);
+    try {
+      const dk = 'bcc:spend:analyst:' + new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const [used] = await kv.raw([['INCR', dk], ['EXPIRE', dk, 172800]], 5000);
+      if (Number(used) > CAP) {
+        return await ageOnly('daily analyst budget spent (' + CAP + ' runs), aging only until midnight UTC',
+          { transcripts: tr.length });
+      }
+    } catch (e) { /* a broken meter must not silence a working radio */ }
+
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },

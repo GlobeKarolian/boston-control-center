@@ -122,3 +122,26 @@ notifications firing to Slack. Audio clips landing and playable. The week
 of real use then hardens the thing the presentation shows, and every bug
 the newsroom hits lands as a commit, so the story of the week is in the
 log.
+
+## The bill, and the ceiling
+
+Set by the editor on 6 August at half past midnight: the whole system runs
+under $100 a month. Learned an hour earlier: the API account had already
+spent its entire credit balance in ten days, mostly on an ungoverned
+every-minute Sonnet analyst and an extractor whose 2,440-token prompt is
+too short for Haiku to cache and too long to keep re-sending.
+
+The ceiling is now structural, not aspirational. Extraction has a daily
+allowance (EXTRACT_DAILY_CAP, default 500 model calls) and falls to the
+regex path past it, loudly labelled. The analyst has one too
+(ANALYST_DAILY_CAP, default 40 runs) on a five-minute cron, and past it the
+board ages without new judgment until midnight UTC. Worst case that is
+under three dollars a day of API on top of ten dollars of Redis and pennies
+of Blob.
+
+Two things finish the job. In the Anthropic console, a monthly spend limit
+around $75, so the platform enforces what the code intends. And the real
+cure: extraction moving onto the mini next to Whisper (extract-local.js is
+built and waiting; gate it on the recorded corpus, then wire the relay),
+which deletes the larger model line outright and buys the analyst room to
+breathe inside the same ceiling.

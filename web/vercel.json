@@ -37,7 +37,7 @@
     "api/outages.js": { "maxDuration": 10 }
   },
   "crons": [
-    { "path": "/api/cron/analyst", "schedule": "* * * * *" },
+    { "path": "/api/cron/analyst", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/sweep", "schedule": "*/5 * * * *" },
     { "path": "/api/cron/baseline", "schedule": "*/10 * * * *" },
     { "path": "/api/cron/pulse", "schedule": "0 */3 * * *" },
