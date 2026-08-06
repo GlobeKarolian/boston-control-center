@@ -372,6 +372,17 @@
   .cline .cplay.playing{color:var(--road)}
   .cline .cdl{color:var(--text-faint);text-decoration:none;margin-right:6px;font-size:10px}
   .cline .cdl:hover{color:var(--text-dim)}
+  .radiobtn{background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-family:var(--mono);font-size:9px;padding:1px 8px;margin-left:10px;cursor:pointer;letter-spacing:.4px}
+  .radiobtn.on{color:var(--scanner);border-color:var(--scanner)}
+  .radiobtn:hover{color:var(--text)}
+  /* The chain control, in the detail header and at the pin. Same voice as the
+     radio toggle so the two audio controls on this page read as one family. */
+  .dchain{background:none;border:1px solid var(--border);border-radius:4px;color:var(--scanner);font-family:var(--mono);font-size:9.5px;padding:2px 9px;margin-top:7px;cursor:pointer;letter-spacing:.4px;display:inline-block}
+  .dchain:hover{border-color:var(--scanner)}
+  .tl-item .cplay{background:none;border:0;padding:0 3px 0 0;cursor:pointer;color:var(--scanner);font-size:9px}
+  .tl-item .cplay.playing{color:var(--road)}
+  .tl-item .cdl{color:var(--text-faint);text-decoration:none;margin-right:5px;font-size:10px}
+  .tl-item .cdl:hover{color:var(--text-dim)}
   .inc-wrap{background:transparent;border:0}
   .inc-ico{width:18px;height:18px;position:relative;display:flex;align-items:center;justify-content:center}
   .inc-ico .dot{width:9px;height:9px;border-radius:50%;background:var(--c);border:1.5px solid #06090f;box-shadow:0 0 6px var(--c)}
@@ -1144,14 +1155,13 @@
       <button class="pb-now" id="pbNow" title="Jump back to the current hour">NOW</button>
     </div>
     <div class="pb-note" id="pbNote">
-      <b>Forecast, bent by live readings.</b> The base surface is typical busyness
-      for this weekday. Where we can measure the city right now, that patch is pulled
-      toward what is actually happening. Everywhere else the forecast stands.
+      <b>A forecast, not a reading.</b> Typical busyness for this weekday and hour,
+      averaged from history. Nothing on this layer measures the city live.
     </div>
   </div>
 
   <div class="console">
-    <div class="chead"><span class="rec"></span><h3>Live Audio</h3><span class="sub2" id="consoleSub">connecting&hellip;</span></div>
+    <div class="chead"><span class="rec"></span><h3>Live Audio</h3><button id="radioBtn" class="radiobtn" onclick="radioToggle()" title="Play each new transmission out loud as it lands, about half a minute behind the air. Off plays nothing until you press a row's arrow.">&#9654; radio</button><span class="sub2" id="consoleSub">connecting&hellip;</span></div>
     <div class="clog" id="clog"><div class="cline">Waiting for transmissions&hellip;</div></div>
   </div>
   <!-- The two live regions, and the one panel that deliberately is not one.
@@ -1578,10 +1588,14 @@ function incPopupHTML(inc){
   const tl=(inc.timeline||[]).slice(-3).reverse().map(e=>
     '<div class="pop-tl'+(e.clear?' clear':'')+'"><span class="pop-tlt">'+new Date(e.t).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})+'</span>'+(e.role?roleBadge(e.role):'')+esc(e.text)+'</div>'
   ).join('')||'<div class="pop-tl" style="color:var(--text-faint)">no transmissions yet</div>';
+  /* The chain, at the pin. Two dozen taps of context without leaving the map:
+     everything this call has audio for, oldest first, one press. */
+  const chain=(inc.timeline||[]).map(e=>e.clip).filter(u=>u&&window.BCCClips&&BCCClips.ok(u));
+  const listen=chain.length?'<button class="dchain" style="margin-top:6px" onclick="chainPlay(JSON.parse(this.dataset.chain))" data-chain="'+esc(JSON.stringify(chain))+'" title="Play every transmission this call has audio for, in order">&#9654; listen ('+chain.length+')</button>':'';
   return '<div class="pop-t" style="color:var(--scanner)">'+esc(inc.type)+'</div>'+
     '<div class="pop-r">'+esc(inc.location||'')+'</div>'+
     '<div class="pop-meta">'+badge+hi+'</div>'+units+
-    '<div class="pop-tls">'+tl+'</div>'+
+    '<div class="pop-tls">'+tl+'</div>'+listen+
     /* role="button" and tabindex="0" put this on the same footing as every other div
        with an onclick in this file, and the delegated Enter and Space handler picks it
        up by the role attribute with no wiring of its own. It matters more here than it
@@ -1641,7 +1655,17 @@ function renderDetail(inc){
   const badge=inc.status==='active'?'<span class="badge active">Active</span>':'<span class="badge cleared">Cleared</span>';
   const hi=(inc.priority==='high'&&inc.status==='active')?'<span class="badge high">&#9888; Priority</span>':'';
   const cl=(inc.status!=='active'&&inc.clearedAt)?'<div class="dunits" style="margin-top:5px">cleared '+new Date(inc.clearedAt).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'})+'</div>':'';
-  const tl=(inc.timeline||[]).slice().reverse().map(e=>'<div class="tl-item'+(e.clear?' clear':(e.onScene?' onscene':''))+'"><div class="tlt">'+new Date(e.t).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'America/New_York'})+'</div><div class="tlx">'+esc(e.text)+'</div><div class="tlsrc">'+esc(e.source)+' '+roleBadge(e.role)+'</div></div>').join('');
+  /* Every timeline entry that has audio gets the same two controls the console
+     rows carry, and the header gets the one the desk actually asked for: play
+     the chain, oldest first, so the room hears the call the way it happened. */
+  const chain=(inc.timeline||[]).map(e=>e.clip).filter(u=>u&&window.BCCClips&&BCCClips.ok(u));
+  const chainBtn=chain.length?'<button class="dchain" onclick="chainPlay(JSON.parse(this.dataset.chain))" data-chain="'+esc(JSON.stringify(chain))+'" title="Play every transmission this call has audio for, in order">&#9654; play the chain ('+chain.length+')</button>':'';
+  const tl=(inc.timeline||[]).slice().reverse().map(e=>{
+    const clip=(e.clip&&window.BCCClips&&BCCClips.ok(e.clip))?e.clip:'';
+    const audio=clip?('<button class="cplay'+(CLIP_NOW===clip?' playing':'')+'" data-clip="'+esc(clip)+'" tabindex="-1" title="hear the transmission">'+(CLIP_NOW===clip?'&#9632;':'&#9654;')+'</button>'+
+      '<a class="cdl" href="'+esc(BCCClips.downloadUrl(clip))+'" download tabindex="-1" title="download the clip">&#8595;</a>'):'';
+    return '<div class="tl-item'+(e.clear?' clear':(e.onScene?' onscene':''))+'"><div class="tlt">'+audio+new Date(e.t).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',second:'2-digit',timeZone:'America/New_York'})+'</div><div class="tlx">'+esc(e.text)+'</div><div class="tlsrc">'+esc(e.source)+' '+roleBadge(e.role)+'</div></div>';
+  }).join('');
   /* The panel re-renders on every scanner poll and not only when it is opened: the
      branch at the end of pollScanner() feeds the selected incident back through here
      so that a live call's timeline grows while you are reading it. That rewrite
@@ -1654,8 +1678,20 @@ function renderDetail(inc){
      the old one, so there is nothing to compare it to. */
   const keepClose=el.contains(document.activeElement)&&
     document.activeElement.classList.contains('dclose');
-  el.innerHTML='<div class="dh"><span class="dclose" role="button" tabindex="0" aria-label="Close call detail" onclick="closeDetail()">&times;</span><div class="dtype">'+esc(inc.type)+'</div><div class="dloc">'+esc(inc.location||'')+'</div><div class="dmeta">'+badge+hi+'<span class="dunits">'+esc((inc.units||[]).join(', '))+'</span></div>'+cl+'</div><div class="dtl">'+(tl||'<div class="dunits" style="padding:10px 14px">no transmissions yet</div>')+'</div>';
+  el.innerHTML='<div class="dh"><span class="dclose" role="button" tabindex="0" aria-label="Close call detail" onclick="closeDetail()">&times;</span><div class="dtype">'+esc(inc.type)+'</div><div class="dloc">'+esc(inc.location||'')+'</div><div class="dmeta">'+badge+hi+'<span class="dunits">'+esc((inc.units||[]).join(', '))+'</span></div>'+cl+chainBtn+'</div><div class="dtl">'+(tl||'<div class="dunits" style="padding:10px 14px">no transmissions yet</div>')+'</div>';
   if(keepClose){const c=el.querySelector('.dclose');if(c)c.focus();}
+  /* Same capture-phase claim the console uses, wired once. Without it a press
+     on a timeline play control would also count as a press on whatever sits
+     under it, and the panel re-render would eat the playing state. */
+  if(!el._clipsWired){
+    el._clipsWired=1;
+    el.addEventListener('click',e=>{
+      const b=e.target.closest&&e.target.closest('.cplay');
+      if(b){e.stopPropagation();e.preventDefault();clipToggle(b);return;}
+      const a=e.target.closest&&e.target.closest('.cdl');
+      if(a)e.stopPropagation();
+    },true);
+  }
 }
 function showToast(inc){
   const w=document.getElementById('toastWrap');
@@ -1801,25 +1837,74 @@ async function loadAircraft(){
    seconds. The URL is re-checked against the trusted host here, not just at
    render, because innerHTML is a copy machine and the attribute it copies
    from could be older than the check that produced it. */
-let CLIP_PLAYER=null, CLIP_NOW='';
+let CLIP_PLAYER=null, CLIP_NOW='', CLIP_Q=[];
+/* Radio mode. John asked for audio so he does not have to stare at the
+   screen, and a play button still needs staring. With radio on, every clip
+   that lands goes on the queue and gets spoken in arrival order, about half
+   a minute behind the air. The seen set starts as whatever is already on
+   the console, so turning it on plays the future, not the archive. */
+let RADIO_ON=false, RADIO_SEEN=new Set();
+const RADIO_SILENT='data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+function clipPlayer(){
+  if(!CLIP_PLAYER){
+    CLIP_PLAYER=new Audio();
+    /* ended and error both fall through to the queue, because one clip the
+       store lost should cost the room a single transmission, never the
+       whole broadcast. */
+    CLIP_PLAYER.addEventListener('ended',()=>{clipStop();clipNext();});
+    CLIP_PLAYER.addEventListener('error',()=>{clipStop();clipNext();});
+  }
+  return CLIP_PLAYER;
+}
 function clipStop(){
   if(CLIP_PLAYER){try{CLIP_PLAYER.pause();}catch(e){}}
   CLIP_NOW='';
   document.querySelectorAll('.cplay.playing').forEach(b=>{b.classList.remove('playing');b.innerHTML='&#9654;';});
 }
+function clipPlay(url){
+  if(!(window.BCCClips&&BCCClips.ok(url)))return false;
+  clipStop();
+  const p=clipPlayer();
+  p.src=url; CLIP_NOW=url;
+  /* Light every control that points at this clip: the console row and the
+     detail timeline can both be showing the same transmission. */
+  document.querySelectorAll('.cplay').forEach(b=>{
+    if(b.dataset.clip===url){b.classList.add('playing');b.innerHTML='&#9632;';}
+  });
+  p.play().catch(()=>{clipStop();clipNext();});
+  return true;
+}
+function clipNext(){
+  while(CLIP_Q.length){ if(clipPlay(CLIP_Q.shift())) return; }
+}
 function clipToggle(btn){
   const url=btn.dataset.clip||'';
-  if(!(window.BCCClips&&BCCClips.ok(url)))return;
   if(CLIP_NOW===url){clipStop();return;}
-  clipStop();
-  if(!CLIP_PLAYER){
-    CLIP_PLAYER=new Audio();
-    CLIP_PLAYER.addEventListener('ended',clipStop);
-    CLIP_PLAYER.addEventListener('error',clipStop);
+  clipPlay(url);
+}
+/* The chain: one press on an event, every transmission it has audio for,
+   oldest first, so the room hears the call the way it happened. Replaces
+   whatever was queued, because pressing this IS the newsroom saying what it
+   wants to listen to next. Radio stays on and resumes behind it. */
+function chainPlay(urls){
+  const good=(urls||[]).filter(u=>window.BCCClips&&BCCClips.ok(u));
+  if(!good.length)return;
+  CLIP_Q=good.slice(1);
+  clipPlay(good[0]);
+}
+function radioToggle(){
+  RADIO_ON=!RADIO_ON;
+  const rb=document.getElementById('radioBtn');
+  if(rb){rb.classList.toggle('on',RADIO_ON);rb.innerHTML=RADIO_ON?'&#9632; radio on':'&#9654; radio';}
+  if(RADIO_ON){
+    RADIO_SEEN=new Set((lastTx||[]).map(t=>t.id));
+    /* The toggle click is the one user gesture this feature will ever get,
+       so it unlocks the shared player with a silent wav. Every later play
+       comes from a poll timer, and a locked element refuses those. */
+    const p=clipPlayer(); p.src=RADIO_SILENT; p.play().catch(()=>{});
+  }else{
+    CLIP_Q=[]; clipStop();
   }
-  CLIP_PLAYER.src=url; CLIP_NOW=url;
-  btn.classList.add('playing'); btn.innerHTML='&#9632;';
-  CLIP_PLAYER.play().catch(clipStop);
 }
 
 async function pollConsole(){
@@ -1838,9 +1923,24 @@ async function pollConsole(){
      second fetch of the same file on the same cadence to get bytes this
      function already has would be the worst way to feed them. */
   lastTx=list;
+  /* Radio: queue what is new since the last poll, oldest first. The seen set
+     keeps replays out; the rebuild keeps it from growing all night, and the
+     console ring is capped at 80 so the rebuild loses nothing it needs. */
+  if(RADIO_ON){
+    const fresh=[];
+    for(const t of list){
+      if(RADIO_SEEN.has(t.id))continue;
+      RADIO_SEEN.add(t.id);
+      if(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))fresh.push(t.clip);
+    }
+    for(let i=fresh.length-1;i>=0;i--)CLIP_Q.push(fresh[i]);
+    if(RADIO_SEEN.size>600)RADIO_SEEN=new Set(list.map(t=>t.id));
+    if(!CLIP_NOW&&CLIP_Q.length)clipNext();
+  }
   if(!list.length){ if(sub)sub.textContent='waiting for audio'; return; }
   const newest=list[0]&&list[0].time?new Date(list[0].time):null;
-  if(sub)sub.textContent=(newest&&(Date.now()-newest.getTime()<25000))?'ingesting live':'idle';
+  if(sub){const s0=(newest&&(Date.now()-newest.getTime()<25000))?'ingesting live':'idle';
+    sub.textContent=RADIO_ON?(s0+' · radio on'+(CLIP_Q.length?' · '+CLIP_Q.length+' queued':'')):s0;}
   const keep=roveKeep();
   el.innerHTML=list.map(t=>{
     const hit=!!t.incidentId, cleared=t.tags&&t.tags.clear;

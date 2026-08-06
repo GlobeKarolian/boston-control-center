@@ -487,7 +487,7 @@ function createStore(geocode, extractFn, opt) {
     };
 
     if (inc) {
-      inc.timeline.push({ t: iso(time), source, text, onScene: ex.isOnScene, clear: ex.isClear, role });
+      inc.timeline.push({ t: iso(time), source, text, onScene: ex.isOnScene, clear: ex.isClear, role, clip: clip || undefined });
       inc.lastUpdate = iso(time);
       if (ex.priority === 'high') inc.priority = 'high';
       if (escalated) inc.escalations = (inc.escalations || 0) + 1;
@@ -584,7 +584,7 @@ function createStore(geocode, extractFn, opt) {
         signals: th.signals.map(s => s.label), specialists: th.units.map(u => u.label),
         depts: department ? [department] : [], alarm,
         unitJoins: ex.units.map(() => +new Date(time)),
-        units: [...ex.units], timeline: [{ t: iso(time), source, text, onScene: ex.isOnScene, clear: ex.isClear, role }],
+        units: [...ex.units], timeline: [{ t: iso(time), source, text, onScene: ex.isOnScene, clear: ex.isClear, role, clip: clip || undefined }],
       };
       if (stop) { stop.incidentId = id; inc.stopId = stop.id; }
       scoreHeat(inc);
