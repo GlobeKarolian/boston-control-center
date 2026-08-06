@@ -254,36 +254,49 @@ private extension Capture {
         let puller = HLSPuller()
         var misses = 0
         var nextRenew = Date.distantPast
+        /* Set from inside the pool closure to leave the loop, since a closure
+           cannot return the enclosing function. */
+        var stopFollow = false
         emit(.state(s.id, "live"))
 
         while !isStopping {
-            if s.isBroadcastify, let exp = st.expires,
-               exp.timeIntervalSinceNow < 120, Date() >= nextRenew,
-               let fid = Capture.feedID(s.url) {
-                nextRenew = Date().addingTimeInterval(30)
-                if case .success(let fresh) = Broadcastify.shared.resolve(feedID: fid) {
-                    st = fresh
-                    emit(.log("[\(s.slug)] listening token renewed"))
+            /* One pool per poll. This is a raw Thread that loops for the life
+               of the app, and a raw Thread never drains its autorelease pool
+               on its own. Every HTTP request here creates a DispatchSemaphore
+               (a Mach port), a URLRequest, a dataTask and a response, and
+               without this pool all of it accumulates for days until the
+               process runs out of Mach ports and macOS kills it. Same crash,
+               network side, as the subprocess side in Capture.run. */
+            autoreleasepool {
+                if s.isBroadcastify, let exp = st.expires,
+                   exp.timeIntervalSinceNow < 120, Date() >= nextRenew,
+                   let fid = Capture.feedID(s.url) {
+                    nextRenew = Date().addingTimeInterval(30)
+                    if case .success(let fresh) = Broadcastify.shared.resolve(feedID: fid) {
+                        st = fresh
+                        emit(.log("[\(s.slug)] listening token renewed"))
+                    }
+                }
+
+                let p = puller.poll(st, session: Broadcastify.shared.session)
+                if let e = p.error {
+                    misses += 1
+                    if misses >= 4 {
+                        emit(.failed(s.id, e))
+                        emit(.state(s.id, "error"))
+                        isStopping ? () : (stopFollow = true)
+                    }
+                } else if p.added > 0 {
+                    misses = 0
+                }
+
+                if !stopFollow, puller.seconds >= seconds {
+                    let chunk = puller.takeBuffer()
+                    emit(.segment(s.id))
+                    work.addOperation { [weak self] in self?.transcribe(chunk, source: s) }
                 }
             }
-
-            let p = puller.poll(st, session: Broadcastify.shared.session)
-            if let e = p.error {
-                misses += 1
-                if misses >= 4 {
-                    emit(.failed(s.id, e))
-                    emit(.state(s.id, "error"))
-                    return
-                }
-            } else if p.added > 0 {
-                misses = 0
-            }
-
-            if puller.seconds >= seconds {
-                let chunk = puller.takeBuffer()
-                emit(.segment(s.id))
-                work.addOperation { [weak self] in self?.transcribe(chunk, source: s) }
-            }
+            if stopFollow { return }
             nap(2)
         }
     }
@@ -306,20 +319,27 @@ private extension Capture {
         emit(.state(s.id, "live"))
 
         while !isStopping {
-            if let e = raw.failure {
-                emit(.failed(s.id, e))
-                emit(.state(s.id, "error"))
-                break
-            }
-            let d = raw.take()
-            if !d.isEmpty { framer.append(d) }
-            while let seg = framer.drain(seconds: seconds) {
-                emit(.segment(s.id))
-                work.addOperation { [weak self] in
-                    self?.decode(seg.data, ext: "mp3", source: s)
+            /* Same reason as follow(): a raw Thread that loops forever drains
+               no pool of its own, so the Data buffers this moves accumulate
+               without one. */
+            var brk = false
+            autoreleasepool {
+                if let e = raw.failure {
+                    emit(.failed(s.id, e))
+                    emit(.state(s.id, "error"))
+                    brk = true; return
                 }
+                let d = raw.take()
+                if !d.isEmpty { framer.append(d) }
+                while let seg = framer.drain(seconds: seconds) {
+                    emit(.segment(s.id))
+                    work.addOperation { [weak self] in
+                        self?.decode(seg.data, ext: "mp3", source: s)
+                    }
+                }
+                if raw.finished && d.isEmpty { brk = true }
             }
-            if raw.finished && d.isEmpty { break }
+            if brk { break }
             nap(0.5)
         }
         raw.stop()
@@ -461,17 +481,32 @@ extension Capture {
        there, and a pipe nobody drains is a pipe that eventually deadlocks. */
     static func run(_ path: String, _ args: [String]) -> (code: Int32, out: String) {
         guard FileManager.default.isExecutableFile(atPath: path) else { return (-1, "") }
-        let p = Process()
-        p.executableURL = URL(fileURLWithPath: path)
-        p.arguments = args
-        let pipe = Pipe()
-        p.standardOutput = pipe
-        p.standardInput = FileHandle.nullDevice
-        p.standardError = FileHandle.nullDevice
-        do { try p.run() } catch { return (-1, "") }
-        let data = pipe.fileHandleForReading.readDataToEndOfFile()
-        p.waitUntilExit()
-        return (p.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        /* The autorelease pool is not decoration. This runs thousands of times
+           a day on background threads (whisper on every segment, afconvert on
+           every kept clip), and a background thread does not drain its pool on
+           its own. Process and Pipe are Foundation objects backed by Mach ports
+           and file descriptors; without a pool draining each call, those ports
+           accumulate for the life of the thread until the task hits the
+           per-process Mach port limit and macOS kills the app. That is the
+           EXC_RESOURCE / PORT_SPACE crash the relay was dying of every several
+           hours. The explicit close() is belt to the pool's braces: it returns
+           the pipe's descriptors the instant the read is done rather than at
+           pool drain. */
+        return autoreleasepool {
+            let p = Process()
+            p.executableURL = URL(fileURLWithPath: path)
+            p.arguments = args
+            let pipe = Pipe()
+            p.standardOutput = pipe
+            p.standardInput = FileHandle.nullDevice
+            p.standardError = FileHandle.nullDevice
+            let readHandle = pipe.fileHandleForReading
+            do { try p.run() } catch { try? readHandle.close(); return (-1, "") }
+            let data = readHandle.readDataToEndOfFile()
+            p.waitUntilExit()
+            try? readHandle.close()
+            return (p.terminationStatus, String(data: data, encoding: .utf8) ?? "")
+        }
     }
 
     /// Loudness of a sixteen bit mono WAV, sampled rather than summed whole.
