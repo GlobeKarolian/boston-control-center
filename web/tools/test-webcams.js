@@ -168,13 +168,24 @@ ok('origin is added when given', W.embedSrc(W.get('p-pVYYH4ZCk'), { origin: 'htt
 ok('origin is absent when not given', e.indexOf('origin=') < 0);
 ok('a bad camera makes no url', W.embedSrc(null) === '');
 ok('a malformed camera makes no url', W.embedSrc({ id: 'x' }) === '');
-// A channel embed is the only thing here that survives an id rotation, so the
-// branch is tested even though no catalog row uses it yet.
-const ch = W.embedSrc({ id: 'abcdefghijk', lat: 42, lon: -71, channelId: 'UC_test' });
-ok('a channel id takes the live_stream path', ch.indexOf('/embed/live_stream?channel=UC_test') > 0);
-ok('the channel embed still autoplays muted', ch.indexOf('autoplay=1') > 0 && ch.indexOf('mute=1') > 0);
-ok('the channel embed has one question mark', ch.split('?').length === 2);
-ok('no catalog row has a channel id yet', W.list().every(c => !c.channelId));
+// A channel embed shows whichever ONE stream the channel has live, so it is
+// only a safe address for a channel that owns a single camera here. The rule
+// is catalog-aware on purpose: a bare object with a channelId does not get
+// the channel path, because the catalog is where ownership is counted.
+const solo = W.embedSrc(W.get('_OeFhA2XqqA'));   // Mass Maritime, one camera
+ok('a solo-channel camera takes the live_stream path',
+  solo.indexOf('/embed/live_stream?channel=UCiKd90Y9P2dH3QR_AecBYaA') > 0);
+ok('the channel embed still autoplays muted', solo.indexOf('autoplay=1') > 0 && solo.indexOf('mute=1') > 0);
+ok('the channel embed has one question mark', solo.split('?').length === 2);
+// Boston and Maine Live owns eight of these cameras. Eight pins showing the
+// same picture is worse than eight pins that occasionally rot, so a shared
+// channel keeps the video path even though its channelId is recorded.
+const shared = W.embedSrc(W.get('p-pVYYH4ZCk'));
+ok('a shared-channel camera keeps the video path', shared.indexOf('/embed/p-pVYYH4ZCk') > 0);
+ok('and does not take the channel path', shared.indexOf('live_stream') < 0);
+ok('every catalog row records its channel now', W.list().every(c => c.channelId && /^UC[\w-]{22}$/.test(c.channelId)));
+ok('a foreign channelId outside the catalog gets no channel path',
+  W.embedSrc({ id: 'abcdefghijk', lat: 42, lon: -71, channelId: 'UC_test' }).indexOf('live_stream') < 0);
 
 head('watch urls');
 const w = W.watchURL(W.get('catvjIWNrZg'));

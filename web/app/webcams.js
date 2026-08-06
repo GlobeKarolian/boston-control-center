@@ -42,61 +42,73 @@
      nobody established a direction and the camera gets fanned instead. */
   var CAMS = [
     { id: 'p-pVYYH4ZCk', site: 'mos', name: 'Museum of Science, east',
+      channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Science Park, Boston', region: 'boston',
       lat: 42.3676, lon: -71.0716, bearing: 90, confirmed: true,
       note: 'Green Line and the Charles River dam' },
 
     { id: '2lRbwu4TVtA', site: 'boylston', name: 'Boston Common at Boylston',
+      channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: '160 Boylston St, Boston', region: 'boston',
       lat: 42.3525, lon: -71.0664, bearing: 300, confirmed: true,
       note: 'Street level, Boylston at the Common' },
 
     { id: 'Jq-5u9NNZiM', site: 'mos', name: 'Museum of Science, southwest',
+      channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Science Park, Boston', region: 'boston',
       lat: 42.3676, lon: -71.0716, bearing: 225, confirmed: false,
       note: 'Downtown skyline' },
 
     { id: 'oezcsH9ZZ24', site: 'mos', name: 'Museum of Science, west',
+      channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Science Park, Boston', region: 'boston',
       lat: 42.3676, lon: -71.0716, bearing: 270, confirmed: true,
       note: 'Charles River basin toward Cambridge' },
 
     { id: '_OeFhA2XqqA', site: 'canal', name: 'Cape Cod Canal',
+      channelId: 'UCiKd90Y9P2dH3QR_AecBYaA',
       place: 'Mass Maritime Academy, Buzzards Bay', region: 'ma',
       lat: 41.7394, lon: -70.6234, bearing: 135, confirmed: true,
       note: 'Canal traffic and the railroad bridge' },
 
     { id: 'TE6N2eDrsR0', site: 'woodshole', name: 'Woods Hole ferry dock',
+      channelId: 'UCGfre1YJATN850wNq-jzgEw',
       place: '10 Water St, Woods Hole', region: 'ma',
       lat: 41.5233, lon: -70.6689, bearing: 200, confirmed: true,
       note: 'Steamship Authority berth and the harbour' },
 
     { id: 'LkZZTkRHLVQ', site: 'portsmouth', name: 'Market Square, Portsmouth',
+      channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Market Square, Portsmouth NH', region: 'nh',
       lat: 43.0770, lon: -70.7576, bearing: null, confirmed: true,
       note: 'Downtown Portsmouth, street level' },
 
     { id: 'H8bFFw-0ZQE', site: 'conway', name: 'North Conway',
+      channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Norcross Place, North Conway NH', region: 'nh',
       lat: 44.0545, lon: -71.1294, bearing: null, confirmed: false,
       note: 'Village centre and the Moat range' },
 
     { id: 'qaKsuZF9ZT8', site: 'loon', name: 'Loon Peak summit',
+      channelId: 'UCGtdI1KTGu-p1g1fOaMS7nQ',
       place: 'Loon Mountain, Lincoln NH', region: 'nh',
       lat: 44.0346, lon: -71.6208, bearing: null, confirmed: false,
       note: 'Summit, weather at altitude' },
 
     { id: 'RLIRtD89O7g', site: 'ogunquit', name: 'Marginal Way, Ogunquit',
+      channelId: 'UCALmdjIUxpKqyUTxg5QOSMQ',
       place: 'Lobster Point Light, Ogunquit ME', region: 'me',
       lat: 43.2438, lon: -70.5900, bearing: 100, confirmed: true,
       note: 'Open ocean, southern Maine coast' },
 
     { id: 'catvjIWNrZg', site: 'york', name: 'York Harbor Beach',
+      channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Stage Neck Inn, York ME', region: 'me',
       lat: 43.1311, lon: -70.6386, bearing: 60, confirmed: true,
       note: 'Harbour mouth and the beach' },
 
     { id: 'OteVW3af3BU', site: 'barharbor', name: 'Bar Harbor, west',
+      channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Bar Harbor Inn, Bar Harbor ME', region: 'me',
       lat: 44.3904, lon: -68.2025, bearing: 270, confirmed: true,
       note: 'Frenchman Bay and the town pier' }
@@ -264,11 +276,22 @@
     return 'north';
   }
 
-  /* A channel embed resolves to whatever that channel has live at the moment the
-     iframe loads, which is the only thing here that survives an id rotation. No
-     channel ids are recorded yet, so today every camera takes the video path.
-     The branch is written first because filling in one field later is a smaller
-     change than restructuring this when the first stream dies. */
+  /* How many catalog cameras share each channel. A channel embed shows ONE
+     stream, whichever the channel happens to have live when the iframe asks,
+     so it is only a safe address for a channel that owns a single camera in
+     this catalog. Boston and Maine Live runs eight of these twelve at once,
+     and eight pins showing the same picture is worse than eight pins that
+     occasionally rot. Their durable fix is a title-matching resolver against
+     the channel's streams page, and it is a later piece of work. */
+  var CHANNEL_OWNS = {};
+  CAMS.forEach(function (c) {
+    if (c.channelId) CHANNEL_OWNS[c.channelId] = (CHANNEL_OWNS[c.channelId] || 0) + 1;
+  });
+
+  /* A channel embed resolves to whatever that channel has live at the moment
+     the iframe loads, which is the only address here that survives an id
+     rotation. Every catalog row now records its channel, and the branch takes
+     it exactly when the channel owns one camera, per CHANNEL_OWNS above. */
   function embedSrc(cam, opts) {
     if (!ok(cam)) return '';
     var o = opts || {};
@@ -276,7 +299,7 @@
              'mute=' + (o.mute === false ? '0' : '1'),
              'playsinline=1', 'rel=0', 'modestbranding=1'];
     if (o.origin) q.push('origin=' + encodeURIComponent(o.origin));
-    if (cam.channelId) {
+    if (cam.channelId && CHANNEL_OWNS[cam.channelId] === 1) {
       return 'https://www.youtube.com/embed/live_stream?channel=' +
         encodeURIComponent(cam.channelId) + '&' + q.join('&');
     }
