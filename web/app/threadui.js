@@ -53,7 +53,14 @@
       text = str(e.text).trim();
       if (!text) continue;
       rows.push({ i: i, at: at || null, kind: str(e.kind) || 'note', text: text,
-        type: str(e.type) || null, t: stamp(at) });
+        type: str(e.type) || null, t: stamp(at),
+        /* The audio behind the beat. Carried through verbatim: sitClips and
+           the card's listen button read clips off THESE rows, so a field
+           dropped here is a play button that can never exist. That is not a
+           hypothetical: this line was missing from the day beats grew clips,
+           and the button it silenced was the most-asked-for control on the
+           board. */
+        clips: Array.isArray(e.clips) ? e.clips : [] });
     }
     /* Undated beats sort last and hold their arrival order among themselves,
        the same rule the state police column uses on undated cards. Putting an

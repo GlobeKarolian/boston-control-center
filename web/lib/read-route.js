@@ -6,15 +6,49 @@
 // note on json() in http.js: these routes are behind Basic auth and Vercel's
 // CDN does not key its cache on the Authorization header.
 
-const { requireRead, json } = require('./http');
+const crypto = require('crypto');
+const { requireRead, json, harden } = require('./http');
 const store_io = require('./store-io');
 
-function readRoute(key, fallback = '[]', { priv = 2 } = {}) {
+/* One copy of each board payload per warm function instance, shared by every
+   viewer that polls it within the window. This is the whole Redis bandwidth
+   story: before it, ten open screens each paid the full transcript payload
+   out of the store every few seconds, around the clock, which is how a
+   250MB database moved 35GB in a month. The data itself only changes every
+   few seconds, so within a three-second window every poll after the first
+   is the same bytes. Serve them from memory and let the store answer once.
+
+   The window trades at most `shareMs` of extra staleness on a board whose
+   payload is already seconds old by the time anyone reads it. A cold or
+   freshly recycled instance simply fetches once and is warm. */
+const SHARED = new Map(); // key -> { at, body, etag }
+
+function readRoute(key, fallback = '[]', { priv = 2, shareMs = 3000 } = {}) {
   return async (req, res) => {
     if (!(await requireRead(req, res))) return;
     try {
-      const body = await store_io.readOut(key, fallback);
-      return json(res, body, { priv });
+      const now = Date.now();
+      let c = SHARED.get(key);
+      if (!c || (now - c.at) > shareMs) {
+        const body = await store_io.readOut(key, fallback);
+        c = {
+          at: now, body,
+          etag: 'W/"' + crypto.createHash('sha1').update(body).digest('hex').slice(0, 16) + '"',
+        };
+        SHARED.set(key, c);
+      }
+      res.setHeader('ETag', c.etag);
+      /* The other half of the bandwidth: the wire to the browser. The board
+         polls with the browser's HTTP cache in play, so when nothing changed
+         the answer is a 304 and zero payload rather than the same JSON
+         again. Weak ETag off the exact bytes; no writer had to learn
+         anything for this to hold. */
+      if (req.headers['if-none-match'] === c.etag) {
+        harden(res);
+        res.setHeader('Cache-Control', 'private, max-age=' + priv + ', stale-while-revalidate=' + (priv * 4));
+        return res.status(304).end();
+      }
+      return json(res, c.body, { priv });
     } catch (e) {
       // A Redis blip must not blank the map. Send the empty shape with a
       // header the console can see, so the page degrades instead of erroring.

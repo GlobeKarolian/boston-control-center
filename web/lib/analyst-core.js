@@ -181,10 +181,18 @@ function clipMatcher(batch) {
   return function clipsForText(s) {
     const want = normWords(s);
     if (want.length < 3 || !clipRows.length) return [];
+    /* Scored per transmission, normalized by the TRANSMISSION's length: what
+       fraction of this thirty seconds of radio made it into the summary. The
+       first version normalized by the summary's length, which quietly made
+       matching impossible for verbose summaries: a 15-word transmission can
+       never cover a third of a 60-word summary, so the situations written by
+       wordier models carried no audio at all. The question was always "does
+       the summary quote this clip", and that is the row's fraction, not the
+       summary's. */
+    const wantSet = new Set(want);
     const scored = clipRows.map(r => {
-      const set = new Set(r.words);
-      let hit = 0; for (const w of want) if (set.has(w)) hit++;
-      return { clip: r.clip, at: r.at, score: hit / Math.max(6, want.length) };
+      let hit = 0; for (const w of r.words) if (wantSet.has(w)) hit++;
+      return { clip: r.clip, at: r.at, score: hit / Math.max(6, r.words.length) };
     }).filter(x => x.score >= 0.34).sort((a, b) => b.score - a.score).slice(0, 4);
     return scored.sort((a, b) => String(a.at).localeCompare(String(b.at)))
       .map(x => ({ u: x.clip, at: x.at }));
