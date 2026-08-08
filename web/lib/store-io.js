@@ -240,7 +240,15 @@ async function getHealth() {
    nothing alone and everything after "Engine 7, 40 Boylston". This reads the
    rendered transcript key rather than the store, so it costs one GET and never
    touches the write lock. */
+/* Cached per warm instance for a few seconds, because this runs on EVERY
+   relay ingest, which is every few seconds forever, and each call was a
+   full read of the transcript key out of the store. Context that is five
+   seconds stale reads identically to the extractor; the repeat reads were
+   a measurable slice of the monthly bandwidth for a store that never had
+   a storage problem in its life. */
+let RECENT_CACHE = { at: 0, out: null };
 async function recentBySource(n = 3) {
+  if (RECENT_CACHE.out && (Date.now() - RECENT_CACHE.at) < 5000) return RECENT_CACHE.out;
   const out = {};
   try {
     const raw = await readOut(K.outTranscripts, '[]');
@@ -253,6 +261,7 @@ async function recentBySource(n = 3) {
       if (out[s].length < n) out[s].unshift(String(t.text).slice(0, 220));
     }
   } catch (e) { /* no context is worse extraction, never a failed ingest */ }
+  RECENT_CACHE = { at: Date.now(), out };
   return out;
 }
 

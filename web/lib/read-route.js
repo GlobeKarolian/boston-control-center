@@ -23,7 +23,13 @@ const store_io = require('./store-io');
    freshly recycled instance simply fetches once and is warm. */
 const SHARED = new Map(); // key -> { at, body, etag }
 
-function readRoute(key, fallback = '[]', { priv = 2, shareMs = 3000 } = {}) {
+/* shareMs deliberately sits ABOVE the page's poll interval. This board has
+   one newsroom, not a crowd: the win is not ten viewers sharing a read, it
+   is one always-on screen's consecutive polls reusing a read instead of
+   paying the store every four seconds forever. Six seconds of worst-case
+   staleness on words that took ten to transcribe is nothing; 2.7GB a day
+   of repeat reads was the whole Upstash bill. */
+function readRoute(key, fallback = '[]', { priv = 2, shareMs = 6000 } = {}) {
   return async (req, res) => {
     if (!(await requireRead(req, res))) return;
     try {
