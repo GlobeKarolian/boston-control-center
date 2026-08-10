@@ -205,7 +205,10 @@ private extension Capture {
         while !isStopping {
             let began = Date()
 
-            if Capture.isPlaylist(s.url), let u = URL(string: s.url) {
+            if s.isRapidSOS {
+                rapidsos(s, seconds: o.segmentSeconds)
+
+            } else if Capture.isPlaylist(s.url), let u = URL(string: s.url) {
                 follow(Broadcastify.Stream(playlist: u, token: "", expires: nil),
                        source: s, seconds: o.segmentSeconds)
 
@@ -344,6 +347,68 @@ private extension Capture {
         }
         raw.stop()
         lock.lock(); raws[s.id] = nil; lock.unlock()
+    }
+
+    /* Boston Police. The socket hands over whole transmissions rather than an
+       endless bitstream, which is the one respect in which this feed is nicer
+       than every other one here: the radio itself says where a clip begins and
+       ends, so a segment is a complete thing somebody said instead of a slice
+       of the clock that starts mid-word.
+
+       Audio arrives already sixteen kilohertz mono, which is what Whisper
+       wants, so this path skips afconvert entirely and hands PCM straight
+       down. Nothing is written to disk on the way. */
+    func rapidsos(_ s: Source, seconds: Double) {
+        let stream = RapidSOSStream(channel: s.url, label: s.label)
+        stream.start()
+        if let e = stream.failure {
+            emit(.failed(s.id, e))
+            emit(.state(s.id, "error"))
+            return
+        }
+        emit(.state(s.id, "live"))
+
+        /* A whole transmission, but not an unbounded one: somebody who keys up
+           and walks away should still be transcribed in pieces rather than
+           held until they let go. */
+        let cap = max(Int(seconds * 16_000), 16_000)
+        let floorSamples = 16_000                    // a second, below which it is a click
+        var buf: [Int16] = []
+
+        while !isStopping {
+            var brk = false
+            autoreleasepool {
+                if let e = stream.failure {
+                    emit(.failed(s.id, e))
+                    emit(.state(s.id, "error"))
+                    brk = true; return
+                }
+                buf.append(contentsOf: stream.take())
+                let ended = stream.transmissionEnded
+                if (ended && buf.count >= floorSamples) || buf.count >= cap {
+                    let chunk = buf
+                    buf.removeAll(keepingCapacity: true)
+                    emit(.segment(s.id))
+                    work.addOperation { [weak self] in
+                        self?.runWhisper(SystemAudioTap.wav(chunk), source: s)
+                    }
+                }
+                /* finished without a failure is the cookie ageing out. The
+                   supervisor above reconnects with a fresh one, which is the
+                   whole reason this feed no longer dies twice a day. */
+                if stream.finished { brk = true }
+            }
+            if brk { break }
+            nap(0.4)
+        }
+
+        if buf.count >= floorSamples {
+            let chunk = buf
+            work.addOperation { [weak self] in
+                self?.runWhisper(SystemAudioTap.wav(chunk), source: s)
+            }
+        }
+        stream.stop()
     }
 }
 

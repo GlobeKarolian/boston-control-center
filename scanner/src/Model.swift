@@ -63,6 +63,12 @@ struct Source: Identifiable, Codable, Equatable {
 
     var isAppAudio: Bool { kind == "app" }
 
+    /* Boston Police, straight off the city's own radio socket. It reuses the
+       url field to hold the channel id, so a feed is still one row with one
+       address in it, and the app tap it replaces needed a browser left open
+       on a machine nobody could touch. */
+    var isRapidSOS: Bool { kind == "rapidsos" }
+
     var coverage: [String] {
         let raw = scope.isEmpty ? city : scope
         return raw.split(separator: ",")

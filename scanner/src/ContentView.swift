@@ -501,13 +501,16 @@ struct FeedRow: View {
                 Picker("", selection: $source.kind) {
                     Text("Stream").tag("stream")
                     Text("App audio").tag("app")
+                    Text("Boston Police").tag("rapidsos")
                 }
                 .labelsHidden()
                 .pickerStyle(.menu)
-                .frame(width: 108)
+                .frame(width: 128)
 
                 if source.isAppAudio {
                     appPicker
+                } else if source.isRapidSOS {
+                    bostonPolicePicker
                 } else {
                     TextField("Paste a Broadcastify link, or a feed number", text: $source.url)
                         .textFieldStyle(.roundedBorder)
@@ -562,9 +565,24 @@ struct FeedRow: View {
         .background(Color.primary.opacity(0.04), in: RoundedRectangle(cornerRadius: 8))
     }
 
-    /* Boston Police is not on Broadcastify, so the way in is to let Chrome play
-       the department's own web player and take the sound back out of the Mac.
-       Browsers sort to the top because that is what this is for. */
+    /* Boston Police publishes its channels by id, and an id is 24 characters
+       of hex that nobody can proofread. So the app carries the list and a
+       person picks a channel by the name the city uses for it. Anything
+       already saved that is not on the list still shows, so a channel added
+       by hand outlives the next time this menu is edited. */
+    private var bostonPolicePicker: some View {
+        Picker("", selection: $source.url) {
+            Text("Pick a channel").tag("")
+            ForEach(RapidSOS.channels, id: \.id) { c in Text(c.label).tag(c.id) }
+            if !source.url.isEmpty,
+               !RapidSOS.channels.contains(where: { $0.id == RapidSOS.channelID(source.url) }) {
+                Text(source.url).tag(source.url)
+            }
+        }
+        .labelsHidden()
+        .pickerStyle(.menu)
+    }
+
     private var appPicker: some View {
         HStack(spacing: 6) {
             Picker("", selection: $source.bundleID) {

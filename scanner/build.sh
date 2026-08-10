@@ -37,6 +37,8 @@ SOURCES=(
   "$HERE/src/Ollama.swift"
   "$HERE/src/MP3Framer.swift"
   "$HERE/src/HLS.swift"
+  "$HERE/src/Opus.swift"
+  "$HERE/src/RapidSOS.swift"
   "$HERE/src/SystemAudio.swift"
   "$HERE/src/Capture.swift"
   "$HERE/src/Relay.swift"
@@ -49,11 +51,37 @@ echo "==> clean"
 rm -rf "$BUILD"
 mkdir -p "$APP/Contents/MacOS" "$WDIR" "$MDIR"
 
+# The Opus decoder the Boston Police feed needs. Swift cannot see a C library
+# without a module map, and the map has to name a real path, so it is written
+# at build time from wherever Homebrew actually put libopus rather than
+# hardcoded to one machine's layout. Missing libopus is not fatal: the build
+# drops the RapidSOS sources and everything else still ships, which keeps a
+# machine that only listens to Broadcastify from needing a package manager.
+OPUS_PREFIX="$(brew --prefix opus 2>/dev/null || true)"
+OPUS_FLAGS=()
+if [ -n "$OPUS_PREFIX" ] && [ -f "$OPUS_PREFIX/include/opus/opus.h" ]; then
+  mkdir -p "$BUILD/COpus"
+  cat > "$BUILD/COpus/module.modulemap" <<MAPEOF
+module COpus [system] {
+  header "$OPUS_PREFIX/include/opus/opus.h"
+  link "opus"
+  export *
+}
+MAPEOF
+  OPUS_FLAGS=(-I "$BUILD/COpus" -L"$OPUS_PREFIX/lib" -lopus)
+  echo "    opus: $OPUS_PREFIX"
+else
+  echo "    opus: not found, the Boston Police feed will be unavailable"
+  SOURCES=("${SOURCES[@]/$HERE\/src\/Opus.swift}")
+  SOURCES=("${SOURCES[@]/$HERE\/src\/RapidSOS.swift}")
+fi
+
 echo "==> compile"
 SLICES=()
 for ARCH in arm64 x86_64; do
   if swiftc -O -parse-as-library -swift-version 5 \
       -sdk "$SDK" -target "$ARCH-apple-macosx$MINOS" \
+      "${OPUS_FLAGS[@]}" \
       -o "$BUILD/$EXEC-$ARCH" "${SOURCES[@]}" 2>"$BUILD/compile-$ARCH.log"; then
     SLICES+=("$BUILD/$EXEC-$ARCH")
     echo "    $ARCH ok"
