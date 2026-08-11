@@ -36,12 +36,27 @@ function readRoute(key, fallback = '[]', { priv = 2, shareMs = 6000 } = {}) {
       const now = Date.now();
       let c = SHARED.get(key);
       if (!c || (now - c.at) > shareMs) {
-        const body = await store_io.readOut(key, fallback);
-        c = {
-          at: now, body,
-          etag: 'W/"' + crypto.createHash('sha1').update(body).digest('hex').slice(0, 16) + '"',
-        };
-        SHARED.set(key, c);
+        /* Ask what changed before asking for it.
+
+           The board is polled around the clock and almost every poll finds
+           the same data it saw a moment ago, so the expensive part was never
+           the answer, it was re-fetching four hundred kilobytes to discover
+           there was nothing new. The writer leaves a twelve character stamp
+           beside each key; reading that costs nothing, and the payload only
+           moves when it has actually changed. A missing stamp means an older
+           deploy or an expired key, and falls back to the plain timed read
+           so the board never depends on the optimisation being present. */
+        const ver = await store_io.outVersion(key);
+        if (c && ver && c.ver === ver) {
+          c.at = now;                       // still current, nothing to fetch
+        } else {
+          const body = await store_io.readOut(key, fallback);
+          c = {
+            at: now, body, ver,
+            etag: 'W/"' + crypto.createHash('sha1').update(body).digest('hex').slice(0, 16) + '"',
+          };
+          SHARED.set(key, c);
+        }
       }
       res.setHeader('ETag', c.etag);
       /* The other half of the bandwidth: the wire to the browser. The board

@@ -271,6 +271,67 @@ async function recentBySource(n = 3) {
 // on a few-second loop across a newsroom, and hydrating the full blob per
 // poll would run into gigabytes of Redis egress a day. Instead each write
 // leaves behind exactly what the browser asks for, and the CDN caches that.
+/* How much of an incident's history rides along on the board payload.
+   
+   This is the single most expensive number in the system and it was unbounded.
+   An incident keeps every transmission it ever heard, one call had grown to
+   312 of them, and the whole lot was serialized into the incidents key on
+   every ingest and read back out on every poll. Measured on a normal night:
+   660KB of the 898KB incidents payload was timeline, 75% of it, moving both
+   directions every few seconds. That was 12GB of database traffic a day for a
+   newsroom with one screen open.
+
+   Ten is what a person actually reads before clicking in: enough to see how a
+   call developed and to hear the last several transmissions, and short enough
+   that a long incident costs the same as a short one. The count of what was
+   dropped rides along so the detail panel can say so rather than quietly
+   presenting a trimmed story as the whole one. */
+const BOARD_TIMELINE = 10;
+
+/* A cleared call is history, and history does not need to re-explain itself
+   every few seconds. Two out of every three incidents on this board are
+   cleared, so what they carry is the difference between a payload that fits
+   the plan and one that does not. Three lines is enough to say what the call
+   turned out to be; anyone who needs the whole thing is reading the
+   transcript, not the pin. */
+const BOARD_TIMELINE_CLEARED = 3;
+
+/* What this warm instance last put in each output key, so an unchanged value
+   is not written again. Per instance and lost on a cold start, which is the
+   right shape: the cost of forgetting is one extra write. */
+const LAST_WRITE = new Map();
+
+/* The version stamp beside each output key. A reader asks for this first,
+   and only pulls the payload when the answer is new. */
+function verKey(key) { return key + ':v'; }
+
+function shortHash(body) {
+  return require('crypto').createHash('sha1').update(body).digest('hex').slice(0, 12);
+}
+
+/* One tiny read that answers "is what I already have still current". Returns
+   null when the stamp is missing, which is what an older deploy or a
+   just-expired key looks like, and the caller falls back to its timer. */
+async function outVersion(key) {
+  try {
+    const r = await kv.raw([['GET', verKey(key)]], 6000);
+    const v = Array.isArray(r) ? r[0] : r;
+    return (typeof v === 'string' && v) ? v : null;
+  } catch (e) { return null; }
+}
+
+function slimForBoard(incs) {
+  return (incs || []).map(inc => {
+    const tl = Array.isArray(inc.timeline) ? inc.timeline : null;
+    if (!tl) return inc;
+    const keep = inc.status === 'cleared' ? BOARD_TIMELINE_CLEARED : BOARD_TIMELINE;
+    if (tl.length <= keep) return inc;
+    /* A copy, never a mutation: this array belongs to the live store and the
+       next ingest still needs the full history to correlate against. */
+    return { ...inc, timeline: tl.slice(-keep), timelineTotal: tl.length };
+  });
+}
+
 async function renderOutputs(store, { extractorLabel } = {}) {
   const incs = store.snapshotIncidents();
   const transcripts = store.snapshotTranscripts().slice(0, 80);
@@ -334,13 +395,41 @@ async function renderOutputs(store, { extractorLabel } = {}) {
     events: store.snapshotEvents(),
   };
 
-  await kv.raw([
-    ['SET', K.outIncidents, JSON.stringify(incs), 'EX', OUT_TTL],
-    ['SET', K.outTranscripts, JSON.stringify(transcripts), 'EX', OUT_TTL],
-    ['SET', K.outPipeline, JSON.stringify(pipeline), 'EX', OUT_TTL],
-    ['SET', K.outStops, JSON.stringify(stopsOut), 'EX', OUT_TTL],
-    ['SET', K.outStopsN, JSON.stringify(stopsN), 'EX', OUT_TTL],
-  ], 20000);
+  /* Write only what actually changed.
+
+     Every ingest used to rewrite all five keys unconditionally, which meant
+     the entire incidents blob went back over the wire every time any feed
+     said anything, whether or not that feed changed a single incident. On a
+     quiet channel that is a megabyte to say nothing happened. The write side,
+     not the read side, was the larger half of this database's traffic.
+
+     The comparison is against the exact string last written by this warm
+     instance, so a cold start writes once and then goes quiet again. TTL is
+     the one reason to write an unchanged value, so anything untouched for a
+     third of its life is refreshed regardless: a key that silently expired
+     because nothing changed would blank the board. */
+  const writes = [
+    [K.outIncidents, JSON.stringify(slimForBoard(incs))],
+    [K.outTranscripts, JSON.stringify(transcripts)],
+    [K.outPipeline, JSON.stringify(pipeline)],
+    [K.outStops, JSON.stringify(stopsOut)],
+    [K.outStopsN, JSON.stringify(stopsN)],
+  ];
+  const now = Date.now();
+  const cmds = [];
+  for (const [key, body] of writes) {
+    const last = LAST_WRITE.get(key);
+    const stale = !last || (now - last.at) > (OUT_TTL * 1000) / 3;
+    if (last && last.body === body && !stale) continue;
+    LAST_WRITE.set(key, { body, at: now });
+    cmds.push(['SET', key, body, 'EX', OUT_TTL]);
+    /* The version stamp a reader checks before deciding to pull the payload.
+       Twelve characters instead of four hundred kilobytes: the board asks
+       "has this changed" hundreds of times an hour and almost always gets
+       no for an answer, and this is what makes that question cheap. */
+    cmds.push(['SET', verKey(key), shortHash(body), 'EX', OUT_TTL]);
+  }
+  if (cmds.length) await kv.raw(cmds, 20000);
   return { incidents: incs.length, active: pipeline.stats.active, stops: stopsOut.open.length };
 }
 
@@ -359,4 +448,4 @@ async function readOut(key, fallback = '[]') {
   } catch (e) { return fallback; }
 }
 
-module.exports = { K, withStore, loadStore, saveStore, claimNew, putHealth, getHealth, recentBySource, renderOutputs, readOut, OFFLINE_AFTER_MS };
+module.exports = { K, withStore, loadStore, saveStore, claimNew, putHealth, getHealth, recentBySource, renderOutputs, readOut, outVersion, OFFLINE_AFTER_MS };
