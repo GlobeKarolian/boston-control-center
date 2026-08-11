@@ -9,6 +9,21 @@
 
 const W = require('../app/webcams.js');
 
+/* The museum's three cameras, found by where they point rather than by the id
+   they happen to be carrying today.
+
+   This file used to name those ids as string literals in twenty places, which
+   made the whole suite a tripwire on somebody else's release schedule: YouTube
+   rotates an id whenever a stream restarts, and on 11 August 2026 all three
+   rotated at once and this test stopped reporting on coordinates and nudge
+   geometry entirely, crashing on undefined instead. Bearing is the property
+   that describes the camera rather than the stream, so it is the one to look
+   things up by. */
+const MOS_CAMS = W.list().filter(c => c.site === 'mos');
+const MOS_E = (MOS_CAMS.find(c => c.bearing === 90) || {}).id;
+const MOS_SW = (MOS_CAMS.find(c => c.bearing === 225) || {}).id;
+const MOS_W = (MOS_CAMS.find(c => c.bearing === 270) || {}).id;
+
 let pass = 0, fail = 0;
 const head = (s) => console.log('\n' + s);
 const ok = (name, cond) => {
@@ -42,7 +57,11 @@ ok('every longitude is negative', W.list().every(c => c.lon < 0));
 // The Museum of Science coordinate is the one an outside catalog had wrong. It
 // listed 42.3555,-71.0565, which is Faneuil Hall, about 1.4km southeast of the
 // roof these three cameras actually sit on. Pin it so nobody re-imports that.
-const mos = W.get('p-pVYYH4ZCk');
+/* Found by site, not by video id. This lookup used to name the id the east
+   camera happened to carry, so the day YouTube rotated it the assertion did
+   not fail with an opinion about coordinates, it crashed on null. The site
+   key is the thing that does not move. */
+const mos = W.list().find(c => c.site === 'mos');
 ok('museum of science is not the bad downtown coordinate',
   Math.abs(mos.lat - 42.3555) > 0.005 || Math.abs(mos.lon + 71.0565) > 0.005);
 eq('museum of science latitude', mos.lat, 42.3676);
@@ -124,9 +143,9 @@ ok('no moved pin is still on the shared cell',
 // The point of nudging along the bearing rather than fanning arbitrarily: the
 // pin ends up in the direction the camera is looking, so its position on the
 // map is information rather than decoration.
-const mosE = moved.find(p => p.id === 'p-pVYYH4ZCk');
-const mosW = moved.find(p => p.id === 'oezcsH9ZZ24');
-const mosSW = moved.find(p => p.id === 'Jq-5u9NNZiM');
+const mosE = moved.find(p => p.id === MOS_E);
+const mosW = moved.find(p => p.id === MOS_W);
+const mosSW = moved.find(p => p.id === MOS_SW);
 ok('the east camera sits east of the roof', mosE.lon > -71.0716);
 ok('the west camera sits west of the roof', mosW.lon < -71.0716);
 ok('the southwest camera sits south of the roof', mosSW.lat < 42.3676);
@@ -151,9 +170,9 @@ eq('null has no word', W.facing(null), '');
 eq('undefined has no word', W.facing(undefined), '');
 
 head('embed urls');
-const e = W.embedSrc(W.get('p-pVYYH4ZCk'));
+const e = W.embedSrc(W.get(MOS_E));
 ok('is a youtube embed', e.indexOf('https://www.youtube.com/embed/') === 0);
-ok('carries the video id', e.indexOf('p-pVYYH4ZCk') > 0);
+ok('carries the video id', e.indexOf(MOS_E) > 0);
 // Muted is not a preference. An unmuted autoplay is refused by every current
 // browser, so the frame would sit black until somebody clicked it, which on a
 // wall screen nobody does.
@@ -162,9 +181,9 @@ ok('is muted', e.indexOf('mute=1') > 0);
 ok('plays inline on iOS', e.indexOf('playsinline=1') > 0);
 ok('suppresses related videos', e.indexOf('rel=0') > 0);
 ok('has exactly one question mark', e.split('?').length === 2);
-ok('mute can be turned off', W.embedSrc(W.get('p-pVYYH4ZCk'), { mute: false }).indexOf('mute=0') > 0);
-ok('autoplay can be turned off', W.embedSrc(W.get('p-pVYYH4ZCk'), { autoplay: false }).indexOf('autoplay=0') > 0);
-ok('origin is added when given', W.embedSrc(W.get('p-pVYYH4ZCk'), { origin: 'https://x.dev' }).indexOf('origin=https%3A%2F%2Fx.dev') > 0);
+ok('mute can be turned off', W.embedSrc(W.get(MOS_E), { mute: false }).indexOf('mute=0') > 0);
+ok('autoplay can be turned off', W.embedSrc(W.get(MOS_E), { autoplay: false }).indexOf('autoplay=0') > 0);
+ok('origin is added when given', W.embedSrc(W.get(MOS_E), { origin: 'https://x.dev' }).indexOf('origin=https%3A%2F%2Fx.dev') > 0);
 ok('origin is absent when not given', e.indexOf('origin=') < 0);
 ok('a bad camera makes no url', W.embedSrc(null) === '');
 ok('a malformed camera makes no url', W.embedSrc({ id: 'x' }) === '');
@@ -180,8 +199,8 @@ ok('the channel embed has one question mark', solo.split('?').length === 2);
 // Boston and Maine Live owns eight of these cameras. Eight pins showing the
 // same picture is worse than eight pins that occasionally rot, so a shared
 // channel keeps the video path even though its channelId is recorded.
-const shared = W.embedSrc(W.get('p-pVYYH4ZCk'));
-ok('a shared-channel camera keeps the video path', shared.indexOf('/embed/p-pVYYH4ZCk') > 0);
+const shared = W.embedSrc(W.get(MOS_E));
+ok('a shared-channel camera keeps the video path', shared.indexOf('/embed/' + MOS_E) > 0);
 ok('and does not take the channel path', shared.indexOf('live_stream') < 0);
 ok('every catalog row records its channel now', W.list().every(c => c.channelId && /^UC[\w-]{22}$/.test(c.channelId)));
 ok('a foreign channelId outside the catalog gets no channel path',
@@ -195,9 +214,9 @@ ok('a bad camera makes no watch url', W.watchURL(null) === '');
 ok('watch urls are all distinct', new Set(W.list().map(W.watchURL)).size === 12);
 
 head('rotation and known alternates');
-const a = W.alts(W.get('p-pVYYH4ZCk'));
+const a = W.alts(W.get(MOS_E));
 ok('the museum cameras carry alternates', a.length >= 4);
-ok('a camera never lists itself as its own alternate', a.indexOf('p-pVYYH4ZCk') < 0);
+ok('a camera never lists itself as its own alternate', a.indexOf(MOS_E) < 0);
 ok('alternates are unique', new Set(a).size === a.length);
 // Mass Maritime publishes the canal under its own id. It is recorded as the
 // preferred replacement rather than swapped in, because both are live today and
@@ -209,7 +228,7 @@ eq('alts of nothing is empty', W.alts(null).length, 0);
 head('embeds that still need a smoke test');
 const u = W.unproven();
 eq('three are unproven', u.length, 3);
-ok('the museum southwest camera is one', u.indexOf('Jq-5u9NNZiM') >= 0);
+ok('the museum southwest camera is one', u.indexOf(MOS_SW) >= 0);
 ok('north conway is one', u.indexOf('H8bFFw-0ZQE') >= 0);
 ok('loon peak is one', u.indexOf('qaKsuZF9ZT8') >= 0);
 ok('nine are confirmed embeddable', W.list().filter(c => c.confirmed).length === 9);
@@ -263,26 +282,26 @@ function pixelsApart(a, b, z) {
   const dE = (at.lon - bt.lon) * 111320 * Math.cos(at.lat * Math.PI / 180);
   return Math.hypot(dN, dE) / mpp;
 }
-const tight = pixelsApart('Jq-5u9NNZiM', 'oezcsH9ZZ24', 15);
+const tight = pixelsApart(MOS_SW, MOS_W, 15);
 ok('the 45 degree pair clears an icon at z15  [' + tight.toFixed(1) + 'px]', tight > 20);
-ok('the easy pair clears it too at z15  [' + pixelsApart('p-pVYYH4ZCk', 'oezcsH9ZZ24', 15).toFixed(1) + 'px]',
-  pixelsApart('p-pVYYH4ZCk', 'oezcsH9ZZ24', 15) > 20);
-ok('and at z16', pixelsApart('Jq-5u9NNZiM', 'oezcsH9ZZ24', 16) > 20);
+ok('the easy pair clears it too at z15  [' + pixelsApart(MOS_E, MOS_W, 15).toFixed(1) + 'px]',
+  pixelsApart(MOS_E, MOS_W, 15) > 20);
+ok('and at z16', pixelsApart(MOS_SW, MOS_W, 16) > 20);
 // The honest failure. At metro zoom the ceiling binds and the three read as one
 // place, which at that scale is what they are. This is asserted rather than
 // wished away, because it is the reason siblings() below exists.
 ok('at z12 the ceiling binds and they are still one pin  ['
-  + pixelsApart('Jq-5u9NNZiM', 'oezcsH9ZZ24', 12).toFixed(1) + 'px]',
-  pixelsApart('Jq-5u9NNZiM', 'oezcsH9ZZ24', 12) < 20);
+  + pixelsApart(MOS_SW, MOS_W, 12).toFixed(1) + 'px]',
+  pixelsApart(MOS_SW, MOS_W, 12) < 20);
 
 head('so a stacked pin can reach the cameras hiding under it');
-const sib = W.siblings(W.get('p-pVYYH4ZCk'));
+const sib = W.siblings(W.get(MOS_E));
 eq('the east camera knows about two others', sib.length, 2);
-ok('and not about itself', sib.every(c => c.id !== 'p-pVYYH4ZCk'));
+ok('and not about itself', sib.every(c => c.id !== MOS_E));
 ok('they are the other two rooftop cameras',
-  sib.map(c => c.id).sort().join(',') === ['Jq-5u9NNZiM', 'oezcsH9ZZ24'].sort().join(','));
+  sib.map(c => c.id).sort().join(',') === [MOS_SW, MOS_W].sort().join(','));
 ok('the relation goes both ways',
-  W.siblings(W.get('oezcsH9ZZ24')).some(c => c.id === 'p-pVYYH4ZCk'));
+  W.siblings(W.get(MOS_W)).some(c => c.id === MOS_E));
 eq('a camera standing alone has none', W.siblings(W.get('2lRbwu4TVtA')).length, 0);
 eq('neither does a camera that is not one', W.siblings({ id: 'nope' }).length, 0);
 eq('nor null', W.siblings(null).length, 0);

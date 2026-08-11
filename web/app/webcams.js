@@ -41,7 +41,7 @@
      write "looking east" under a title, not to survey anything. null means
      nobody established a direction and the camera gets fanned instead. */
   var CAMS = [
-    { id: 'p-pVYYH4ZCk', site: 'mos', name: 'Museum of Science, east',
+    { id: 'Q187M86pwyg', site: 'mos', name: 'Museum of Science, east',
       channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Science Park, Boston', region: 'boston',
       lat: 42.3676, lon: -71.0716, bearing: 90, confirmed: true,
@@ -53,13 +53,13 @@
       lat: 42.3525, lon: -71.0664, bearing: 300, confirmed: true,
       note: 'Street level, Boylston at the Common' },
 
-    { id: 'Jq-5u9NNZiM', site: 'mos', name: 'Museum of Science, southwest',
+    { id: '3SyR5MBpEJU', site: 'mos', name: 'Museum of Science, southwest',
       channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Science Park, Boston', region: 'boston',
       lat: 42.3676, lon: -71.0716, bearing: 225, confirmed: false,
       note: 'Downtown skyline' },
 
-    { id: 'oezcsH9ZZ24', site: 'mos', name: 'Museum of Science, west',
+    { id: 'yVHY2twtKhQ', site: 'mos', name: 'Museum of Science, west',
       channelId: 'UC8gbWbcNNyb5-NIXvFklkOA',
       place: 'Science Park, Boston', region: 'boston',
       lat: 42.3676, lon: -71.0716, bearing: 270, confirmed: true,
@@ -118,7 +118,15 @@
      that a resolver added later has something to walk, and so the next person to
      find a dead stream can see the rotation is expected rather than a mistake. */
   var KNOWN_ALTS = {
-    mos: ['dCtg7Y1KSgg', '_oWwfJ3v0oE', 'RManbLSTXuc', 'rjyNLYKDYfQ', 'sWF5RQ_OzpM']
+    /* The last three are the ids the museum's three cameras carried until
+       11 August 2026, when all three came back UNPLAYABLE at once and the
+       popup read "this live stream recording is not available". The rest of
+       the catalog was live the whole time, which is the tell: a rotation
+       hits one operator's cameras together and leaves everyone else alone.
+       Eight ids deep on one site now, so the resolver this list was always
+       meant to feed is no longer optional. */
+    mos: ['dCtg7Y1KSgg', '_oWwfJ3v0oE', 'RManbLSTXuc', 'rjyNLYKDYfQ', 'sWF5RQ_OzpM',
+          'p-pVYYH4ZCk', 'Jq-5u9NNZiM', 'oezcsH9ZZ24']
   };
 
   /* Mass Maritime publishes the canal on its own page under a different id than
