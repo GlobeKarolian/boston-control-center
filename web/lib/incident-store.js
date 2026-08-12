@@ -49,6 +49,24 @@ const threat = require('./threat.js');
 const ADDRESS_MATCH_WINDOW_MS = 120 * 60 * 1000; // correlate to a scene up to 2h old
 const STALE_AUTOCLEAR_MS      = 90 * 60 * 1000;  // no chatter for 90m -> auto-clear
 const ARCHIVE_AFTER_CLEAR_MS  = 3  * 60 * 60 * 1000; // drop 3h after clearing
+
+/* How many transmissions an incident keeps ON DISK.
+
+   This was unbounded, and it is the single most expensive fact in the system.
+   The whole store is read out of Redis and written back on EVERY ingest, once
+   per transmission, about 6,700 times a day. So every byte an incident holds
+   is a byte that crosses the wire roughly thirteen thousand times before the
+   day is out. One call had grown a 312-entry timeline. Measured: a ~1.4MB
+   store moving both ways per ingest is ~19GB of database traffic a day, which
+   is the whole bill.
+
+   Thirty is well past what correlation reads (it matches on units, distance
+   and recency, never on the deep tail) and past what the board shows. A
+   cleared call keeps four, because it is finished and nothing will extend it.
+   The count of everything ever heard is kept separately in txCount, so the
+   heat score still knows this was a 312-transmission fire. */
+const TIMELINE_KEEP_ACTIVE  = 30;
+const TIMELINE_KEEP_CLEARED = 4;
 const SAME_SCENE_METERS       = 200;             // a city block plus the corner
 
 /* The alerting bar, and the ceiling that makes it safe to have one.
@@ -254,10 +272,30 @@ function createStore(geocode, extractFn, opt) {
      Everything that contributed is written into inc.why, because a desk that
      cannot see why a scene scored 78 has no way to decide whether to believe
      it, and a score nobody believes gets ignored inside a week. */
+  /* Everything this scene has ever said, which is not the same as everything
+     it still stores. The timeline is trimmed on disk; this is not. Falls back
+     to the array length for incidents written before the counter existed. */
+  function txCount(inc) {
+    return (typeof inc.txCount === 'number' && inc.txCount > 0)
+      ? inc.txCount
+      : (inc.timeline || []).length;
+  }
+
+  /* One way in for a beat, so the cap and the counter can never disagree.
+     Trimming from the front keeps the most recent transmissions, which are
+     the ones the board shows and the ones a reporter is reading. */
+  function addBeat(inc, entry) {
+    const prior = txCount(inc);          // seeds off the array for pre-counter incidents
+    inc.timeline.push(entry);
+    inc.txCount = prior + 1;
+    const keep = inc.status === 'cleared' ? TIMELINE_KEEP_CLEARED : TIMELINE_KEEP_ACTIVE;
+    if (inc.timeline.length > keep) inc.timeline = inc.timeline.slice(-keep);
+  }
+
   function scoreHeat(inc) {
     const first = +new Date(inc.firstHeard);
     const mins = Math.max(1, (+new Date(inc.lastUpdate) - first) / 60000);
-    const rate = inc.timeline.length / mins;                  // transmissions per minute
+    const rate = txCount(inc) / mins;                         // transmissions per minute
     const tier = inc.tier || 0;
     const why = [];
     let h = 0;
@@ -267,7 +305,7 @@ function createStore(geocode, extractFn, opt) {
        Friday night without anything being wrong. */
     let vol = 0;
     vol += Math.min(14, Math.max(0, (inc.units || []).length - 1) * 4); // one unit is not a response
-    vol += Math.min(10, inc.timeline.length * 1.5);           // sustained chatter
+    vol += Math.min(10, txCount(inc) * 1.5);                  // sustained chatter
     vol += Math.min(6, rate * 4);                             // and how fast it is coming
     h += Math.min(30, vol);
     if ((inc.units || []).length > 2) why.push((inc.units || []).length + ' units');
@@ -487,7 +525,7 @@ function createStore(geocode, extractFn, opt) {
     };
 
     if (inc) {
-      inc.timeline.push({ t: iso(time), source, text, onScene: ex.isOnScene, clear: ex.isClear, role, clip: clip || undefined });
+      addBeat(inc, { t: iso(time), source, text, onScene: ex.isOnScene, clear: ex.isClear, role, clip: clip || undefined });
       inc.lastUpdate = iso(time);
       if (ex.priority === 'high') inc.priority = 'high';
       if (escalated) inc.escalations = (inc.escalations || 0) + 1;
@@ -518,7 +556,7 @@ function createStore(geocode, extractFn, opt) {
         if (inc.type && inc.type !== 'unclassified' && inc.type !== ex.callType) {
           // Worth keeping, because "when did this become a working fire" is the
           // first thing anyone asks about a scene that changed under them.
-          inc.timeline.push({ t: iso(time), source, text: 'reclassified: ' + inc.type + ' -> ' + ex.callType, role: 'system' });
+          addBeat(inc, { t: iso(time), source, text: 'reclassified: ' + inc.type + ' -> ' + ex.callType, role: 'system' });
           inc.retyped = (inc.retyped || 0) + 1;
         }
         inc.type = ex.callType;
@@ -664,8 +702,25 @@ function createStore(geocode, extractFn, opt) {
       c.location = null; c.matched = null;
     }
   }
+  /* The cap is enforced HERE as well as in addBeat, because this is the only
+     place the store actually crosses the wire. addBeat keeps new incidents
+     honest; this also trims the ones already sitting in Redis with hundreds
+     of entries from before the cap existed, on the very first write rather
+     than slowly as each one happens to be touched again. Cheap: it only
+     copies the incidents that are actually over. */
   function dump() {
-    return { v: 1, incidents, unitToIncident, transcripts, events, stats, seq, stops: stops.dump() };
+    const out = {};
+    for (const id in incidents) {
+      const c = incidents[id];
+      const tl = c && c.timeline;
+      const keep = c && c.status === 'cleared' ? TIMELINE_KEEP_CLEARED : TIMELINE_KEEP_ACTIVE;
+      if (Array.isArray(tl) && tl.length > keep) {
+        out[id] = { ...c, timeline: tl.slice(-keep), txCount: txCount(c) };
+      } else {
+        out[id] = c;
+      }
+    }
+    return { v: 1, incidents: out, unitToIncident, transcripts, events, stats, seq, stops: stops.dump() };
   }
 
   function snapshotIncidents() {
