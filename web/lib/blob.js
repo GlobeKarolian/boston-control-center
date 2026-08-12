@@ -151,11 +151,15 @@ async function putClip(bytes, row, opts) {
 /* ---- retention ------------------------------------------------------------
 
    Audio is the one thing here that grows without a ceiling, and the ceiling it
-   would otherwise find is a bill. At the measured rate a day of every channel
-   is about 230 megabytes, so a week is a gigabyte and a half and a year is
-   eighty. A week is the window, because a week is longer than any story a
-   reporter is still chasing off a scanner clip and short enough that the
-   number never becomes a conversation.
+   would otherwise find is a bill. Measured since: a day of every channel runs
+   about 80 megabytes, so a year is roughly 30 gigabytes of object storage.
+
+   A week used to be the window, sized for a board that only showed tonight.
+   That reasoning died with the archive. Now that every transmission is kept
+   and searchable, the question stopped being "how long is a reporter still
+   chasing this clip" and became "when somebody finds the Back Bay fire in the
+   archive next spring, can they hear it". So the window is a year, and the
+   text beside it is kept longer still because text is nearly free.
 
    Deletes are free. Listing is not, but it is one Advanced Operation per
    thousand blobs, so a day is six and a sweep is under a hundred. The sweep
@@ -163,7 +167,13 @@ async function putClip(bytes, row, opts) {
    missed crons cleans itself up instead of leaving a bill nobody can explain. */
 async function sweep(opts) {
   if (!enabled()) return { ok: false, why: reason(), deleted: 0 };
-  const days = (opts && typeof opts.days === 'number') ? opts.days : 7;
+  /* A year, per the newsroom. Clips were kept a week, which was sized for a
+     board that only ever showed tonight. Now that every transmission is
+     archived and searchable, a story somebody circles back to in March is
+     worth being able to HEAR, not just read, and audio is the only part of
+     the vault with a real bill: about 80MB a day, so roughly 30GB a year of
+     object storage. Text is under 2MB a day and effectively free. */
+  const days = (opts && typeof opts.days === 'number') ? opts.days : 365;
   const back = (opts && typeof opts.back === 'number') ? opts.back : 14;
   const now = (opts && opts.now) || new Date().toISOString();
   const budget = (opts && typeof opts.maxDeletes === 'number') ? opts.maxDeletes : 20000;
@@ -241,10 +251,58 @@ function withTimeout(p, ms) {
   });
 }
 
+/* A JSON object at a path we choose. putClip names its own path because a
+   clip's filename is a product decision; the vault knows its own layout and
+   passes one in.
+
+   Never throws. The vault is written on the ingest path, and a newsroom
+   losing a transmission because an archive write failed would be a worse
+   outcome than a gap in the archive. Failures come back as a why string the
+   caller can log. */
+async function putJSON(path, obj, opts) {
+  if (!enabled()) return { ok: false, why: reason() };
+  if (!path) return { ok: false, why: 'no path' };
+  let body;
+  try { body = JSON.stringify(obj); } catch (e) { return { ok: false, why: 'unserialisable' }; }
+  try {
+    const out = await withTimeout(sdk.put(path, body, {
+      access: 'public',
+      token: TOKEN,
+      contentType: 'application/json; charset=utf-8',
+      addRandomSuffix: !!(opts && opts.unique),
+      cacheControlMaxAge: 31536000,   // immutable once written
+    }), (opts && opts.timeoutMs) || 8000);
+    return { ok: true, url: out && out.url, path: out && out.pathname, bytes: body.length };
+  } catch (e) {
+    return { ok: false, why: String(e.message || e).slice(0, 160) };
+  }
+}
+
+/* Everything under a prefix, paged. The vault reads a day by listing its
+   folder, so this is the read half of search. */
+async function listPrefix(prefix, opts) {
+  if (!enabled()) return { ok: false, why: reason(), blobs: [] };
+  const out = [];
+  let cursor;
+  const cap = (opts && opts.max) || 5000;
+  try {
+    do {
+      const page = await withTimeout(sdk.list({ token: TOKEN, prefix, limit: 1000, cursor }), 20000);
+      for (const b of (page.blobs || [])) out.push(b);
+      cursor = page.hasMore ? page.cursor : null;
+    } while (cursor && out.length < cap);
+    return { ok: true, blobs: out };
+  } catch (e) {
+    return { ok: false, why: String(e.message || e).slice(0, 160), blobs: out };
+  }
+}
+
 module.exports = {
   enabled,
   reason,
   putClip,
+  putJSON,
+  listPrefix,
   sweep,
   meter,
   MAX_BYTES,

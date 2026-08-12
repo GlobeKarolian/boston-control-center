@@ -14,6 +14,7 @@
 const { cronAuth, json } = require('../../lib/http');
 const store_io = require('../../lib/store-io');
 const blob = require('../../lib/blob');
+const vault = require('../../lib/vault');
 
 /* Audio retention rides this cron rather than owning one, because a schedule
    in vercel.json is configuration in a second place and the sweep is already
@@ -43,6 +44,25 @@ module.exports = async (req, res) => {
       before = s.snapshotIncidents().length;
     }, { waitMs: 4000 });
     after = store.snapshotIncidents().length;
+
+    /* The last moment these scenes exist. withStore has already swept and
+       saved, so what comes back here is a set of incidents that are gone from
+       Redis and live nowhere else. Written with their FULL timeline, which is
+       the one place the archive and the live board deliberately disagree: the
+       board keeps the last few lines to stay small, the vault keeps the whole
+       call because that is what somebody will ask for in six months.
+
+       Failures are counted, not thrown. A sweep that cannot reach the object
+       store still owes the board its render. */
+    let archived = 0, archiveFails = 0;
+    try {
+      const gone = typeof store.takeDropped === 'function' ? store.takeDropped() : [];
+      for (const inc of gone) {
+        const r = await vault.putIncident(inc);
+        if (r && r.ok) archived++; else archiveFails++;
+      }
+    } catch (e) { archiveFails++; }
+
     const counts = await store_io.renderOutputs(store, { extractorLabel: 'sweep' });
 
     /* Fire and account, never block: the store sweep above is the work this

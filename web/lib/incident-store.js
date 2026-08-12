@@ -642,6 +642,12 @@ function createStore(geocode, extractFn, opt) {
     return null;
   }
 
+  /* Scenes the last sweep retired, waiting to be archived. Drained by the
+     caller rather than cleared here, so a caller that fails to write them can
+     be made to try again without the store having already forgotten. */
+  let dropped = [];
+  function takeDropped() { const out = dropped; dropped = []; return out; }
+
   function sweep(now) {
     now = now ? new Date(now) : new Date();
     for (const id in incidents) {
@@ -651,6 +657,11 @@ function createStore(geocode, extractFn, opt) {
       }
       if (c.status === 'cleared' && c.clearedAt && (now - new Date(c.clearedAt)) > ARCHIVE_AFTER_CLEAR_MS) {
         releaseUnits(c);
+        /* Handed to the caller before it goes. This is the last moment this
+           scene exists anywhere, so it is the only chance the archive gets.
+           Held off dump() on purpose: it is a handoff, not state, and
+           persisting it would write every retired incident twice. */
+        dropped.push(c);
         delete incidents[id];
       }
     }
@@ -756,7 +767,7 @@ function createStore(geocode, extractFn, opt) {
   }
 
   return {
-    ingest, sweep, hydrate, dump,
+    ingest, sweep, hydrate, dump, takeDropped,
     snapshotIncidents, snapshotTranscripts, snapshotEvents, snapshotStats, snapshotStops,
     stopsForPlate: p => stops.forPlate(p),
     recentBySource, _incidents: incidents, _stops: stops,

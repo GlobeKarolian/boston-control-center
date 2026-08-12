@@ -32,6 +32,7 @@ const { geocodeBatch } = require('../lib/geo');
 const store_io = require('../lib/store-io');
 const threat = require('../lib/threat');
 const baseline = require('../lib/baseline');
+const vault = require('../lib/vault');
 
 const MAX_ITEMS = 200;
 const MAX_TEXT = 4000;
@@ -265,6 +266,11 @@ module.exports = async (req, res) => {
 
     // ---- inside the lock: pure computation over pre-resolved inputs ------
     const applied = [];
+    /* Collected in here, written after the lock. Everything the archive wants
+       is already computed at this point and nothing else will ever hold all
+       of it at once: the extraction, the geocode, the threat read, and the
+       scene the transmission turned out to belong to. */
+    const forVault = [];
     const { store } = await store_io.withStore(async (s) => {
       for (let i = 0; i < fresh.length; i++) {
         const it = fresh[i];
@@ -284,6 +290,13 @@ module.exports = async (req, res) => {
             },
           });
           if (inc) applied.push(inc.id);
+          forVault.push(vault.txRecord(it, {
+            ex: exs[i],
+            geo: geos[i] === undefined ? null : geos[i],
+            threat: threats[i],
+            incidentId: inc && inc.id,
+            by, machine: auth.machine,
+          }));
         } catch (e) {
           // One bad transmission must not cost the whole batch. The agent
           // has already deleted its copy, so swallowing here is the end of
@@ -298,6 +311,18 @@ module.exports = async (req, res) => {
     // after a render that had just happened for a better reason.
     lastRenderAt = Date.now();
     const counts = await store_io.renderOutputs(store, { extractorLabel: labelFor(by) });
+
+    /* The archive, written after the lock and never inside it. A slow object
+       store must not hold the mutex every other feed is waiting on, and a
+       failed archive write must not fail an ingest: the newsroom losing a
+       live transmission to protect a copy of it would be the wrong trade. So
+       this reports its failures as warnings and nothing else. */
+    try {
+      const v = await vault.putBatch(forVault, { by, machine: auth.machine });
+      if (v && v.ok === false && v.why) warnings.push('vault: ' + v.why);
+    } catch (e) {
+      warnings.push('vault: ' + String(e.message || e).slice(0, 120));
+    }
 
     // Collected now rather than left dangling. A serverless function stops
     // executing the moment it returns, so an un-awaited KV write is a write
