@@ -34,6 +34,10 @@ const DIR = path.join(__dirname, '..', 'app');
    spelled exactly like one of these keys falls back to the page. */
 const ASSETS = {
   'index.html': 'text/html; charset=utf-8',
+  /* The tab icon. Served from here like every other asset so there is one
+     place a file becomes reachable, rather than a second static mechanism
+     that exists for one image. */
+  'favicon.svg': 'image/svg+xml; charset=utf-8',
   'alerts.js': 'application/javascript; charset=utf-8',
   'freshness.js': 'application/javascript; charset=utf-8',
   'statepolice.js': 'application/javascript; charset=utf-8',

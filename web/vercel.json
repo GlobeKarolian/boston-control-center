@@ -4,6 +4,7 @@
   "rewrites": [
     { "source": "/", "destination": "/api/app" },
     { "source": "/index.html", "destination": "/api/app" },
+    { "source": "/favicon.svg", "destination": "/api/app?asset=favicon.svg" },
     { "source": "/alerts.js", "destination": "/api/app?asset=alerts.js" },
     { "source": "/clips.js", "destination": "/api/app?asset=clips.js" },
     { "source": "/deskviews.css", "destination": "/api/app?asset=deskviews.css" },

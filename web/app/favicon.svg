@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  The tab icon. Dan asked for the Globe's gothic B, because this board sits in a
+  browser all day next to twenty other tabs and the default globe icon is the
+  same icon as everything else.
+
+  For whoever swaps this next: the real mark is a Globe brand asset and belongs
+  here as artwork rather than as a letter drawn from memory. Drop the official
+  SVG in at this path and nothing else changes, because the route, the ASSETS
+  entry and the <link> in index.html all name this file, not what is inside it.
+
+  Until then this is the masthead's own treatment rather than an imitation of
+  the logo: the serif the header already sets "Boston" in, on the board's own
+  near-black, with the scanner green the live dot uses. It reads at 16 pixels,
+  which is the only size that matters here, and it does not pretend to be the
+  trademark.
+
+  Text rather than paths, and a font stack rather than a webfont, because a
+  favicon is rendered before anything can load and a webfont would silently
+  become a blank square. Old English Text MT is first for anyone on Windows,
+  where it ships with the OS and gives the blackletter Dan is after for free.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64">
+  <rect width="64" height="64" rx="12" fill="#05070b"/>
+  <rect x="2" y="2" width="60" height="60" rx="10" fill="none" stroke="#232c3b" stroke-width="2"/>
+  <text x="32" y="47" font-family="'Old English Text MT','UnifrakturMaguntia','Blackletter686 BT',Georgia,'Times New Roman',serif" font-size="46" font-weight="700" text-anchor="middle" fill="#e9edf4">B</text>
+  <circle cx="52" cy="13" r="6" fill="#34d399"/>
+</svg>
