@@ -28,6 +28,7 @@
     "api/feed.js": { "maxDuration": 25 },
     "api/cron/analyst.js": { "maxDuration": 120 },
     "api/analyst-report.js": { "maxDuration": 60 },
+    "api/vault-search.js": { "maxDuration": 60 },
     "api/cron/sweep.js": { "maxDuration": 30 },
     "api/cron/baseline.js": { "maxDuration": 60 },
     "api/pulse.js": { "maxDuration": 15 },
