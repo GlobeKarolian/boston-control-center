@@ -495,6 +495,7 @@ private extension Capture {
         emit(.audio(s.id, v.peak))
         if v.peak < options.silenceGate {
             emit(.gated(s.id))
+            Capture.audit(pcm, slug: s.slug)
             return
         }
         let pcm = Capture.trim(pcm, to: v.range)
@@ -647,6 +648,36 @@ extension Capture {
         guard first >= 0, last > first else { return (peak, 0..<0) }
         let pad = 4_000                                   // 250ms of context each side
         return (peak, max(0, first - pad)..<min(total, last + pad))
+    }
+
+    /* What the gate rejects, kept long enough to be audited.
+
+       The gate's whole failure mode is that a wrong rejection is silent: the
+       audio is discarded, so there is no way to go back and ask how often
+       "silence" contained a voice. The counters can say how MUCH was gated
+       and never say how much of that was a mistake, and the difference
+       between a healthy gate and one eating a fatal stabbing is exactly that
+       number.
+
+       So rejects are kept, a few hundred per feed, newest wins, in
+       Application Support where a person or a script can listen back. The cap
+       makes the disk cost a rounding error: at ~1MB per 30s chunk this is
+       a few hundred MB across the fleet, recycled continuously. */
+    static let auditKeep = 300
+
+    static func audit(_ wav: Data, slug: String) {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                            in: .userDomainMask)[0]
+            .appendingPathComponent("ScannerRelay/gated/\(slug)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: base, withIntermediateDirectories: true)
+        let stamp = Int(Date().timeIntervalSince1970)
+        try? wav.write(to: base.appendingPathComponent("\(stamp)-\(UUID().uuidString.prefix(6)).wav"))
+        guard var names = try? FileManager.default.contentsOfDirectory(atPath: base.path),
+              names.count > auditKeep else { return }
+        names.sort()
+        for n in names.prefix(names.count - auditKeep) {
+            try? FileManager.default.removeItem(at: base.appendingPathComponent(n))
+        }
     }
 
     /// The voiced span of a chunk as its own WAV. An empty range hands the
