@@ -2,58 +2,176 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": null,
   "rewrites": [
-    { "source": "/", "destination": "/api/app" },
-    { "source": "/index.html", "destination": "/api/app" },
-    { "source": "/favicon.svg", "destination": "/api/app?asset=favicon.svg" },
-    { "source": "/alerts.js", "destination": "/api/app?asset=alerts.js" },
-    { "source": "/clips.js", "destination": "/api/app?asset=clips.js" },
-    { "source": "/deskviews.css", "destination": "/api/app?asset=deskviews.css" },
-    { "source": "/deskviews.js", "destination": "/api/app?asset=deskviews.js" },
-    { "source": "/freshness.js", "destination": "/api/app?asset=freshness.js" },
-    { "source": "/statepolice.js", "destination": "/api/app?asset=statepolice.js" },
-    { "source": "/threadui.js", "destination": "/api/app?asset=threadui.js" },
-    { "source": "/track.js", "destination": "/api/app?asset=track.js" },
-    { "source": "/webcams.js", "destination": "/api/app?asset=webcams.js" },
-    { "source": "/admin", "destination": "/api/admin" },
-    { "source": "/incidents.json", "destination": "/api/incidents" },
-    { "source": "/transcripts.json", "destination": "/api/transcripts" },
-    { "source": "/pipeline.json", "destination": "/api/pipeline" },
-    { "source": "/situations.json", "destination": "/api/situations" },
-    { "source": "/stops.json", "destination": "/api/stops" },
-    { "source": "/stops-count.json", "destination": "/api/stops-count" }
+    {
+      "source": "/",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/index.html",
+      "destination": "/api/app"
+    },
+    {
+      "source": "/favicon.svg",
+      "destination": "/api/app?asset=favicon.svg"
+    },
+    {
+      "source": "/alerts.js",
+      "destination": "/api/app?asset=alerts.js"
+    },
+    {
+      "source": "/clips.js",
+      "destination": "/api/app?asset=clips.js"
+    },
+    {
+      "source": "/deskviews.css",
+      "destination": "/api/app?asset=deskviews.css"
+    },
+    {
+      "source": "/deskviews.js",
+      "destination": "/api/app?asset=deskviews.js"
+    },
+    {
+      "source": "/freshness.js",
+      "destination": "/api/app?asset=freshness.js"
+    },
+    {
+      "source": "/statepolice.js",
+      "destination": "/api/app?asset=statepolice.js"
+    },
+    {
+      "source": "/threadui.js",
+      "destination": "/api/app?asset=threadui.js"
+    },
+    {
+      "source": "/track.js",
+      "destination": "/api/app?asset=track.js"
+    },
+    {
+      "source": "/webcams.js",
+      "destination": "/api/app?asset=webcams.js"
+    },
+    {
+      "source": "/admin",
+      "destination": "/api/admin"
+    },
+    {
+      "source": "/incidents.json",
+      "destination": "/api/incidents"
+    },
+    {
+      "source": "/transcripts.json",
+      "destination": "/api/transcripts"
+    },
+    {
+      "source": "/pipeline.json",
+      "destination": "/api/pipeline"
+    },
+    {
+      "source": "/situations.json",
+      "destination": "/api/situations"
+    },
+    {
+      "source": "/stops.json",
+      "destination": "/api/stops"
+    },
+    {
+      "source": "/stops-count.json",
+      "destination": "/api/stops-count"
+    }
   ],
   "functions": {
-    "api/app.js": { "maxDuration": 10, "includeFiles": "app/**" },
-    "api/admin.js": { "maxDuration": 15 },
-    "api/ingest.js": { "maxDuration": 60 },
-    "api/feed.js": { "maxDuration": 25 },
-    "api/cron/analyst.js": { "maxDuration": 120 },
-    "api/analyst-report.js": { "maxDuration": 60 },
-    "api/vault-search.js": { "maxDuration": 60 },
-    "api/cron/sweep.js": { "maxDuration": 30 },
-    "api/cron/baseline.js": { "maxDuration": 60 },
-    "api/pulse.js": { "maxDuration": 15 },
-    "api/cron/pulse.js": { "maxDuration": 800 },
-    "api/cron/cameras.js": { "maxDuration": 60 },
-    "api/cron/outages.js": { "maxDuration": 30 },
-    "api/cameras.js": { "maxDuration": 15 },
-    "api/outages.js": { "maxDuration": 10 }
+    "api/app.js": {
+      "maxDuration": 10,
+      "includeFiles": "app/**"
+    },
+    "api/admin.js": {
+      "maxDuration": 15
+    },
+    "api/ingest.js": {
+      "maxDuration": 60
+    },
+    "api/feed.js": {
+      "maxDuration": 25
+    },
+    "api/cron/analyst.js": {
+      "maxDuration": 120
+    },
+    "api/analyst-report.js": {
+      "maxDuration": 60
+    },
+    "api/vault-search.js": {
+      "maxDuration": 60
+    },
+    "api/cron/sweep.js": {
+      "maxDuration": 30
+    },
+    "api/cron/baseline.js": {
+      "maxDuration": 60
+    },
+    "api/pulse.js": {
+      "maxDuration": 15
+    },
+    "api/cron/pulse.js": {
+      "maxDuration": 800
+    },
+    "api/cron/cameras.js": {
+      "maxDuration": 60
+    },
+    "api/cron/outages.js": {
+      "maxDuration": 30
+    },
+    "api/cameras.js": {
+      "maxDuration": 15
+    },
+    "api/outages.js": {
+      "maxDuration": 10
+    },
+    "api/vault-browse.js": {
+      "maxDuration": 60
+    }
   },
   "crons": [
-    { "path": "/api/cron/analyst", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/sweep", "schedule": "*/5 * * * *" },
-    { "path": "/api/cron/baseline", "schedule": "*/10 * * * *" },
-    { "path": "/api/cron/pulse", "schedule": "0 */3 * * *" },
-    { "path": "/api/cron/cameras", "schedule": "0 */6 * * *" },
-    { "path": "/api/cron/outages", "schedule": "*/15 * * * *" }
+    {
+      "path": "/api/cron/analyst",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/sweep",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/baseline",
+      "schedule": "*/10 * * * *"
+    },
+    {
+      "path": "/api/cron/pulse",
+      "schedule": "0 */3 * * *"
+    },
+    {
+      "path": "/api/cron/cameras",
+      "schedule": "0 */6 * * *"
+    },
+    {
+      "path": "/api/cron/outages",
+      "schedule": "*/15 * * * *"
+    }
   ],
   "headers": [
     {
       "source": "/(.*)",
       "headers": [
-        { "key": "X-Robots-Tag", "value": "noindex, nofollow, noarchive" },
-        { "key": "Referrer-Policy", "value": "no-referrer" },
-        { "key": "X-Content-Type-Options", "value": "nosniff" }
+        {
+          "key": "X-Robots-Tag",
+          "value": "noindex, nofollow, noarchive"
+        },
+        {
+          "key": "Referrer-Policy",
+          "value": "no-referrer"
+        },
+        {
+          "key": "X-Content-Type-Options",
+          "value": "nosniff"
+        }
       ]
     }
   ]

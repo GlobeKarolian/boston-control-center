@@ -162,6 +162,7 @@ final class Controller: ObservableObject {
             }
         case .failed(let id, let reason):
             store.statuses[id, default: SourceStatus()].lastError = reason
+            store.statuses[id, default: SourceStatus()].failed += 1
             if let s = store.sources.first(where: { $0.id == id }) {
                 store.note("[\(s.label.isEmpty ? s.slug : s.label)] \(reason)")
             }
@@ -230,6 +231,7 @@ final class Controller: ObservableObject {
                 "clips": st.clips,
                 "segs": st.segments,
                 "gated": st.gated,
+                "failed": st.failed,
                 "lastAudioAt": st.lastAudioAt.map { iso.string(from: $0) } as Any,
                 "lastTextAt": st.lastTextAt.map { iso.string(from: $0) } as Any,
                 "lastError": st.lastError as Any,

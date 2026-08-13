@@ -160,6 +160,13 @@ struct SourceStatus: Equatable {
     var lastAudioAt: Date?
     var lastError: String?
     var peak: Double = 0
+    /* Runs that died rather than finished: whisper aborting, a segment that
+       would not decode, audio that could not be staged. Counted because a
+       failure that only sets lastError is overwritten by the next failure,
+       and a whole evening of them leaves one string behind. The South Station
+       stabbing was missing from the archive for a day before anyone could
+       even ask how much was being lost. */
+    var failed = 0
 }
 
 /* ---------------------------------------------------------------- config --- */

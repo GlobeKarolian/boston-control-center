@@ -477,12 +477,27 @@ private extension Capture {
             return
         }
 
-        let peak = Capture.rms(pcm)
-        emit(.audio(s.id, peak))
-        if peak < options.silenceGate {
+        /* Gate on the loudest 300ms window, not the average of the chunk.
+
+           The average is how most of a night's radio got thrown away. A four
+           second transmission inside a thirty second chunk averages against
+           twenty-six seconds of dead air and lands under the gate, so the
+           busier hours lost more, and the one feed that cuts per transmission
+           (the native Boston Police tap) kept 80% while every timer-cut feed
+           kept a third or less. The loudest window has no such bias: if any
+           moment of the chunk was speech, the chunk is speech.
+
+           The chunk is then trimmed to its voiced span before whisper sees it,
+           so the model's time is spent on the transmission rather than the
+           silence around it, and the archived clip starts where the voice
+           does. */
+        let v = Capture.voiced(pcm, gate: options.silenceGate)
+        emit(.audio(s.id, v.peak))
+        if v.peak < options.silenceGate {
             emit(.gated(s.id))
             return
         }
+        let pcm = Capture.trim(pcm, to: v.range)
 
         let dir = FileManager.default.temporaryDirectory
             .appendingPathComponent("scanner-relay", isDirectory: true)
@@ -593,6 +608,62 @@ extension Capture {
             }
         }
         return n > 0 ? (sum / Double(n)).squareRoot() : 0
+    }
+
+    /// Loudness by 300ms window, and the padded span of windows above the
+    /// gate. Sampled inside each window the way rms() samples the file.
+    static func voiced(_ wav: Data, gate: Double) -> (peak: Double, range: Range<Int>) {
+        let win = 4_800                                   // 300ms at 16kHz
+        var peak = 0.0
+        var first = -1
+        var last = -1
+        var total = 0
+        wav.withUnsafeBytes { raw in
+            total = (raw.count - 44) / 2
+            guard total > 0 else { return }
+            var base = 0
+            while base < total {
+                let n = min(win, total - base)
+                let step = max(1, n / 600)
+                var sum = 0.0
+                var seen = 0
+                var i = 0
+                while i < n {
+                    let v = raw.loadUnaligned(fromByteOffset: 44 + (base + i) * 2, as: Int16.self)
+                    let f = Double(v) / 32768.0
+                    sum += f * f
+                    seen += 1
+                    i += step
+                }
+                let r = seen > 0 ? (sum / Double(seen)).squareRoot() : 0
+                if r > peak { peak = r }
+                if r >= gate {
+                    if first < 0 { first = base }
+                    last = base + n
+                }
+                base += win
+            }
+        }
+        guard first >= 0, last > first else { return (peak, 0..<0) }
+        let pad = 4_000                                   // 250ms of context each side
+        return (peak, max(0, first - pad)..<min(total, last + pad))
+    }
+
+    /// The voiced span of a chunk as its own WAV. An empty range hands the
+    /// chunk back whole rather than guessing.
+    static func trim(_ wav: Data, to range: Range<Int>) -> Data {
+        guard !range.isEmpty else { return wav }
+        var samples = [Int16](repeating: 0, count: range.count)
+        wav.withUnsafeBytes { raw in
+            let total = (raw.count - 44) / 2
+            var j = 0
+            for i in range {
+                if i >= total { break }
+                samples[j] = raw.loadUnaligned(fromByteOffset: 44 + i * 2, as: Int16.self)
+                j += 1
+            }
+        }
+        return SystemAudioTap.wav(samples)
     }
 }
 

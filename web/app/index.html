@@ -1272,6 +1272,12 @@
                placeholder="big fire last night in Back Bay" aria-label="Search the archive">
         <button id="arGo" class="ar-go">Search</button>
       </div>
+      <div class="ar-bar" id="arBrowseBar">
+        <select id="arFeed" class="ar-input" style="flex:0 0 220px"></select>
+        <input id="arFrom" class="ar-input" type="datetime-local" style="flex:0 0 205px">
+        <input id="arTo" class="ar-input" type="datetime-local" style="flex:0 0 205px">
+        <button id="arPlay" class="ar-go">Pull that window</button>
+      </div>
       <div class="ar-eg">
         try
         <button class="ar-chip">big fire last night in Back Bay</button>
@@ -2218,6 +2224,69 @@ function arRead(u,n,ms){
     +n+' call'+(n===1?'':'s')+' &middot; '+ms+'ms';
 }
 
+/* The other door into the archive: a feed and a window, no words involved.
+
+   Search depends on transcription, and transcription of trunked radio misses
+   proper nouns exactly when they matter. A reporter who knows roughly when
+   and roughly which agency gets the actual radio, in order, regardless of
+   what whisper thought anyone said. This is the door the South Station
+   stabbing could have come through. */
+function wireBrowse(){
+  const sel=document.getElementById('arFeed');
+  const from=document.getElementById('arFrom'), to=document.getElementById('arTo');
+  const btn=document.getElementById('arPlay');
+  if(!sel||!btn)return;
+  fetch('./api/status',{credentials:'include'}).then(r=>r.json()).then(d=>{
+    const feeds=(d.feeds||[]).map(f=>f.id).sort();
+    sel.innerHTML='<option value="">every feed</option>'
+      +feeds.map(f=>'<option value="'+esc(f)+'">'+esc(f)+'</option>').join('');
+  }).catch(()=>{ sel.innerHTML='<option value="">every feed</option>'; });
+  const now=new Date(), ago=new Date(Date.now()-3600000);
+  const fmt=d=>new Date(+d-d.getTimezoneOffset()*60000).toISOString().slice(0,16);
+  from.value=fmt(ago); to.value=fmt(now);
+  btn.onclick=()=>arBrowse(sel.value,from.value,to.value);
+}
+
+async function arBrowse(feed,from,to){
+  const out=document.getElementById('arOut'), read=document.getElementById('arRead');
+  if(AR_BUSY||!from||!to)return;
+  AR_BUSY=true;
+  read.innerHTML='pulling that window...'; out.innerHTML='';
+  try{
+    const u='./api/vault-browse?feed='+encodeURIComponent(feed)
+      +'&from='+encodeURIComponent(new Date(from).toISOString())
+      +'&to='+encodeURIComponent(new Date(to).toISOString());
+    const r=await fetch(u,{credentials:'include'});
+    const d=await r.json();
+    if(!d.ok){ read.textContent=''; out.innerHTML='<p class="ar-none">'+esc(d.why||'that did not work')+'</p>'; AR_BUSY=false; return; }
+    const heard=Object.keys(d.heard||{}).sort().map(k=>esc(k)+' '+d.heard[k]).join(' &middot; ');
+    read.innerHTML=(feed?'<b>'+esc(feed)+'</b>':'every feed')+', '
+      +esc(arWhen(d.from))+' to '+esc(arWhen(d.to))
+      +'<br>'+d.count+' transmission'+(d.count===1?'':'s')
+      +(d.clipped?' (showing the first 500)':'')
+      +(heard?' &middot; heard: '+heard:'')+' &middot; '+d.ms+'ms';
+    if(!d.tx.length){
+      out.innerHTML='<p class="ar-none">Nothing archived on '
+        +(feed?'that feed':'any feed')+' in that window.'
+        +(heard?' Other feeds in the same window: '+heard+'.':'')+'</p>';
+      AR_BUSY=false; return;
+    }
+    /* One pseudo-call per feed, through the same renderer the search uses, so
+       the play-in-order chain works identically here. */
+    const byFeed={};
+    for(const t of d.tx){ (byFeed[t.feed||'unknown']=byFeed[t.feed||'unknown']||[]).push(t); }
+    out.innerHTML=Object.keys(byFeed).sort().map(k=>{
+      const tx=byFeed[k];
+      return arCall({ id:'browse:'+k, loose:false, feed:k, town:null, type:null,
+        place:null, from:tx[0].at, to:tx[tx.length-1].at, units:[], tx:tx,
+        clips:tx.filter(t=>t.clip).map(t=>({u:t.clip,at:t.at})) });
+    }).join('');
+  }catch(e){
+    read.textContent='';
+    out.innerHTML='<p class="ar-none">The archive did not answer. '+esc(String(e.message||e))+'</p>';
+  }finally{ AR_BUSY=false; }
+}
+
 async function arSearch(q){
   const out=document.getElementById('arOut'), read=document.getElementById('arRead');
   if(!q||!q.trim()||AR_BUSY)return;
@@ -2281,6 +2350,7 @@ function arCall(c){
   const go=document.getElementById('arGo'), q=document.getElementById('arQ');
   if(!go||!q)return;
   go.onclick=()=>arSearch(q.value);
+  wireBrowse();
   q.addEventListener('keydown',e=>{ if(e.key==='Enter')arSearch(q.value); });
   document.querySelectorAll('.ar-chip').forEach(c=>{
     c.onclick=()=>{ q.value=c.textContent; arSearch(q.value); };

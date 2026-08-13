@@ -108,6 +108,7 @@ module.exports = async (req, res) => {
     out.feeds = (await store_io.getHealth()).map(f => ({
       id: f.id, machine: f.machine || null, status: f.status,
       clips: f.clips, segs: f.segs, gated: f.gated,
+      failed: f.failed || 0,
       lastTextAt: f.lastTextAt || null, staleSec: f.staleSec || 0,
       lastError: f.lastError ? String(f.lastError).slice(0, 160) : null,
     }));
