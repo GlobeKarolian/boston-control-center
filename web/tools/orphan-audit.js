@@ -43,6 +43,14 @@ function shift(d, days) {
 
   const referenced = new Set();
   let txCount = 0;
+  /* Late writes are the outage's fingerprint. A batch normally lands within a
+     minute of its audio; a batch written long after its own timestamps was
+     sitting in the relay's retry queue while the cloud refused it. If the
+     evening was erased by queue eviction there will ALSO be a gap with no
+     batches at all. If neither shows up, the outage theory is wrong and the
+     traffic never reached the relay in the first place. */
+  const late = [];
+  const vaultHour = {};
   for (const d of [shift(day, -1), day, shift(day, 1)]) {
     const vaultList = await blob.listPrefix('vault/' + d + '/tx/', { max: 10000 });
     const urls = vaultList.blobs.map(b => b.url);
@@ -56,6 +64,15 @@ function shift(d, days) {
           if (!r.ok) continue;
           const j = await r.json();
           for (const t of (j.tx || [])) { txCount++; if (t.clip) referenced.add(norm(t.clip)); }
+          if (d === day && j.tx && j.tx.length) {
+            const first = +new Date(j.tx[0].at);
+            const wrote = +new Date(j.writtenAt || 0);
+            const hh = new Date(first).toLocaleString('en-US',
+              { timeZone: 'America/New_York', hour12: false, hour: '2-digit' });
+            vaultHour[hh + ':00 ET'] = (vaultHour[hh + ':00 ET'] || 0) + j.tx.length;
+            const delayMin = Math.round((wrote - first) / 60000);
+            if (wrote && delayMin > 15) late.push({ at: j.tx[0].at, delayMin, n: j.tx.length });
+          }
         } catch (e) { /* one unreadable batch is not a failed audit */ }
       }
     }
@@ -63,6 +80,22 @@ function shift(d, days) {
     console.log('vault ' + d + ': ' + vaultList.blobs.length + ' batches read');
   }
   console.log('vault transmissions seen: ' + txCount + '   clips referenced: ' + referenced.size);
+
+  console.log('\nvault transmissions by hour (Eastern), the unbiased density:');
+  Object.keys(vaultHour).sort().forEach(k => console.log('  ' + k.padEnd(10) + vaultHour[k]));
+
+  const clipHour = {};
+  for (const b of clipList.blobs) {
+    const m = norm(b.pathname || b.url).match(/-(\d{2})(\d{2})(\d{2})-et-/);
+    const hh = m ? m[1] + ':00 ET' : '??';
+    clipHour[hh] = (clipHour[hh] || 0) + 1;
+  }
+  console.log('\nclips uploaded by hour (Eastern), what the relay actually heard:');
+  Object.keys(clipHour).sort().forEach(k => console.log('  ' + k.padEnd(10) + clipHour[k]));
+
+  late.sort((a, b) => b.delayMin - a.delayMin);
+  console.log('\nbatches written >15 min after their own audio (the retry-queue fingerprint): ' + late.length);
+  for (const l of late.slice(0, 12)) console.log('  ' + l.at + '  written ' + l.delayMin + ' min late, ' + l.n + ' tx');
 
   const orphans = clipList.blobs.filter(b => !referenced.has(norm(b.pathname || b.url)));
   console.log('\nORPHANS, audio with no transcript anywhere: ' + orphans.length);
