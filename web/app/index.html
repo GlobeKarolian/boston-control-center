@@ -2209,6 +2209,7 @@ function arClock(iso){
 function arRead(u,n,ms){
   const bits=[];
   if(u.type) bits.push('type <b>'+esc(u.type)+'</b>');
+  if(u.landmark) bits.push('at <b>'+esc(u.landmark)+'</b>');
   if(u.place) bits.push('in <b>'+esc(u.place)+'</b>');
   if(u.big) bits.push('<b>serious</b> calls first');
   if(u.words&&u.words.length) bits.push('mentioning <b>'+u.words.map(esc).join(', ')+'</b>');
@@ -2228,10 +2229,17 @@ async function arSearch(q){
     if(!d.ok){ read.textContent=''; out.innerHTML='<p class="ar-none">'+esc(d.why||'that search did not work')+'</p>'; return; }
     read.innerHTML=arRead(d.understood,d.calls,d.ms);
     if(!d.results.length){
+      const cov=d.coverage||{};
       out.innerHTML='<p class="ar-none">Nothing in the archive matches that yet.'
         +(d.scanned?' Read '+d.scanned+' transmissions from that window.':'')
-        +'<br><br>The archive only holds what has come in since it was switched on, so a question about'
-        +' something older than that has nothing to find.</p>';
+        +(cov.from&&cov.to
+            ? '<br><br>What the archive holds for that window runs '+esc(arWhen(cov.from))
+              +' to '+esc(arWhen(cov.to))+'. If the call you want is older than that, it was'
+              +' never written down; if it is inside that span, the words you searched for'
+              +' are not in the transcripts.'
+            : '<br><br>Nothing at all is archived for that window, so the question has nothing'
+              +' to find. The archive only holds what has come in since it was switched on.')
+        +'</p>';
       return;
     }
     out.innerHTML=d.results.map(arCall).join('');

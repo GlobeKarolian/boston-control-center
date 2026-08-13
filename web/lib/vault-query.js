@@ -18,6 +18,24 @@
 // If that stops being enough, this is the seam where a model gets added, and
 // nothing above it has to change.
 //
+// WHAT THIS GOT WRONG THE FIRST TIME, because it is the whole reason the
+// search was useless and the failure mode is worth naming:
+//
+//   1. Every transmission inside the time window started at score 1. A query
+//      with no type and no place therefore matched all of them, and "1,768
+//      scanned, 1,768 matched" is not a search, it is a date filter wearing
+//      one. Evidence is now required: if the question carries any criteria at
+//      all, a transmission has to satisfy at least one of them to come back.
+//
+//   2. Words were matched with String.includes, so "body" matched "somebody"
+//      seventeen times in one night and never once meant a body. Matching is
+//      now on token boundaries.
+//
+//   3. There was nowhere to put "TD Garden". The archive knows neighborhoods
+//      and towns; a newsroom says landmarks. A body in the Garden parking
+//      garage was unfindable by the name every reporter in the building would
+//      use for it.
+//
 //   node tools/test-vault-query.js
 
 'use strict';
@@ -96,6 +114,7 @@ function whenOf(q, now) {
   }
   if (/\btoday\b/i.test(q)) return { from: startOfDay(0), to: new Date(+t), label: 'today' };
   if (/\blast (week|7 days)\b|\bpast week\b/i.test(q)) return { from: new Date(+t - 7 * dayMs), to: new Date(+t), label: 'the last week' };
+  if (/\blast (month|30 days)\b|\bpast month\b/i.test(q)) return { from: new Date(+t - 30 * dayMs), to: new Date(+t), label: 'the last month' };
   if (/\blast (hour|60 minutes)\b/i.test(q)) return { from: new Date(+t - 3600000), to: new Date(+t), label: 'the last hour' };
   const iso = q.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
   if (iso) {
@@ -109,23 +128,46 @@ function whenOf(q, now) {
 
 /* WHAT. The call types the extractor already assigns, plus the words a person
    actually uses for them. "working fire" and "structure fire" are both fire;
-   nobody types "callType:fire". */
+   nobody types "callType:fire".
+
+   Order matters: the first pattern that matches the question wins, so the
+   specific sits above the general. "body" has to beat "medical" or a death
+   search returns every ambulance run of the night. */
 const TYPES = {
-  fire: /\b(fire|working fire|structure fire|smoke|alarm of fire|box alarm)\b/i,
-  medical: /\b(medical|ems|ambulance|cardiac|overdose|od|seizure|unresponsive|injur)\w*\b/i,
-  crash: /\b(crash|accident|mva|collision|rollover|car into|struck by)\b/i,
-  pursuit: /\b(pursuit|chase|fleeing|failed to stop)\b/i,
-  shooting: /\b(shooting|shots fired|gunshot|shot)\b/i,
-  stabbing: /\b(stabbing|stabbed|knife)\b/i,
+  death: /\b(body|bodies|deceased|dead|doa|fatal|fatality|fatalities|coroner|medical examiner|untimely|jumper|drowning|drowned)\b/i,
+  shooting: /\b(shooting|shots fired|gunshot|gunfire|shot)\b/i,
+  stabbing: /\b(stabbing|stabbed|knife|slashed)\b/i,
+  fire: /\b(fire|working fire|structure fire|smoke|alarm of fire|box alarm|arson)\b/i,
+  crash: /\b(crash|accident|mva|collision|rollover|car into|struck by|pedestrian struck)\b/i,
   hazmat: /\b(hazmat|chemical|gas leak|spill|carbon monoxide)\b/i,
-  search: /\b(search|missing|water rescue|dive team)\b/i,
-  disturbance: /\b(disturbance|fight|assault|disorderly)\b/i,
-  robbery: /\b(robbery|holdup|larceny|breaking and entering|b&e)\b/i,
+  pursuit: /\b(pursuit|chase|fleeing|failed to stop)\b/i,
+  robbery: /\b(robbery|holdup|larceny|breaking and entering|burglary)\b/i,
+  search: /\b(search|missing|water rescue|dive team|well being)\b/i,
+  disturbance: /\b(disturbance|fight|assault|disorderly|brawl)\b/i,
+  medical: /\b(medical|ems|ambulance|cardiac|overdose|seizure|unresponsive|injur)\w*\b/i,
 };
 
-/* WHERE. Boston's neighborhoods are what a reporter says; the archive stores a
-   town and a matched address. Both get searched, so "Back Bay" finds a call
-   whose town is Boston and whose address landed on Boylston St. */
+/* Call types that are the same night from a different angle. The extractor
+   picks one label per transmission and a reporter picks another, and the two
+   vocabularies do not have to agree for the search to work. A body is very
+   often filed as a medical; a shooting almost always drags a medical with it.
+   These are worth partial credit rather than a hard no. */
+const KIN = {
+  death: ['medical', 'search'],
+  medical: ['death'],
+  shooting: ['medical', 'death'],
+  stabbing: ['medical', 'death'],
+  crash: ['medical'],
+  fire: ['hazmat'],
+  hazmat: ['fire'],
+  robbery: ['disturbance'],
+  disturbance: ['robbery'],
+};
+
+/* WHERE, part one. Boston's neighborhoods are what a reporter says; the
+   archive stores a town and a matched address. Both get searched, so "Back
+   Bay" finds a call whose town is Boston and whose address landed on
+   Boylston St. */
 const PLACES = [
   'back bay', 'south end', 'north end', 'east boston', 'south boston', 'southie',
   'dorchester', 'roxbury', 'mattapan', 'jamaica plain', 'roslindale', 'west roxbury',
@@ -136,73 +178,239 @@ const PLACES = [
   'lowell', 'lynn', 'waltham', 'framingham', 'braintree', 'milton', 'dedham',
 ];
 
+const PLACE_ALIASES = {
+  southie: 'south boston',
+  eastie: 'east boston',
+  jp: 'jamaica plain',
+};
+
+/* WHERE, part two, and the reason the Garden was unfindable.
+
+   A reporter does not say "Causeway Street", they say "the Garden". The
+   archive stores whatever came over the radio, which might be the street, the
+   venue, the station, or the neighborhood, and any of the four is the same
+   place to the person asking. Each entry is a canonical name and the strings
+   that mean it, and matching any one of them counts.
+
+   Aliases are kept tight on purpose. "Copley" does not list Boylston Street,
+   because Boylston runs for two miles and half of it is nowhere near Copley;
+   a landmark that quietly matches a whole neighborhood is worse than one that
+   matches nothing, because the reporter cannot see it happening. */
+const LANDMARKS = {
+  'td garden': ['td garden', 'the garden', 'boston garden', 'fleetcenter', 'fleet center',
+                'north station', 'causeway st', 'causeway street', 'legends way'],
+  'fenway park': ['fenway park', 'lansdowne', 'yawkey way', 'jersey st', 'jersey street'],
+  'logan airport': ['logan airport', 'logan intl', 'massport', 'terminal a', 'terminal b',
+                    'terminal c', 'terminal e'],
+  'south station': ['south station'],
+  'back bay station': ['back bay station'],
+  'boston common': ['boston common', 'the common', 'frog pond'],
+  'public garden': ['public garden', 'swan boat'],
+  'faneuil hall': ['faneuil hall', 'faneuil', 'quincy market'],
+  'copley square': ['copley square', 'copley place', 'copley'],
+  'prudential center': ['prudential center', 'prudential', 'the pru'],
+  'city hall': ['city hall', 'government center'],
+  'mass general': ['mass general', 'massachusetts general', 'mgh'],
+  'brigham': ['brigham and women', 'the brigham'],
+  'boston medical center': ['boston medical center', 'bmc'],
+  'tufts medical': ['tufts medical', 'tufts med'],
+  'seaport world trade': ['world trade center', 'convention center', 'bcec'],
+  'bunker hill': ['bunker hill'],
+  'harvard square': ['harvard square', 'harvard sq'],
+  'kendall square': ['kendall square', 'kendall sq'],
+  'assembly row': ['assembly row', 'assembly square'],
+  'encore casino': ['encore boston', 'encore casino', 'wynn casino'],
+  'gillette stadium': ['gillette stadium'],
+  'boston university': ['boston university'],
+  'northeastern': ['northeastern'],
+  'zakim bridge': ['zakim'],
+  'tobin bridge': ['tobin bridge'],
+  'sumner tunnel': ['sumner tunnel'],
+  'callahan tunnel': ['callahan tunnel'],
+  'ted williams tunnel': ['ted williams tunnel'],
+};
+
 const BIG = /\b(big|major|serious|large|massive|bad|worst|significant|multiple alarm|second alarm|third alarm|working)\b/i;
 
 /* Words that carry no signal for matching. Everything left after the parse is
    used as free text against the transcript, and leaving these in would match
    every line on the radio. */
-const STOP = new Set(('the a an of in on at from to for and or all any me i we ' +
-  'need want find show get give please scanner transmissions transmission calls call ' +
-  'audio radio about with was were is are there that this last night yesterday today ' +
-  'tonight morning evening week hour big major serious large').split(' '));
+const STOP = new Set(('the a an of in on at from to for and or all any me i we my our ' +
+  'need needs want find finding show get give please can could would ' +
+  'scanner transmissions transmission calls call audio radio recording ' +
+  'about with was were is are be been there here that this those these ' +
+  'last night yesterday today tonight morning evening afternoon week weeks ' +
+  'hour hours day days month months big major serious large what when where ' +
+  'who why how happened something anything everything ' +
+  /* Verbs a question is built out of rather than about. "Body FOUND at the
+     Garden" turns on the body and the Garden; "found" on its own would match
+     every lost wallet on the radio and dilute the ranking of the ones that
+     matched something real. */
+  'found find located locate involving involved near around report reported ' +
+  'happening going down over out').split(/\s+/));
+
+/* Token set for a haystack, with a naive singular folded in beside every
+   plural. Tokens rather than substrings because "body" is inside "somebody",
+   which is how a search for a death in a parking garage came back with
+   seventeen people asking somebody to check a tablet. */
+function tokenize(s) {
+  const set = new Set();
+  for (const w of String(s || '').toLowerCase().split(/[^a-z0-9]+/)) {
+    if (!w) continue;
+    set.add(w);
+    if (w.length > 3 && w.endsWith('s')) set.add(w.slice(0, -1));
+    if (w.length > 4 && w.endsWith('es')) set.add(w.slice(0, -2));
+    if (w.length > 5 && w.endsWith('ing')) set.add(w.slice(0, -3));
+  }
+  return set;
+}
+
+function hasWord(set, w) {
+  if (set.has(w)) return true;
+  if (w.length > 3 && w.endsWith('s') && set.has(w.slice(0, -1))) return true;
+  return set.has(w + 's');
+}
 
 function parse(q, now) {
   const raw = String(q || '').trim();
   const when = whenOf(raw, now);
+  const lower = ' ' + raw.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
 
   let type = null;
   for (const k of Object.keys(TYPES)) {
     if (TYPES[k].test(raw)) { type = k; break; }
   }
 
-  const lower = raw.toLowerCase();
+  /* Landmark before neighborhood, because "the Garden" is a sharper constraint
+     than "downtown" and a question that names one rarely means the other. */
+  let landmark = null;
+  let landmarkHit = null;
+  outer:
+  for (const canon of Object.keys(LANDMARKS)) {
+    for (const alias of LANDMARKS[canon]) {
+      if (lower.includes(' ' + alias + ' ')) { landmark = canon; landmarkHit = alias; break outer; }
+    }
+  }
+
   let place = null;
   for (const p of PLACES) {
-    if (lower.includes(p)) { place = p; break; }
+    if (lower.includes(' ' + p + ' ')) { place = p; break; }
   }
+  if (!place) {
+    for (const a of Object.keys(PLACE_ALIASES)) {
+      if (lower.includes(' ' + a + ' ')) { place = a; break; }
+    }
+  }
+  if (place && PLACE_ALIASES[place]) place = PLACE_ALIASES[place];
+
+  /* "Fenway Park" names the park, and the neighborhood called Fenway is a
+     square mile around it. Holding both would demand a transmission satisfy
+     the narrow constraint and the broad one, which the narrow one already
+     implies. The landmark wins. */
+  if (landmark && place && landmark.includes(place)) place = null;
 
   /* What is left after when/what/where have taken their words. Used against
      the transcript text, which is how a question with no structured handle
      still finds something. */
+  const consumed = new Set();
+  if (place) for (const w of place.split(' ')) consumed.add(w);
+  if (landmark) {
+    for (const w of landmark.split(' ')) consumed.add(w);
+    if (landmarkHit) for (const w of landmarkHit.split(' ')) consumed.add(w);
+  }
+
   const words = lower
-    .replace(/[^a-z0-9\s]/g, ' ')
     .split(/\s+/)
+    .filter(Boolean)
     .filter(w => w.length > 2 && !STOP.has(w))
-    .filter(w => !place || !place.includes(w))
+    .filter(w => !consumed.has(w))
     .filter(w => !type || !TYPES[type].test(w))
+    .filter((w, i, a) => a.indexOf(w) === i)
     .slice(0, 8);
 
-  return { from: when.from, to: when.to, when: when.label, type, place, big: BIG.test(raw), words, q: raw };
+  return {
+    from: when.from, to: when.to, when: when.label,
+    type, place, landmark, big: BIG.test(raw), words, q: raw,
+  };
 }
 
 /* Does one archived transmission answer this question?
+
    Scored rather than boolean, so the best match sorts to the top and a
-   near-miss still shows up rather than vanishing. */
+   near-miss still shows up rather than vanishing. But a score of zero has to
+   mean something: a transmission earns its place by matching a criterion the
+   question actually stated. The only query that matches everything in the
+   window is a query that asked for nothing else. */
 function score(tx, f) {
   const at = +new Date(tx.at);
   if (!(at >= +f.from && at <= +f.to)) return 0;
 
-  let s = 1;
-  const hay = ((tx.text || '') + ' ' + (tx.matched || '') + ' ' + (tx.town || '') + ' ' +
-               (tx.address || '') + ' ' + (tx.street || '') + ' ' + (tx.landmark || '') + ' ' +
-               (tx.city || '') + ' ' + (tx.feed || '')).toLowerCase();
+  /* Two haystacks, and the split matters.
 
+     What was said and where it was is content, and a call type has to be found
+     in there. The feed name, the department and the unit numbers are labels the
+     system attached, and a feed called "boston-fire" carries the word fire on
+     every transmission it ever hands over, including the seven about somebody
+     checking a tablet. Testing the fire pattern against that turns a whole
+     channel into a permanent false positive.
+
+     Free-text words still search the labels, because "boston fire" and "engine
+     33" are things a reporter reasonably types and expects to work. */
+  const hay = ((tx.text || '') + ' ' + (tx.matched || '') + ' ' + (tx.town || '') + ' ' +
+               (tx.address || '') + ' ' + (tx.street || '') + ' ' + (tx.crossStreet || '') + ' ' +
+               (tx.landmark || '') + ' ' + (tx.city || '')).toLowerCase();
+  const labels = ((tx.feed || '') + ' ' + (tx.dept || '') + ' ' +
+                  (tx.units || []).join(' ')).toLowerCase();
+  const bag = tokenize(hay + ' ' + labels);
+
+  const asked = (f.type ? 1 : 0) + (f.place ? 1 : 0) + (f.landmark ? 1 : 0) + f.words.length;
+  /* A question with no handle on it beyond a time range is a browse, and a
+     browse legitimately returns the window. */
+  if (asked === 0) return 1;
+
+  let s = 0;
+  let hit = 0;
+
+  /* The pipeline's own label is the strongest evidence in the record, because
+     something already read the whole transmission to assign it. It has to
+     outweigh a couple of incidental word hits, or "confirming a body" loses to
+     a line that merely says "parking garage" twice. */
   if (f.type) {
-    if (tx.callType === f.type) s += 6;
-    else if (TYPES[f.type].test(hay)) s += 3;
+    if (tx.callType === f.type) { s += 10; hit++; }
+    else if (TYPES[f.type].test(hay)) { s += 5; hit++; }
+    else if ((KIN[f.type] || []).includes(tx.callType)) { s += 2; hit++; }
     else return 0;                       // asked for a fire, this is not one
   }
+
+  if (f.landmark) {
+    const aliases = LANDMARKS[f.landmark] || [f.landmark];
+    if (aliases.some(a => hay.includes(a))) { s += 7; hit++; }
+    else return 0;                       // asked for the Garden, this is not there
+  }
+
   if (f.place) {
-    if (hay.includes(f.place)) s += 5;
+    if (hay.includes(f.place)) { s += 5; hit++; }
     else return 0;                       // asked for Back Bay, this is not there
   }
+
+  for (const w of f.words) if (hasWord(bag, w)) { s += 3; hit++; }
+
+  /* Seriousness sharpens a ranking but never stands in as evidence. "Big fire"
+     with nothing else matched is still not this transmission. */
   if (f.big) {
     if (tx.priority === 'high') s += 3;
     if ((tx.tier || 0) >= 2) s += 2;
     if (tx.alarm) s += 2;
   }
-  for (const w of f.words) if (hay.includes(w)) s += 2;
-  return s;
+
+  if (hit === 0) return 0;
+
+  /* Matching three of three stated things beats matching one of three, whatever
+     the raw points say. */
+  return s * (1 + hit / Math.max(asked, 1));
 }
 
-module.exports = { parse, score, whenOf, dayString, TYPES, PLACES, TZ };
+module.exports = {
+  parse, score, whenOf, dayString, tokenize, hasWord,
+  TYPES, PLACES, LANDMARKS, KIN, TZ,
+};

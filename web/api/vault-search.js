@@ -24,6 +24,12 @@ const vq = require('../lib/vault-query');
 const MAX_OBJECTS = 3500;
 const CONCURRENCY = 64;
 
+/* A batch is named for the first transmission in it, so the last one can sit a
+   little after that stamp. The window is widened before filtering by filename
+   and every transmission is still checked exactly by score(), so this only
+   ever skips objects that could not have contained an answer. */
+const BATCH_SLACK_MS = 30 * 60 * 1000;
+
 function daysBetween(from, to) {
   const out = [];
   const step = 86400000;
@@ -32,6 +38,18 @@ function daysBetween(from, to) {
     if (d && !out.includes(d)) out.push(d);
   }
   return out;
+}
+
+/* The epoch the archive wrote into a batch's filename: vault/DAY/tx/<ms>-<n>.json,
+   possibly with a random suffix before the extension. Anything unparseable is
+   kept rather than dropped, because a filename this code does not recognise is
+   not evidence that the night is not in there. */
+function stampOf(path) {
+  const base = String(path || '').split('/').pop() || '';
+  const m = base.match(/^(\d{10,16})-/);
+  if (!m) return null;
+  const n = +m[1];
+  return Number.isFinite(n) ? n : null;
 }
 
 /* Object storage has no query language, so the fetch is the search. Run wide
@@ -70,11 +88,11 @@ function group(hits) {
     if (!g) {
       g = { id: key, loose: !tx.incidentId, feed: tx.feed, town: tx.town || tx.city || null,
             type: tx.callType || null, place: tx.matched || tx.address || tx.street || null,
-            from: tx.at, to: tx.at, score: 0, units: new Set(), tx: [] };
+            from: tx.at, to: tx.at, score: 0, best: 0, units: new Set(), tx: [] };
       byInc.set(key, g);
     }
     g.tx.push(tx);
-    g.score += s;
+    if (s > g.best) g.best = s;
     if (tx.at < g.from) g.from = tx.at;
     if (tx.at > g.to) g.to = tx.at;
     if (!g.type && tx.callType) g.type = tx.callType;
@@ -83,6 +101,13 @@ function group(hits) {
   }
   return [...byInc.values()].map(g => ({
     ...g,
+    /* Ranked on its best transmission, nudged by how many others agreed.
+
+       Summing every transmission's score, which is what this did first, ranks
+       by how talkative a call was. A forty-line structure fire then buries the
+       three lines that are the actual answer to the question, which is the
+       opposite of what a reporter at 1am needs. */
+    score: g.best + Math.log2(1 + g.tx.length),
     units: [...g.units].slice(0, 12),
     tx: g.tx.sort((a, b) => String(a.at).localeCompare(String(b.at))),
     clips: g.tx.filter(t => t.clip).map(t => ({ u: t.clip, at: t.at })).slice(0, 40),
@@ -101,13 +126,24 @@ module.exports = async (req, res) => {
   const f = vq.parse(q);
 
   /* Only the days the question touches. This is the whole reason the vault is
-     filed by Eastern day: "last night" reads two folders, never the archive. */
-  const days = daysBetween(f.from, f.to);
+     filed by Eastern day: "last night" reads two folders, never the archive.
+
+     Newest day first, so that a question wide enough to hit the object cap
+     loses its oldest edge rather than the night the reporter is asking about. */
+  const days = daysBetween(f.from, f.to).sort().reverse();
+  const lo = +f.from - BATCH_SLACK_MS;
+  const hi = +f.to + BATCH_SLACK_MS;
   const urls = [];
   let truncated = false;
+  let listed = 0;
   for (const d of days) {
     const r = await blob.listPrefix('vault/' + d + '/tx/', { max: MAX_OBJECTS });
     for (const b of (r.blobs || [])) {
+      listed++;
+      /* The day folders on either edge are read for the hours that spill over
+         a midnight, not for their whole contents. */
+      const at = stampOf(b.pathname || b.url);
+      if (at !== null && (at < lo || at > hi)) continue;
       if (urls.length >= MAX_OBJECTS) { truncated = true; break; }
       urls.push(b.url);
     }
@@ -122,6 +158,20 @@ module.exports = async (req, res) => {
   }
   const groups = group(hits).slice(0, 40);
 
+  /* What the archive actually holds for the window that was read.
+
+     A search that finds nothing has two very different meanings and the
+     reporter cannot tell them apart: the thing did not happen on the radio, or
+     the archive was not running yet. Saying the span that was searched turns
+     "nothing found" into something a person can act on. */
+  let seenFrom = null, seenTo = null;
+  for (const t of tx) {
+    const at = String(t.at || '');
+    if (!at) continue;
+    if (!seenFrom || at < seenFrom) seenFrom = at;
+    if (!seenTo || at > seenTo) seenTo = at;
+  }
+
   return json(res, {
     ok: true,
     q,
@@ -129,11 +179,12 @@ module.exports = async (req, res) => {
       when: f.when,
       from: f.from.toISOString(),
       to: f.to.toISOString(),
-      type: f.type, place: f.place, big: f.big, words: f.words,
+      type: f.type, place: f.place, landmark: f.landmark, big: f.big, words: f.words,
     },
     scanned: tx.length,
     matched: hits.length,
     calls: groups.length,
+    coverage: { from: seenFrom, to: seenTo, objects: urls.length, listed },
     /* Said out loud rather than hidden, because a search that quietly stopped
        reading is a search that lies about what is not there. */
     truncated,
