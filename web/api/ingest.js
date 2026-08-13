@@ -306,23 +306,31 @@ module.exports = async (req, res) => {
       }
     });
 
-    // A real ingest always renders, and resets the heartbeat clock along with
-    // it. Without this line the next quiet POST could render again 30 seconds
-    // after a render that had just happened for a better reason.
-    lastRenderAt = Date.now();
-    const counts = await store_io.renderOutputs(store, { extractorLabel: labelFor(by) });
+    /* The archive, written the moment the lock releases and BEFORE the
+       render. The render talks to Redis; the vault talks to Blob; they fail
+       independently, and on the night it mattered they failed in exactly the
+       order that erased the evening: Redis threw, the handler bailed, and
+       the archive write it never reached was to the one service that was
+       healthy. Nothing between the store transaction and this line is
+       allowed to throw.
 
-    /* The archive, written after the lock and never inside it. A slow object
-       store must not hold the mutex every other feed is waiting on, and a
-       failed archive write must not fail an ingest: the newsroom losing a
-       live transmission to protect a copy of it would be the wrong trade. So
-       this reports its failures as warnings and nothing else. */
+       Still outside the lock, because a slow object store must not hold the
+       mutex every other feed is waiting on, and a failed archive write must
+       not fail an ingest: the newsroom losing a live transmission to protect
+       a copy of it would be the wrong trade. Failures are warnings here,
+       nothing more. */
     try {
       const v = await vault.putBatch(forVault, { by, machine: auth.machine });
       if (v && v.ok === false && v.why) warnings.push('vault: ' + v.why);
     } catch (e) {
       warnings.push('vault: ' + String(e.message || e).slice(0, 120));
     }
+
+    // A real ingest always renders, and resets the heartbeat clock along with
+    // it. Without this line the next quiet POST could render again 30 seconds
+    // after a render that had just happened for a better reason.
+    lastRenderAt = Date.now();
+    const counts = await store_io.renderOutputs(store, { extractorLabel: labelFor(by) });
 
     // Collected now rather than left dangling. A serverless function stops
     // executing the moment it returns, so an un-awaited KV write is a write
@@ -345,6 +353,25 @@ module.exports = async (req, res) => {
       warnings,
     });
   } catch (e) {
+    /* Redis, or any stage that leans on it, just failed. The archive must
+       not die with it: Blob is a separate service, and through every quota
+       crisis Redis has had, Blob stayed healthy. So before answering, the
+       batch goes to the vault raw. No extraction, no geocode, no incident,
+       just who said what, when, on which feed, with its audio. A raw row can
+       be re-enriched tonight; an unwritten one is the South Station
+       stabbing. Deterministic naming makes the retry the relay is about to
+       send overwrite this same object rather than pile up copies, and when
+       Redis recovers and the batch lands properly, compaction can drop raw
+       rows that match enriched ones. */
+    try {
+      if (Array.isArray(items) && items.length) {
+        const rows = items.map(it => vault.txRecord(it, {
+          ex: null, geo: null, threat: null, incidentId: null,
+          by: 'raw-fallback', machine: auth.machine,
+        }));
+        await vault.putBatch(rows, { by: 'raw-fallback', machine: auth.machine, exact: true });
+      }
+    } catch (e2) { /* the outage is total; the relay keeps its queue */ }
     const status = e && e.status === 503 ? 503 : 500;
     // 503 tells the agent to hold the batch and retry. It keeps its disk
     // queue, so a busy store costs latency, never transcripts.

@@ -41,6 +41,9 @@ final class Relay {
     var healthProvider: (() -> [[String: Any]])?
 
     private var queue: [Dispatch] = []
+    /// Transcripts deleted because the queue hit its cap during an outage.
+    /// Zero on every healthy day; any other number is a story we lost.
+    private(set) var evicted = 0
     private let lock = NSLock()
     private var seq = 0
     private var sending = false
@@ -50,7 +53,12 @@ final class Relay {
     private var lastHeartbeat = Date.distantPast
 
     private static let batchMax = 40
-    private static let queueMax = 600
+    /* Twenty thousand, not six hundred. Queue rows are a few hundred bytes of
+       text and a clip URL, so this is megabytes, and the cap is the difference
+       between an evening-long cloud outage costing latency and costing the
+       South Station stabbing. At the fleet's real rate this holds roughly a
+       day of radio. */
+    private static let queueMax = 20_000
 
     func start() {
         stop()
@@ -88,7 +96,15 @@ final class Relay {
         queue.append(Dispatch(src: src, city: city, scope: scope, clip: clip, ex: ex, text: text,
                               at: at, seq: seq))
         seq += 1
-        if queue.count > Self.queueMax { queue.removeFirst(queue.count - Self.queueMax) }
+        if queue.count > Self.queueMax {
+            let n = queue.count - Self.queueMax
+            evicted += n
+            queue.removeFirst(n)
+            let total = evicted
+            DispatchQueue.main.async { [weak self] in
+                self?.onLog?("ingest queue full: dropped \(n) oldest transcripts (\(total) this run)")
+            }
+        }
         let depth = queue.count
         lock.unlock()
         DispatchQueue.main.async { [weak self] in self?.onState?("queued", depth) }

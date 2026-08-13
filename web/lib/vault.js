@@ -123,7 +123,10 @@ async function putBatch(rows, meta) {
     by: (meta && meta.by) || null,
     count: rows.length,
     tx: rows,
-  }, { unique: true });
+    /* exact: a degraded-mode caller that may retry the identical batch names
+       it deterministically, so the retry overwrites one object rather than
+       multiplying copies of the same evening. */
+  }, { unique: !(meta && meta.exact) });
 }
 
 /* A scene, written once when it retires rather than every time it changes.
