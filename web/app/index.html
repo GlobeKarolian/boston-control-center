@@ -1551,7 +1551,14 @@ async function fetchText(url){
 async function fetchJSON(url){const r=await fetch(url,{cache:'no-store',headers:{Accept:'application/json'}});if(!r.ok)throw new Error('HTTP '+r.status);return r.json();}
 function pDate(s){if(!s)return null;const d=new Date(s);return isNaN(d)?null:d;}
 function ago(d){if(!d)return'';const s=Math.floor((Date.now()-d.getTime())/1000);if(s<60)return s+'s ago';const m=(s/60)|0;if(m<60)return m+'m ago';const h=(m/60)|0;if(h<24)return h+'h ago';return((h/24)|0)+'d ago';}
-function esc(s){return(s||'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
+/* Escapes whatever it is handed, rather than only strings.
+   The old body was (s||'').replace(...), which threw "replace is not a
+   function" the moment anything passed a number, an array or an object, and
+   because every renderer on this page builds its HTML through here, one bad
+   argument took down a whole panel with a message that named neither the
+   caller nor the value. An escaper is the wrong place to be strict about
+   types: its job is to make anything safe to print. */
+function esc(s){return(s==null?'':String(s)).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
 
 /* ---- Layer row state: did this feed answer or not ----
    One place where a row learns whether its feed came back. Six loaders were each
@@ -3039,7 +3046,8 @@ async function deskLoad(){
       }).join(' &middot; ')+'</div>';
     }
     if(d.unsure&&d.unsure.length){
-      h+='<div class="dp-unsure">could not make out: '+d.unsure.map(esc).join(' &middot; ')+'</div>';
+      h+='<div class="dp-unsure">could not make out: '
+        +d.unsure.map(function(x){return esc(x);}).join(' &middot; ')+'</div>';
     }
     read.innerHTML=h;
     read.classList.toggle('quiet',d.quiet===true);

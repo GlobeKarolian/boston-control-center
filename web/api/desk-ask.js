@@ -50,6 +50,9 @@ const SYSTEM = [
   '  - Do not call anything confirmed unless a transmission says it was.',
   '  - Do not describe an event as bigger than the traffic supports.',
   '  - When you cite something, give its clock time so it can be found.',
+  '  - When nothing matches what was asked, say so in the first sentence, then',
+  '    say what the window did contain. Do not stretch unrelated traffic into',
+  '    an answer, and do not stop at "there is nothing" when there is context.',
   '',
   'Write 2-5 sentences of plain English. No preamble, no bullet points unless',
   'the answer is genuinely a list. Times are Eastern.',
@@ -63,24 +66,18 @@ const SYSTEM = [
    enough to have its own incident. A question that named a type or a place
    also gets that filter applied, so "any fires in Dorchester" narrows before
    anything is ranked. */
-function shortlist(rows, f) {
-  const incSize = {};
-  for (const t of rows) if (t.incidentId) incSize[t.incidentId] = (incSize[t.incidentId] || 0) + 1;
+/* Below this many matches, a filtered question also gets the night's most
+   significant traffic, marked as context. Asked "any stabbings tonight" on a
+   quiet night, the filter matches nothing and the honest answer is "no
+   stabbings, here is what there was" rather than a shrug about an empty list.
+   The first version returned zero rows and the model dutifully reported that
+   it had been given nothing, which is true, useless, and reads to a reporter
+   as though the archive had been searched properly. */
+const MIN_MATCH = 15;
 
+function rank(rows, incSize) {
   const scored = [];
   for (const t of rows) {
-    const hay = ((t.text || '') + ' ' + (t.matched || '') + ' ' + (t.address || '') + ' ' + (t.town || '')).toLowerCase();
-    if (f.type) {
-      const own = t.callType === f.type;
-      const said = vq.TYPES[f.type] && vq.TYPES[f.type].test(hay);
-      if (!own && !said) continue;
-    }
-    if (f.place && !hay.includes(f.place)) continue;
-    if (f.landmark) {
-      const aliases = vq.LANDMARKS[f.landmark] || [f.landmark];
-      if (!aliases.some(a => hay.includes(a))) continue;
-    }
-
     let s = 0;
     s += (Number(t.tier) || 0) * 10;
     if (t.signals && t.signals.length) s += 6;
@@ -93,24 +90,69 @@ function shortlist(rows, f) {
     if (/^(chatter|unintelligible|unit-status)$/.test(String(t.category || ''))) s -= 4;
     scored.push({ t, s });
   }
-
   scored.sort((a, b) => b.s - a.s || String(a.t.at).localeCompare(String(b.t.at)));
+  return scored;
+}
 
-  /* No single scene may eat the shortlist. A forty-transmission structure fire
-     would otherwise crowd out every other call of the night, which is exactly
-     the wrong answer to "what were the biggest calls". */
-  const perInc = {};
+/* No single scene may take more than a slice of the list, because a
+   forty-transmission structure fire would otherwise crowd out every other
+   call of the night, which is the wrong answer to "what were the biggest
+   calls". */
+function spread(scored, cap, perScene) {
+  const seen = {};
   const keep = [];
   for (const x of scored) {
     const k = x.t.incidentId || ('loose:' + x.t.feed);
-    perInc[k] = (perInc[k] || 0) + 1;
-    if (perInc[k] > 12) continue;
+    seen[k] = (seen[k] || 0) + 1;
+    if (seen[k] > perScene) continue;
     keep.push(x.t);
-    if (keep.length >= SHOW) break;
+    if (keep.length >= cap) break;
   }
-  /* Chronological for the model, because a night has an order and a shuffled
-     night reads as several unrelated ones. */
-  return keep.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  return keep;
+}
+
+function shortlist(rows, f) {
+  const incSize = {};
+  for (const t of rows) if (t.incidentId) incSize[t.incidentId] = (incSize[t.incidentId] || 0) + 1;
+
+  const asked = !!(f.type || f.place || f.landmark || (f.words && f.words.length));
+  const matches = [];
+  for (const t of rows) {
+    if (!asked) { matches.push(t); continue; }
+    const hay = ((t.text || '') + ' ' + (t.matched || '') + ' ' + (t.address || '') + ' ' + (t.town || '')).toLowerCase();
+    if (f.type) {
+      const own = t.callType === f.type;
+      const said = vq.TYPES[f.type] && vq.TYPES[f.type].test(hay);
+      if (!own && !said) continue;
+    }
+    if (f.place && !hay.includes(f.place)) continue;
+    if (f.landmark) {
+      const aliases = vq.LANDMARKS[f.landmark] || [f.landmark];
+      if (!aliases.some(a => hay.includes(a))) continue;
+    }
+    if (f.words && f.words.length && !f.type && !f.place && !f.landmark) {
+      if (!f.words.some(w => hay.includes(w))) continue;
+    }
+    matches.push(t);
+  }
+
+  const hit = spread(rank(matches, incSize), SHOW, 12);
+
+  /* Too few, or none: add the night's most significant traffic so the answer
+     can be "not that, but here is what happened" instead of silence. Marked,
+     so the model knows which lines answer the question and which are only
+     there for context. */
+  let context = [];
+  if (hit.length < MIN_MATCH) {
+    const have = new Set(hit);
+    const rest = rows.filter(t => !have.has(t));
+    context = spread(rank(rest, incSize), SHOW - hit.length, 8);
+  }
+
+  /* Chronological, because a night has an order and a shuffled night reads as
+     several unrelated ones. */
+  const byTime = (a, b) => String(a.at).localeCompare(String(b.at));
+  return { hit: hit.sort(byTime), context: context.sort(byTime), asked };
 }
 
 module.exports = async (req, res) => {
@@ -152,21 +194,34 @@ module.exports = async (req, res) => {
   }
 
   const picked = shortlist(rows, f);
-  const tx = picked.map(stream.forListening);
-  const lines = tx.map(t => {
+  const tx = picked.hit.concat(picked.context).map(stream.forListening);
+  const fmt = (t) => {
     const clock = String(t.at || '').slice(11, 16) + 'Z';
     return clock + ' [' + t.src + ']'
       + (t.where ? ' (' + String(t.where).slice(0, 60) + ')' : '')
       + ' ' + String(t.text || '').slice(0, 320);
-  }).join('\n');
+  };
+  const hitLines = picked.hit.map(stream.forListening).map(fmt).join('\n');
+  const ctxLines = picked.context.map(stream.forListening).map(fmt).join('\n');
+
+  let user = 'QUESTION: ' + q + '\n\n';
+  if (picked.hit.length) {
+    user += (picked.asked ? 'Transmissions matching what was asked about' : 'The most significant transmissions')
+      + ' (' + picked.hit.length + ' of ' + rows.length + ' heard):\n\n' + hitLines + '\n';
+  } else {
+    user += 'NOTHING in the ' + rows.length + ' transmissions heard matches what was asked about.'
+      + ' Say that plainly first.\n';
+  }
+  if (picked.context.length) {
+    user += '\nFor context, the most significant OTHER traffic in the same window. '
+      + 'These do not answer the question; use them only to say what did happen:\n\n' + ctxLines + '\n';
+  }
+  user += '\nWindow: ' + from.toISOString().slice(11, 16) + 'Z to ' + to.toISOString().slice(11, 16) + 'Z, Eastern times in the answer.';
 
   try {
     const answer = await llm.chat({
       system: SYSTEM,
-      user: 'QUESTION: ' + q
-        + '\n\nThese are the ' + tx.length + ' most significant transmissions out of '
-        + rows.length + ' heard between ' + from.toISOString().slice(11, 16) + 'Z and '
-        + to.toISOString().slice(11, 16) + 'Z, in order:\n\n' + lines,
+      user,
       maxTokens: 700,
       timeoutMs: 30000,
       role: 'desk-ask',
@@ -178,6 +233,7 @@ module.exports = async (req, res) => {
       window: { from: from.toISOString(), to: to.toISOString(), named: namedTime, label: namedTime ? f.when : 'the last ' + DEFAULT_HOURS + ' hours' },
       considered: rows.length,
       shown: tx.length,
+      matched: picked.hit.length,
       complete: got.complete,
       tx,
       ms: Date.now() - t0,
