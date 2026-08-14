@@ -1505,7 +1505,7 @@
        and clicking them scrolls the console to that row when it is on screen.
        Painted entirely by dialPaint(); nothing here is static but the shell. -->
   <div id="dial" style="position:fixed;right:286px;bottom:150px;z-index:1600;display:flex;align-items:center;gap:11px;background:rgba(14,18,26,.92);border:1px solid var(--border);border-radius:34px;padding:7px 16px 7px 8px;box-shadow:0 10px 32px rgba(0,0,0,.6);backdrop-filter:blur(8px);cursor:default">
-    <span id="dialBtn" role="button" tabindex="0" aria-label="Radio on or off" onclick="radioToggle()" style="position:relative;width:40px;height:40px;border-radius:50%;background:#0b0f16;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:13px;cursor:pointer;flex:0 0 auto">&#9654;</span>
+    <span id="dialBtn" role="button" tabindex="0" aria-label="Play or stop" onclick="dialToggle()" style="position:relative;width:40px;height:40px;border-radius:50%;background:#0b0f16;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:13px;cursor:pointer;flex:0 0 auto">&#9654;</span>
     <span id="dialBody" style="min-width:0">
       <span id="dialTop" style="display:flex;align-items:center;gap:8px;font-family:var(--mono);white-space:nowrap">
         <span id="dialState" style="font-size:9.5px;color:var(--text-faint);font-weight:700;letter-spacing:.12em">RADIO OFF</span>
@@ -2189,7 +2189,19 @@ function dialPaint(){
         q=document.getElementById('dialQ'),sk=document.getElementById('dialSkip'),
         dial=document.getElementById('dial');
   const playing=!!CLIP_NOW;
-  btn.innerHTML=RADIO_ON?'&#9632;':'&#9654;';
+  /* The glyph used to read RADIO_ON alone, so a clip could be playing, the
+     button could be lit green by the three lines below, and it still showed
+     a play triangle. Somebody hearing audio with a play button in front of
+     them concludes the control is broken, and the only way out was to wait
+     nine seconds for the clip to end.
+
+     It is worse than a wrong icon, because the click handler was
+     radioToggle(): pressing the one obvious control while a clip played
+     turned the live radio ON instead of stopping what you were listening
+     to. See dialToggle(). */
+  btn.innerHTML=(RADIO_ON||playing)?'&#9632;':'&#9654;';
+  btn.setAttribute('aria-label',playing?'Stop this clip':(RADIO_ON?'Turn the radio off':'Turn the radio on'));
+  btn.title=playing?'Stop':(RADIO_ON?'Radio off':'Radio on');
   btn.style.borderColor=RADIO_ON||playing?'var(--scanner)':'var(--border)';
   btn.style.color=RADIO_ON||playing?'var(--scanner)':'var(--text-dim)';
   btn.style.background=RADIO_ON||playing?'#0d1f19':'#0b0f16';
@@ -2219,6 +2231,21 @@ function dialTick(){
   if(pr&&CLIP_PLAYER&&isFinite(CLIP_PLAYER.duration)&&CLIP_PLAYER.duration>0){
     pr.style.width=Math.min(100,(CLIP_PLAYER.currentTime/CLIP_PLAYER.duration)*100)+'%';
   }
+}
+/* One button, and it stops whatever you can actually hear.
+
+   A clip wins over the radio because a clip is the thing the room chose to
+   play: somebody pressed 'hear it' on a story. The radio is ambient and has
+   its own state that survives, so stopping a clip drops back to whatever the
+   radio was doing rather than silencing everything.
+
+   An explicit stop also drops the queue. There is a separate skip control for
+   moving through a chain, so the only reason to press this one is to stop
+   listening, and having it advance to the next transmission instead would be
+   the opposite of what was asked for. */
+function dialToggle(){
+  if(CLIP_NOW){CLIP_Q.length=0;clipStop();return;}
+  radioToggle();
 }
 function dialSkip(){const had=CLIP_Q.length;clipStop();if(had)clipNext();}
 function dialJump(){
