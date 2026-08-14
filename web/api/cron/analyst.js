@@ -37,6 +37,7 @@ const stream = require('../../lib/stream');
 const severity = require('../../lib/severity');
 const verify = require('../../lib/verify');
 const baseline = require('../../lib/baseline');
+const llm = require('../../lib/llm');
 
 /* The last thing this cron did, where a person can see it. Never throws: a
    broken note must not break the run it is describing. */
@@ -48,6 +49,11 @@ async function noteRun(o) {
 }
 
 const ANALYST_MODEL = process.env.ANALYST_MODEL || 'claude-sonnet-5';
+/* The same judgment, reachable with the key this project actually has.
+   Sonnet through OpenRouter rather than through api.anthropic.com, because
+   the analyst was the last thing in the system needing a second credential
+   and that is the entire reason the Situations board has been empty. */
+const ANALYST_MODEL_OR = process.env.ANALYST_MODEL_OR || 'anthropic/claude-sonnet-5';
 
 // One analyst run at a time. Two crons overlapping would double the model
 // spend and race on the situations key for no benefit.
@@ -139,8 +145,14 @@ module.exports = async (req, res) => {
        depends on a completely different credential from extraction, the desk
        read, the ask box and the verifier, and a project with a perfectly
        healthy OpenRouter key can still have an empty board. */
+    /* Either door. OpenRouter is preferred because it is the key that is set,
+       monitored and already carrying extraction, the desk read and the
+       verifier. Anthropic direct stays as the fallback for anyone who has that
+       key set instead. Only the case of neither is a stop. */
     const key = (process.env.ANTHROPIC_API_KEY || '').trim();
-    if (!key) return await ageOnly('no ANTHROPIC_API_KEY, so nothing is being judged and Situations cannot fill');
+    if (!key && !llm.enabled()) {
+      return await ageOnly('no OPENROUTER_API_KEY and no ANTHROPIC_API_KEY, so nothing can judge the radio and Situations cannot fill');
+    }
     if (tr.length < 3) return await ageOnly('not enough traffic', { transcripts: tr.length });
 
     /* THE LISTENER'S INPUT.
@@ -193,8 +205,14 @@ module.exports = async (req, res) => {
         transcripts: tr.length, localAt: rawLocalAt,
       });
     }
-    if (process.env.ANALYST_CLOUD !== '1') {
-      return await ageOnly('cloud analyst disabled and no local analyst has reported in 10 minutes, so nothing is judging the radio (set ANALYST_CLOUD=1)', {
+    /* This used to require ANALYST_CLOUD=1 to run at all, which made an unset
+       variable indistinguishable from a deliberate choice and left the board
+       empty by default. The local analyst was an Ollama model on the Mac and
+       it is not the plan any more. The gate above already stands down for a
+       local analyst that has actually reported in the last ten minutes, so
+       this one only has to honour somebody explicitly switching cloud off. */
+    if (process.env.ANALYST_CLOUD === '0') {
+      return await ageOnly('cloud analyst switched off by ANALYST_CLOUD=0 and no local analyst has reported in 10 minutes, so nothing is judging the radio', {
         transcripts: tr.length,
       });
     }
@@ -215,25 +233,51 @@ module.exports = async (req, res) => {
       }
     } catch (e) { /* a broken meter must not silence a working radio */ }
 
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-      body: JSON.stringify({
-        model: ANALYST_MODEL, max_tokens: 2000, system: core.ANALYST_SYSTEM,
-        tools: [{ name: 'report_situations', description: 'Report the active situations.', input_schema: core.SIT_SCHEMA }],
-        tool_choice: { type: 'tool', name: 'report_situations' },
-        messages: [{
-          role: 'user',
-          content: core.openStoriesBlock(prev) +
-            '\n\n---\n\nRecent scanner traffic (oldest first):\n\n' + lines,
-        }],
-      }),
-      signal: AbortSignal.timeout(60000),
-    });
-    if (!r.ok) throw new Error('anthropic ' + r.status + ' ' + (await r.text()).slice(0, 200));
-    const j = await r.json();
-    const tu = (j.content || []).find(c => c.type === 'tool_use');
-    const sits = (tu && tu.input && tu.input.situations) || [];
+    const userBlock = core.openStoriesBlock(prev)
+      + '\n\n---\n\nRecent scanner traffic (oldest first):\n\n' + lines;
+
+    let sits = [];
+    let usedModel = null;
+    if (llm.enabled()) {
+      /* JSON mode rather than Anthropic tool-use, because this now goes
+         through the one gateway every other model call uses: reasoning off,
+         a real token budget, timeouts that fall back instead of escaping,
+         and a line in the activity log. The analyst has been the only
+         judgment in this system nobody could watch. */
+      usedModel = ANALYST_MODEL_OR;
+      const out = await llm.chatJSON({
+        system: core.ANALYST_SYSTEM
+          + '\n\nReply with a single JSON object and nothing else. It must have'
+          + ' one key, "situations", whose value is an array matching this schema'
+          + ' exactly:\n' + JSON.stringify(core.SIT_SCHEMA)
+          + '\n\nAn empty array is a correct and expected answer. Report nothing'
+          + ' you did not hear.',
+        user: userBlock,
+        maxTokens: 3000,
+        timeoutMs: 60000,
+        role: 'analyst',
+        model: ANALYST_MODEL_OR,
+      });
+      sits = (out && (Array.isArray(out) ? out : out.situations)) || [];
+      if (!Array.isArray(sits)) sits = [];
+    } else {
+      usedModel = ANALYST_MODEL;
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+        body: JSON.stringify({
+          model: ANALYST_MODEL, max_tokens: 2000, system: core.ANALYST_SYSTEM,
+          tools: [{ name: 'report_situations', description: 'Report the active situations.', input_schema: core.SIT_SCHEMA }],
+          tool_choice: { type: 'tool', name: 'report_situations' },
+          messages: [{ role: 'user', content: userBlock }],
+        }),
+        signal: AbortSignal.timeout(60000),
+      });
+      if (!r.ok) throw new Error('anthropic ' + r.status + ' ' + (await r.text()).slice(0, 200));
+      const j = await r.json();
+      const tu = (j.content || []).find(c => c.type === 'tool_use');
+      sits = (tu && tu.input && tu.input.situations) || [];
+    }
 
     /* The dispose pipeline, shared verbatim with the local path
        (lib/analyst-core.js): geocoding, feed verification, clip
@@ -322,9 +366,9 @@ module.exports = async (req, res) => {
     if (streamed && streamed.cursor) { try { await kv.set(CURSOR, streamed.cursor, 24 * 3600); } catch (e) {} }
 
     const out = result.situations;
-    await noteRun({ ran: true, why: null, situations: out.length, model: ANALYST_MODEL });
+    await noteRun({ ran: true, why: null, situations: out.length, model: usedModel });
     return json(res, {
-      ok: true, model: ANALYST_MODEL,
+      ok: true, model: usedModel,
       situations: out.length,
       reported: fresh.length,
       opened: result.opened.length,
