@@ -790,6 +790,18 @@
   .dp-head select{margin-left:auto;font:inherit;font-size:11px;background:#161c27;color:#9aa3b5;
     border:1px solid var(--border-soft);border-radius:6px;padding:2px 6px}
   .dp-head button{background:transparent;border:0;color:#7c8598;font-size:19px;line-height:1;cursor:pointer;padding:0 2px}
+  .dp-ask{display:flex;gap:6px;padding:9px 12px 4px}
+  .dp-ask input{flex:1 1 auto;font:inherit;font-size:12.5px;background:#141a24;color:#e7ebf2;
+    border:1px solid var(--border-soft);border-radius:7px;padding:6px 9px;min-width:0}
+  .dp-ask input::placeholder{color:#5f6878}
+  .dp-ask button{font:inherit;font-size:12px;background:transparent;border:1px solid #2f6f4f;
+    color:#9fe3bd;border-radius:7px;padding:6px 12px;cursor:pointer}
+  .dp-ask button[disabled]{opacity:.5;cursor:default}
+  .dp-answer{padding:2px 13px 0;font-size:13.5px;line-height:1.5;color:#e7ebf2}
+  .dp-answer:empty{display:none}
+  .dp-answer .a{border-left:2px solid #2f6f4f;background:rgba(47,111,79,.10);
+    padding:9px 11px;border-radius:0 7px 7px 0;margin:6px 0 2px}
+  .dp-answer .src{font-size:11px;color:#6d7488;font-family:var(--mono);padding:3px 0 6px}
   .dp-read{padding:12px 13px;font-size:13.5px;line-height:1.5;color:#e7ebf2}
   .dp-read.quiet{color:#9aa3b5}
   .dp-watch{margin-top:8px;font-size:12px;color:#9fe3bd}
@@ -1455,6 +1467,15 @@
       </select>
       <button id="dpClose" title="Close">&times;</button>
     </div>
+    <!-- Ask the desk. The same window the read covers, unless the question
+         names its own time, in which case the question wins: "biggest calls
+         tonight" means tonight regardless of what the dropdown says. -->
+    <form class="dp-ask" id="dpAskForm">
+      <input id="dpAsk" type="text" autocomplete="off" spellcheck="false"
+        placeholder="ask the desk &mdash; what were the biggest calls tonight?">
+      <button type="submit" id="dpAskGo">Ask</button>
+    </form>
+    <div class="dp-answer" id="dpAnswer"></div>
     <div class="dp-read" id="dpRead">Listening&hellip;</div>
     <div class="dp-meta" id="dpMeta"></div>
     <div class="dp-tx" id="dpTx"></div>
@@ -2970,6 +2991,39 @@ async function deskLoad(){
   }finally{ DESK_BUSY=false; }
 }
 
+/* A question, answered out of the archive rather than out of the model's
+   memory. The shortlist that produced the answer replaces the window list
+   underneath, so the sentence and its evidence are on screen together and a
+   reporter can audit the claim by reading the same lines the model read. */
+async function deskAsk(q){
+  const ans=document.getElementById('dpAnswer'), txEl=document.getElementById('dpTx');
+  const go=document.getElementById('dpAskGo'), meta=document.getElementById('dpMeta');
+  if(!q||!q.trim()||!ans)return;
+  if(go){go.disabled=true;go.textContent='\u2026';}
+  ans.innerHTML='<div class="a">reading the night&hellip;</div>';
+  try{
+    const r=await fetch('./api/desk-ask',{method:'POST',credentials:'include',
+      headers:{'content-type':'application/json'},body:JSON.stringify({q:q})});
+    const d=await r.json();
+    if(!d.ok){ ans.innerHTML='<div class="a">'+esc(d.why||'that did not work')+'</div>'; return; }
+    ans.innerHTML='<div class="a">'+esc(d.answer||('No answer this time'+(d.why?': '+d.why:'')+'. The transmissions it looked at are below.'))+'</div>'
+      +'<div class="src">read '+d.shown+' of '+d.considered+' transmissions \u00b7 '
+      +esc((d.window&&d.window.label)||'')+' \u00b7 '+(d.ms||0)+'ms</div>';
+    if(meta)meta.textContent='showing the '+d.shown+' transmissions behind that answer';
+    if(txEl&&d.tx){
+      txEl.innerHTML=d.tx.slice().reverse().map(function(t){
+        const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
+        return '<div class="dp-line">'
+          +'<span class="t">'+esc(String(t.at||'').slice(11,16))+'</span>'
+          +'<span class="f">'+esc(t.src||'')+'</span>'
+          +'<span class="x">'+(clip?'<button class="cplay" data-clip="'+esc(clip)+'" title="hear this">&#9654;</button> ':'')
+          +esc(t.text||'')+'</span></div>';
+      }).join('');
+    }
+  }catch(e){ ans.innerHTML='<div class="a">The desk did not answer. '+esc(String(e.message||e))+'</div>'; }
+  finally{ if(go){go.disabled=false;go.textContent='Ask';} }
+}
+
 function deskToggle(force){
   const p=deskPanel();if(!p)return;
   DESK_OPEN=(typeof force==='boolean')?force:!DESK_OPEN;
@@ -2986,6 +3040,8 @@ function deskToggle(force){
     pill.onclick=function(){deskToggle();};
     const c=document.getElementById('dpClose');if(c)c.onclick=function(){deskToggle(false);};
     const w=document.getElementById('dpWindow');if(w)w.onchange=function(){deskLoad();};
+    const form=document.getElementById('dpAskForm');
+    if(form)form.onsubmit=function(e){ e.preventDefault(); deskAsk((document.getElementById('dpAsk')||{}).value); };
     document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&DESK_OPEN)deskToggle(false); });
   };
   if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',go);else go();

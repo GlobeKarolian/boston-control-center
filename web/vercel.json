@@ -137,6 +137,9 @@
     },
     "api/desk-read.js": {
       "maxDuration": 45
+    },
+    "api/desk-ask.js": {
+      "maxDuration": 60
     }
   },
   "crons": [
