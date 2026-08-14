@@ -3248,9 +3248,101 @@ function paintBoard(list){
     circ.bindPopup('<div class="pop-t" style="color:'+c+'">'+esc(s.headline||'')+'</div><div class="pop-r">'+esc(s.summary||'')+'</div><div class="pop-src">approx &middot; '+esc(s.location||'')+'</div>'+listen);
     circ.addTo(sitLayer);}});
   renderStatePolice(list);
-  const hi=list.find(s=>s.priority==='high'&&!sitState.seenHigh.has(s.id));
-  if(hi){sitState.seenHigh.add(hi.id);showBigAlert(hi);}
-  if(sitState.seenHigh.size>150)sitState.seenHigh=new Set(list.filter(s=>s.priority==='high').map(s=>s.id));
+  bannerCheck(list);
+}
+
+/* ---- the banner, and what earns one -----------------------------------
+   The loudest surface in the room used to have the weakest gate in the
+   system. Situations Mode showed "Nothing has cleared the bar, 9 unverified
+   hidden" while the big red banner took over the map for one of those same
+   nine. The rail asked whether the severity floor scored it a story AND a
+   second model from another lab stood the claim up. The banner asked
+   priority === 'high', which is a regex tier, and nothing else.
+
+   So it uses the same bar as the rail now. If it did not clear the bar to be
+   listed, it does not clear the bar to cover the map. The consequence is
+   real and intended: while the verifier is unreachable everything is held,
+   and a held story does not get a banner. That silence is explained in the
+   header rather than left to be discovered.
+
+   Three more things had to be true before this stopped hitting people in the
+   face on load.
+
+   The first board a page sees is the backlog, not the news. alerts.js has
+   primed against exactly this since it was written, with a long comment
+   about wall displays announcing the whole overnight at nine in the morning.
+   This path never got one, so every high card in the archive fired, one per
+   poll, in a queue. Take the opening board as the baseline and say nothing.
+
+   A refresh is not new news. The seen set lived in memory, so reloading the
+   tab re-announced everything it had just finished announcing. It is in
+   sessionStorage now: quiet across a reload, and a genuinely new tab
+   tomorrow morning still primes rather than replays.
+
+   Old is not breaking. A high-priority card whose last beat was four hours
+   ago is history, whatever its tier, and taking over the map for it teaches
+   the room that the banner means nothing. */
+
+const BA_FRESH_MS = 15 * 60 * 1000;
+const BA_SEEN_KEY = 'bcc.ba.seen';
+
+function baLoadSeen(){
+  try{
+    const raw=sessionStorage.getItem(BA_SEEN_KEY);
+    if(raw)return new Set(JSON.parse(raw));
+  }catch(e){}
+  return null;
+}
+function baSaveSeen(){
+  try{sessionStorage.setItem(BA_SEEN_KEY,JSON.stringify(Array.from(sitState.seenHigh).slice(-150)));}catch(e){}
+}
+
+/* When a story last said anything, by the same reckoning the map rings use. */
+function sitLastMs(s){
+  let last=0;
+  try{const bs=(window.BCCThread&&BCCThread.beats)?BCCThread.beats(s):[];
+    for(const b of bs){const t=b&&b.at?new Date(b.at).getTime():0;if(t>last)last=t;}}catch(e){}
+  if(!last)last=new Date(s.updated||s.updatedAt||0).getTime()||0;
+  return last;
+}
+
+/* Everything that has to be true for a story to take over the map. */
+function baWorthy(s,now){
+  if(!s)return false;
+  if(s.major!==true)return false;          /* the rail's bar, not a regex tier */
+  if(s.priority!=='high')return false;
+  if(s.status==='closed')return false;
+  const last=sitLastMs(s);
+  if(!last||(now-last)>BA_FRESH_MS)return false;
+  return true;
+}
+
+function bannerCheck(list){
+  const now=Date.now();
+  const arr=Array.isArray(list)?list:[];
+
+  /* Restored from a reload, or primed from the opening board. Either way the
+     first pass announces nothing. */
+  if(!sitState.baPrimed){
+    sitState.baPrimed=true;
+    const restored=baLoadSeen();
+    if(restored){
+      sitState.seenHigh=restored;
+    }else{
+      sitState.seenHigh=new Set();
+      for(const s of arr)if(s&&s.id&&baWorthy(s,now))sitState.seenHigh.add(s.id);
+      baSaveSeen();
+      return;
+    }
+  }
+
+  const hi=arr.find(s=>baWorthy(s,now)&&!sitState.seenHigh.has(s.id));
+  if(hi){sitState.seenHigh.add(hi.id);baSaveSeen();showBigAlert(hi);}
+
+  if(sitState.seenHigh.size>150){
+    sitState.seenHigh=new Set(arr.filter(s=>s&&s.priority==='high').map(s=>s.id));
+    baSaveSeen();
+  }
 }
 
 /* ---- story threads (#190) -------------------------------------------------
@@ -3285,6 +3377,39 @@ function wireModes(){
   set(SIT_MODE);
 }
 
+/* An empty Situations rail has two causes that look identical and mean
+   opposite things.
+
+   One is a quiet night: the verifier ran, weighed what came across, and
+   nothing earned promotion. That is the system working, and "nothing has
+   cleared the bar" is the correct thing to say.
+
+   The other is that nothing is being weighed at all. lib/verify.js holds any
+   claim a second model did not stand up, and it holds rather than promotes
+   when the model is unreachable, because silence is not consent. When the
+   OpenRouter key is dead every card is held, the rail empties, and the
+   sentence on screen still reads like a quiet night. On the morning of the
+   14th the key had been rotated in the dashboard and not in production and
+   the board looked exactly as healthy as it had an hour earlier.
+
+   So the rail says which of the two it is. An editor reading "nothing is
+   being verified" behaves completely differently from one reading "nothing
+   qualified", and the difference is the whole value of the panel. */
+function sitEmptyMajor(all){
+  const n=(all||[]).length;
+  const held=(all||[]).filter(function(s){return s&&s.held;}).length;
+  /* Everything on the board held, and enough of it that this is a stuck
+     verifier rather than three genuinely marginal calls. */
+  if(n>=3&&held===n){
+    return '<b>Nothing is being verified right now.</b><br>'
+      +'All '+n+' stories are held because the second model could not be reached, '
+      +'so none of them can clear the bar. This is not a quiet night. '
+      +'Check LLM activity in <b>Under The Hood</b>, then switch to Everything '
+      +'to see what is actually coming across.';
+  }
+  return 'Nothing has cleared the bar. Switch to Everything to see what the desk editor is chewing on.';
+}
+
 function paintSits(){
   if(!MODES_WIRED && document.getElementById('modeAll')){ MODES_WIRED=true; wireModes(); return; }
   const all=sitState.list||[];
@@ -3310,9 +3435,7 @@ function paintSits(){
   const keep=roveKeep();
   el.classList.toggle('arming',!!sitState.merge);
   if(!list.length)el.innerHTML='<div class="empty">'
-    +(SIT_MODE==='major'
-      ? 'Nothing has cleared the bar. Switch to Everything to see what the desk editor is chewing on.'
-      : 'Nothing major right now. Watching&hellip;')+'</div>';
+    +(SIT_MODE==='major' ? sitEmptyMajor(all) : 'Nothing major right now. Watching&hellip;')+'</div>';
   else el.innerHTML=list.map(s=>sitCard(s)).join('');
   el.scrollTop=top;
   keep();
