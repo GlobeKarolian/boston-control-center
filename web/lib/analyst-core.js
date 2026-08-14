@@ -202,6 +202,90 @@ function clipMatcher(batch) {
 /* The dispose pipeline: everything that stands between "the model said" and
    "the board shows". Identical no matter which machine ran the model.
    Returns the mapped situations ready for lib/threads.reconcile. */
+/* --------------------------------------------------- grounding the claim ---
+
+   The night this was written, the board carried "Active Shooter at 81 Walden
+   Street, Cambridge - Confirmed by Police", built out of a drunk call. Beside
+   it sat "Pursuit of BMW 330-XX on I-93 Northbound - State Police Confirm",
+   built out of a transmission that said "they're NOT pursuing". Both cards
+   carried confidence: reported while their headlines said confirmed.
+
+   Two distinct failures, and both are the server's job to catch, because
+   asking a model not to hallucinate is a hope and checking its homework is a
+   rule.
+
+   The first is unearned corroboration. Every update was arriving with a
+   "- Confirmed by Police" style suffix, because the analyst reads OPEN
+   STORIES, sees its own previous headline, and treats it as a second source.
+   A model confirming itself is the oldest failure in this building and it now
+   gets stripped unless the radio actually said so.
+
+   The second is severity with no root in the audio. If no transmission in the
+   batch contains a word from the claimed category, the claim did not come
+   from the radio, it came from the model. The highest-harm words are the ones
+   worth policing hardest, because those are the ones that move a newsroom:
+   shooter, hostage, explosion, fatality. A downgrade here costs a headline. A
+   miss costs the Globe. */
+
+const CONFIRM_SUFFIX = /\s*[-–—,:]\s*(?:as\s+)?(?:now\s+)?(?:officially\s+)?(?:confirmed|verified|corroborated)\b[^,.;]*$|\s*[-–—,:]\s*[A-Z][A-Za-z ]{2,30}\s+(?:confirms?|confirmed|verifies|verified)\b[^,.;]*$/i;
+const CONFIRM_WORD = /\b(confirm|confirmed|confirming|verified|on scene and|we have it|positive)\b/i;
+
+/* Claims that must be traceable to something a human said on the radio.
+   Each is the word a reporter would repeat, and the transmission words that
+   would justify it. */
+/* Places the radio did not name. The Walden card said Cambridge with
+   location, matched, lat, lon and feeds all null: nothing in the pipeline
+   placed it, the model simply knows where Walden Street is and typed it. A
+   city in a headline reads as dispatch information to a reporter, so it has
+   to come from a transmission or from the geocoder, never from the model's
+   general knowledge of Massachusetts. */
+const CITIES = /\b(Boston|Cambridge|Somerville|Brookline|Quincy|Newton|Medford|Malden|Everett|Chelsea|Revere|Winthrop|Watertown|Belmont|Arlington|Lowell|Lynn|Waltham|Framingham|Braintree|Milton|Dedham|Melrose|Needham)\b/g;
+
+const GROUNDED = [
+  { claim: /\bactive shooter\b/i, evidence: /\b(active shooter|shooter|shots fired|shooting|gunfire|gunshots?|man with a gun|armed (?:male|female|party|suspect))\b/i },
+  { claim: /\bhostage\b/i, evidence: /\b(hostage|barricad\w*)\b/i },
+  { claim: /\bexplosion|\bbomb\b/i, evidence: /\b(explosion|explosive|blast|bomb|detonat\w*)\b/i },
+  { claim: /\bfatal|\bdeceased\b|\bdead\b|\bkilled\b/i, evidence: /\b(fatal\w*|deceased|dead|doa|expired|coroner|medical examiner|signal 7|unresponsive|cpr)\b/i },
+  { claim: /\bmass casualty\b/i, evidence: /\b(mass casualty|multiple (?:victims|patients)|mci)\b/i },
+  { claim: /\bstabb\w*/i, evidence: /\b(stab\w*|knife|knives|laceration|slashing)\b/i },
+  /* Not bare "fleeing": "history of fleeing from all of the two stops" is a
+     records check on a driver, and it is the sentence that talked the analyst
+     into a high-speed chase that dispatch had explicitly called off. The
+     evidence for a pursuit is somebody pursuing. */
+  { claim: /\bpursuit\b|\bchase\b/i, evidence: /\b(in pursuit|pursuit is|pursuing|chasing|actively fleeing|refus\w+ to stop|failed to stop)\b/i },
+  { claim: /\bofficer (?:down|shot)\b/i, evidence: /\b(officer down|officer shot|signal 1000|shots fired at (?:an )?officer)\b/i },
+];
+
+/* Negation the model reliably drops. "They're not pursuing" became "a pursuit
+   is underway": the word it needed was there, and the word in front of it was
+   not. Evidence found inside a negation does not count as evidence. */
+const NEGATED = /\b(?:not|no longer|never|negative on|disregard|unfounded|cancel(?:led)?|call off|called off|terminated?)\b[^.!?]{0,40}$/i;
+
+function saidOnAir(re, batch) {
+  for (const t of (batch || [])) {
+    const text = String((t && t.text) || '');
+    let m;
+    const rx = new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g');
+    while ((m = rx.exec(text)) !== null) {
+      const before = text.slice(0, m.index);
+      if (NEGATED.test(before)) continue;      // "they're not pursuing"
+      return String(m[0]);
+    }
+  }
+  return null;
+}
+
+/* Returns the claims a situation makes that the radio does not support. */
+function ungrounded(f, batch) {
+  const claimText = (f.headline || '') + ' ' + (f.summary || '');
+  const out = [];
+  for (const g of GROUNDED) {
+    if (!g.claim.test(claimText)) continue;
+    if (!saidOnAir(g.evidence, batch)) out.push(String(claimText.match(g.claim)[0]).toLowerCase());
+  }
+  return out;
+}
+
 async function disposeReported(sits, { batch, prev }) {
   const clipsForText = clipMatcher(batch);
   const heard = new Map();
@@ -231,6 +315,42 @@ async function disposeReported(sits, { batch, prev }) {
       feeds: feedsHeard(s.feeds, heard),
       clips: clipsForText((s.headline || '') + ' ' + (s.summary || '')),
     };
+    /* Corroboration has to have been heard, not decided. */
+    if (CONFIRM_SUFFIX.test(f.headline) && !saidOnAir(CONFIRM_WORD, batch)) {
+      f.headline = f.headline.replace(CONFIRM_SUFFIX, '').trim();
+      f.trimmedClaim = true;
+    }
+    if (f.confidence === 'confirmed' && !saidOnAir(CONFIRM_WORD, batch)) {
+      f.confidence = 'reported';
+      f.trimmedClaim = true;
+    }
+
+    /* A city named by nobody. If the geocoder placed this, the city is
+       earned and stays. Otherwise it has to have been said out loud. */
+    if (!geo) {
+      const named = String(f.headline + ' ' + f.summary).match(CITIES) || [];
+      for (const city of [...new Set(named)]) {
+        if (saidOnAir(new RegExp('\\b' + city + '\\b', 'i'), batch)) continue;
+        const strip = new RegExp('[,\\s]*\\b' + city + '\\b', 'gi');
+        f.headline = f.headline.replace(strip, '').replace(/\s{2,}/g, ' ').replace(/[,\s-]+$/, '').trim();
+        f.summary = f.summary.replace(strip, '').replace(/\s{2,}/g, ' ').trim();
+        f.trimmedClaim = true;
+      }
+    }
+
+    /* And the claim itself has to be in the audio somewhere. A situation whose
+       headline says active shooter when no transmission said shooter, shots,
+       or a gun is not a story with a weak source; it is a story with no
+       source, and it is held rather than published. Held, not deleted: it
+       keeps its transmissions and says why, so a person can look. */
+    const missing = ungrounded(f, batch);
+    if (missing.length) {
+      f.held = true;
+      f.heldWhy = 'no transmission supports: ' + missing.join(', ');
+      f.priority = 'normal';
+      f.confidence = 'unclear';
+    }
+
     f.proposedId = alertKey(f);
     return f;
   }));
@@ -261,5 +381,6 @@ function fitToBudget(sits) {
 module.exports = {
   SIT_SCHEMA, SIT_FORMAT_LOCAL, ANALYST_SYSTEM, WRITE_BUDGET,
   openStoriesBlock, linesOf, sigOf, feedsHeard, locate, clipMatcher,
-  disposeReported, fitToBudget, hhmm,
+  disposeReported, fitToBudget, hhmm, ungrounded, saidOnAir,
+  GROUNDED, CONFIRM_SUFFIX, CONFIRM_WORD,
 };
