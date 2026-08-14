@@ -135,10 +135,13 @@ function whenOf(q, now) {
    search returns every ambulance run of the night. */
 const TYPES = {
   death: /\b(body|bodies|deceased|dead|doa|fatal|fatality|fatalities|coroner|medical examiner|untimely|jumper|drowning|drowned)\b/i,
-  shooting: /\b(shooting|shots fired|gunshot|gunfire|shot)\b/i,
-  stabbing: /\b(stabbing|stabbed|knife|slashed)\b/i,
-  fire: /\b(fire|working fire|structure fire|smoke|alarm of fire|box alarm|arson)\b/i,
-  crash: /\b(crash|accident|mva|collision|rollover|car into|struck by|pedestrian struck)\b/i,
+  shooting: /\b(shootings?|shots fired|gunshots?|gunfire|shot)\b/i,
+  /* "slashed" is not here on purpose: on a police channel it is nearly always
+     tires, and a person who was slashed arrives with knife or stab words in
+     the same breath. */
+  stabbing: /\b(stabbings?|stabbed|stab|knife|knives|slashing)\b/i,
+  fire: /\b(fires?|working fire|structure fire|smoke|alarm of fire|box alarm|arson)\b/i,
+  crash: /\b(crash(es)?|accidents?|mva|collisions?|rollover|car into|struck by|pedestrian struck)\b/i,
   hazmat: /\b(hazmat|chemical|gas leak|spill|carbon monoxide)\b/i,
   pursuit: /\b(pursuit|chase|fleeing|failed to stop)\b/i,
   robbery: /\b(robbery|holdup|larceny|breaking and entering|burglary)\b/i,
@@ -147,11 +150,15 @@ const TYPES = {
   medical: /\b(medical|ems|ambulance|cardiac|overdose|seizure|unresponsive|injur)\w*\b/i,
 };
 
-/* Call types that are the same night from a different angle. The extractor
-   picks one label per transmission and a reporter picks another, and the two
-   vocabularies do not have to agree for the search to work. A body is very
+/* Call types that are the same night from a different angle. A body is very
    often filed as a medical; a shooting almost always drags a medical with it.
-   These are worth partial credit rather than a hard no. */
+
+   Kin is a TIEBREAK, never a door. The first version let a kin label count as
+   evidence by itself, and "stabbing on lancaster street" came back wearing
+   every ambulance run in the archive: one real result and thirty-eight
+   decoys, because each medical cleared the bar on cousinhood alone. Now a
+   kin-labeled transmission gets in only when something else on it matched,
+   and the kinship just nudges it upward once it is already inside. */
 const KIN = {
   death: ['medical', 'search'],
   medical: ['death'],
@@ -319,18 +326,46 @@ function parse(q, now) {
     if (landmarkHit) for (const w of landmarkHit.split(' ')) consumed.add(w);
   }
 
+  /* "Lancaster Street" is one thing, not two. Split into tokens, "street"
+     matches every transmission in Massachusetts that mentions any street,
+     which is most of them, and the name gets lost in its own suffix. So
+     name-plus-suffix pairs become phrases matched whole, in both spellings,
+     and a suffix on its own carries no signal at all. */
+  const SUFFIX = {
+    street: 'st', st: 'street', road: 'rd', rd: 'road', avenue: 'ave', ave: 'avenue',
+    boulevard: 'blvd', blvd: 'boulevard', square: 'sq', sq: 'square',
+    court: 'ct', drive: 'dr', lane: 'ln', place: 'pl',
+    park: null, bridge: null, tunnel: null, station: null, garage: null,
+  };
+  const toks = lower.split(/\s+/).filter(Boolean);
+  const phrases = [];
+  const phrased = new Set();
+  for (let i = 0; i + 1 < toks.length; i++) {
+    const w = toks[i], sfx = toks[i + 1];
+    if (!(sfx in SUFFIX)) continue;
+    if (w.length < 3 || STOP.has(w) || consumed.has(w) || (sfx in SUFFIX && SUFFIX[w] !== undefined && w in SUFFIX)) continue;
+    if (type && TYPES[type].test(w)) continue;
+    const alt = SUFFIX[sfx];
+    const set = [w + ' ' + sfx];
+    if (alt) set.push(w + ' ' + alt);
+    phrases.push(set);
+    phrased.add(w); phrased.add(sfx);
+  }
+
   const words = lower
     .split(/\s+/)
     .filter(Boolean)
     .filter(w => w.length > 2 && !STOP.has(w))
     .filter(w => !consumed.has(w))
+    .filter(w => !phrased.has(w))
+    .filter(w => !(w in SUFFIX))
     .filter(w => !type || !TYPES[type].test(w))
     .filter((w, i, a) => a.indexOf(w) === i)
     .slice(0, 8);
 
   return {
     from: when.from, to: when.to, when: when.label,
-    type, place, landmark, big: BIG.test(raw), words, q: raw,
+    type, place, landmark, phrases, big: BIG.test(raw), words, q: raw,
   };
 }
 
@@ -363,13 +398,17 @@ function score(tx, f) {
                   (tx.units || []).join(' ')).toLowerCase();
   const bag = tokenize(hay + ' ' + labels);
 
-  const asked = (f.type ? 1 : 0) + (f.place ? 1 : 0) + (f.landmark ? 1 : 0) + f.words.length;
+  const phrases = f.phrases || [];
+  const asked = (f.type ? 1 : 0) + (f.place ? 1 : 0) + (f.landmark ? 1 : 0)
+    + phrases.length + f.words.length;
   /* A question with no handle on it beyond a time range is a browse, and a
      browse legitimately returns the window. */
   if (asked === 0) return 1;
 
   let s = 0;
-  let hit = 0;
+  let hit = 0;      // anything at all
+  let named = 0;    // the specifics: a phrase, a landmark, a place, a word
+  let kin = false;
 
   /* The pipeline's own label is the strongest evidence in the record, because
      something already read the whole transmission to assign it. It has to
@@ -378,22 +417,43 @@ function score(tx, f) {
   if (f.type) {
     if (tx.callType === f.type) { s += 10; hit++; }
     else if (TYPES[f.type].test(hay)) { s += 5; hit++; }
-    else if ((KIN[f.type] || []).includes(tx.callType)) { s += 2; hit++; }
+    else if ((KIN[f.type] || []).includes(tx.callType)) { kin = true; }
     else return 0;                       // asked for a fire, this is not one
   }
 
   if (f.landmark) {
     const aliases = LANDMARKS[f.landmark] || [f.landmark];
-    if (aliases.some(a => hay.includes(a))) { s += 7; hit++; }
+    if (aliases.some(a => hay.includes(a))) { s += 7; hit++; named++; }
     else return 0;                       // asked for the Garden, this is not there
   }
 
   if (f.place) {
-    if (hay.includes(f.place)) { s += 5; hit++; }
+    if (hay.includes(f.place)) { s += 5; hit++; named++; }
     else return 0;                       // asked for Back Bay, this is not there
   }
 
-  for (const w of f.words) if (hasWord(bag, w)) { s += 3; hit++; }
+  for (const set of phrases) {
+    if (set.some(v => hay.includes(v))) { s += 8; hit++; named++; }
+  }
+
+  for (const w of f.words) if (hasWord(bag, w)) { s += 3; hit++; named++; }
+
+  /* A kin label alone opens no doors, and it never counts toward how much of
+     the question was answered. A medical that matched the place must not
+     outrank the transmission the pipeline itself labeled a death, which is
+     exactly what happened when kinship padded the coverage ratio. One point,
+     once inside, nothing more. */
+  if (kin) {
+    if (named === 0) return 0;
+    s += 1;
+  }
+
+  /* When the reporter named a thing, a transmission has to carry one of the
+     named things. Matching only the call type is how "stabbing on lancaster
+     street" returned every stabbing-adjacent run of the day: right category,
+     wrong question. Type-only queries ("stabbings today") still work, because
+     nothing was named. */
+  if ((phrases.length || f.words.length || f.landmark || f.place) && named === 0) return 0;
 
   /* Seriousness sharpens a ranking but never stands in as evidence. "Big fire"
      with nothing else matched is still not this transmission. */

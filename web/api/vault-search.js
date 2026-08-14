@@ -21,7 +21,7 @@ const vq = require('../lib/vault-query');
 /* Enough to answer a night without reading a month. A day of traffic is about
    1,500 objects, so this covers roughly two full days and says so when it
    stops rather than quietly returning half an answer. */
-const MAX_OBJECTS = 3500;
+const MAX_OBJECTS = 6000;
 const CONCURRENCY = 64;
 
 /* A batch is named for the first transmission in it, so the last one can sit a
@@ -80,10 +80,27 @@ async function fetchAll(urls) {
    under its feed, because "we heard this and never worked out what it was"
    is a real answer and hiding it would make the archive look tidier than the
    night actually was. */
+/* A quarter hour of quiet ends a burst. Loose matches used to pile into one
+   card per feed, which put a 6am domestic and a 1pm homicide scene in the
+   same "call" and buried the homicide in the middle where nobody scrolls.
+   Now a loose match joins the previous one only if it is the same feed
+   within fifteen minutes, which is roughly the shape of one scene's radio. */
+const BURST_MS = 15 * 60 * 1000;
+
 function group(hits) {
+  hits = [...hits].sort((a, b) => String(a.tx.at).localeCompare(String(b.tx.at)));
+  const lastLoose = new Map();
+  for (const h of hits) {
+    if (h.tx.incidentId) { h.key = h.tx.incidentId; continue; }
+    const feed = h.tx.feed || 'unknown';
+    const at = +new Date(h.tx.at);
+    const prev = lastLoose.get(feed);
+    if (prev && at - prev.at <= BURST_MS) { h.key = prev.key; }
+    else { h.key = 'loose:' + feed + ':' + h.tx.at; }
+    lastLoose.set(feed, { at, key: h.key });
+  }
   const byInc = new Map();
-  for (const { tx, s } of hits) {
-    const key = tx.incidentId || ('loose:' + (tx.feed || 'unknown'));
+  for (const { tx, s, key } of hits) {
     let g = byInc.get(key);
     if (!g) {
       g = { id: key, loose: !tx.incidentId, feed: tx.feed, town: tx.town || tx.city || null,

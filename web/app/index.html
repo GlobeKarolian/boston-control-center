@@ -531,6 +531,8 @@
   .ar-wrap{flex:1;overflow-y:auto;padding:16px 22px 34px}
   .ar-wrap::-webkit-scrollbar{width:9px}.ar-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
   .ar-bar{display:flex;gap:8px;max-width:840px;margin:0 0 9px}
+  .ar-more{margin:14px 0}
+  .ar-more summary{cursor:pointer;color:var(--muted,#8b93a7);font-size:13px;padding:6px 2px}
   .ar-input{flex:1;background:#0e1420;border:1px solid var(--border);border-radius:7px;color:var(--text);
     font-family:inherit;font-size:14px;padding:11px 13px}
   .ar-input:focus{outline:none;border-color:var(--scanner);box-shadow:0 0 0 3px rgba(52,211,153,.12)}
@@ -2311,7 +2313,20 @@ async function arSearch(q){
         +'</p>';
       return;
     }
-    out.innerHTML=d.results.map(arCall).join('');
+    /* The confident results get the room; the long tail folds. A reporter
+       scanning a wall of forty equal cards reads none of them, and the one
+       real answer drowns in its own competition. The cut is score-relative
+       rather than a fixed count, so a night with three strong calls shows
+       three and a night with one shows one. */
+    const strong=[], weak=[];
+    const top=d.results[0].score||1;
+    for(const c of d.results){ ((c.score||0)>=top*0.45&&strong.length<8?strong:weak).push(c); }
+    out.innerHTML=strong.map(arCall).join('')
+      +(weak.length
+        ? '<details class="ar-more"><summary>'+weak.length+' weaker match'
+          +(weak.length===1?'':'es')+', probably noise</summary>'
+          +weak.map(arCall).join('')+'</details>'
+        : '');
   }catch(e){
     read.textContent='';
     out.innerHTML='<p class="ar-none">The archive did not answer. '+esc(String(e.message||e))+'</p>';
