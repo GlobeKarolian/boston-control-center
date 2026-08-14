@@ -342,10 +342,61 @@ async function setIfAbsent(key, val, ttlSec) {
   return r === 'OK';
 }
 
+/* ---- compression ----------------------------------------------------------
+
+   Upstash meters bandwidth in both directions, and this app's single largest
+   consumer is the store blob: every ingest that carries new transmissions
+   reads the whole thing and writes the whole thing back. Nothing about that
+   shape is wrong for a working set, but shipping it as raw JSON meant paying
+   full price for text that is mostly repeated field names.
+
+   Measured on this project's own data, gzip takes 83-86% off:
+
+     incidents.json             26,285 -> 4,461   (83.0%)
+     incidents.json.prerestart  92,393 -> 12,741  (86.2%)
+     archive.jsonl             773,339 -> 129,459 (83.3%)
+
+   So a hundred gigabytes of month becomes roughly fifteen, for one gzip call
+   on each side. Values are stored base64 behind a magic prefix, which is what
+   makes this safe to deploy into a live store: anything written before this
+   change has no prefix and reads back exactly as it always did, so there is
+   no migration and no flag day. New writes are compressed, old ones expire on
+   their own TTL, and the two coexist for a day. */
+const GZ = 'gz64:';
+const zlib = require('zlib');
+const { promisify } = require('util');
+const gzip = promisify(zlib.gzip);
+const gunzip = promisify(zlib.gunzip);
+
+/* Below a couple of kilobytes the gzip header and the base64 tax can make a
+   value BIGGER, and the round trip is not free either. The savings live in the
+   store blob and the board payloads, which are all far above this line. */
+const GZ_MIN = 2048;
+
+async function packBig(str) {
+  if (str.length < GZ_MIN) return str;
+  try {
+    const packed = GZ + (await gzip(Buffer.from(str, 'utf8'), { level: 6 })).toString('base64');
+    return packed.length < str.length ? packed : str;
+  } catch (e) { return str; }
+}
+
+async function unpackBig(str) {
+  if (typeof str !== 'string' || !str.startsWith(GZ)) return str;
+  try {
+    return (await gunzip(Buffer.from(str.slice(GZ.length), 'base64'))).toString('utf8');
+  } catch (e) {
+    /* A value that claims to be compressed and will not decompress is a
+       corrupt value, and hydrate() already knows how to start clean rather
+       than wedge ingestion forever. */
+    return null;
+  }
+}
+
 /* ---- chunked values ------------------------------------------------------- */
 
 async function setBig(key, str, ttlSec) {
-  str = String(str);
+  str = await packBig(String(str));
   const ex = ttlSec ? Math.max(1, Math.round(ttlSec)) : 0;
   if (!LIVE) { memPut(key, str, ttlSec); return; }
   if (str.length <= CHUNK) {
@@ -362,13 +413,13 @@ async function setBig(key, str, ttlSec) {
 async function getBig(key) {
   const head = await get(key);
   if (head === null || head === undefined) return null;
-  if (typeof head !== 'string' || !head.startsWith(SENTINEL)) return head;
+  if (typeof head !== 'string' || !head.startsWith(SENTINEL)) return unpackBig(head);
   const n = parseInt(head.slice(SENTINEL.length), 10);
   if (!(n > 0)) return null;
   const keys = []; for (let i = 0; i < n; i++) keys.push(key + ':p' + i);
   const parts = await mget(keys);
   if (parts.some(p => p === null || p === undefined)) return null;   // a chunk expired: treat as absent
-  return parts.join('');
+  return unpackBig(parts.join(''));
 }
 
 async function getJSON(key, fallback = null) {
