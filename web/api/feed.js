@@ -66,15 +66,41 @@ module.exports = async (req, res) => {
   if (target.protocol !== 'https:' && target.protocol !== 'http:') { res.status(400).send('bad protocol'); return; }
   if (!allowed(target.hostname)) { res.status(403).send('domain not allowed: ' + target.hostname); return; }
 
+  /* REDIRECTS ARE FOLLOWED BY HAND, so the allowlist guards every hop.
+     redirect:'follow' validated target.hostname once and then let fetch chase
+     a Location header anywhere: any open-redirect on any allowlisted outlet
+     (news.google.com and reddit both have them) turned this public, unauthed
+     function into a proxy for RFC-1918 hosts, cloud metadata, or any URL an
+     attacker wanted scan.boston to fetch on their behalf. A check that only
+     runs on the first hop is not a check. This bug shipped by being copied
+     from the Mac's server.js; it is now fixed in both. */
+  const MAX_HOPS = 5;
   try {
-    const upstream = await fetch(target.toString(), {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; BostonNewsroomControlCenter/1.0; +newsroom-monitor)',
-        'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, */*',
-      },
-      redirect: 'follow',
-      signal: AbortSignal.timeout(15000),
-    });
+    let url = target.toString();
+    let upstream = null;
+    for (let hop = 0; hop < MAX_HOPS; hop++) {
+      upstream = await fetch(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (compatible; BostonNewsroomControlCenter/1.0; +newsroom-monitor)',
+          'Accept': 'application/rss+xml, application/atom+xml, application/xml, text/xml, application/json, */*',
+        },
+        redirect: 'manual',
+        signal: AbortSignal.timeout(15000),
+      });
+      if (upstream.status < 300 || upstream.status >= 400) break;
+      const loc = upstream.headers.get('location');
+      if (!loc) break;
+      let next;
+      try { next = new URL(loc, url); } catch (e) { res.status(502).send('bad redirect'); return; }
+      if (!/^https?:$/.test(next.protocol) || !allowed(next.hostname)) {
+        res.status(403).send('redirect to disallowed host: ' + next.hostname); return;
+      }
+      try { await upstream.arrayBuffer(); } catch (e) {}   /* release the hop body */
+      url = next.toString();
+      upstream = null;
+    }
+    if (!upstream) { res.status(502).send('too many redirects'); return; }
+
     const len = Number(upstream.headers.get('content-length') || 0);
     if (len > MAX_BYTES) { res.status(413).send('upstream too large'); return; }
     const body = await upstream.text();
