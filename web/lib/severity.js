@@ -44,6 +44,54 @@ const MAX = 5;
 const GRAVE = new Set(['mass-casualty', 'officer-emerg', 'responder-down', 'active-shooter', 'hostage', 'explosion', 'abduction', 'civil-unrest']);
 const HEAVY = new Set(['alarm-escalate', 'working-fire', 'shots-fired', 'shooting', 'stabbing', 'bomb']);
 
+/* WHAT A FIREGROUND SOUNDS LIKE.
+ *
+ * lib/threat.js can only find a fire if somebody says the words "working
+ * fire", "fully involved", "heavy fire" or "trapped". Firefighters mostly do
+ * not say those things. They say "command to fire line", "I'm going to be
+ * clearing ladders", "first stream is 207", "companies operating". On the
+ * night this was written a Needham/Brookline box ran for twenty-five minutes
+ * with ladders up and command established, and every word-based path scored
+ * it as an alarm.
+ *
+ * There is a second reason it was missed, and it is the more important one.
+ * The floor's strongest signal is agencies converging, which is a superb tell
+ * for violence and a terrible one for fire: a working structure fire is a
+ * single-department event by nature. Fire does not need police to show up to
+ * be a fire. So this clause has to be able to clear the bar on one feed.
+ *
+ * These are operations words. They describe things crews DO once there is
+ * something to fight, and they do not appear when a box turns out to be
+ * nothing. Two separate transmissions are required, so one garbled line
+ * cannot conjure a fire on its own.
+ */
+const FIREGROUND = [
+  /\b(?:aerial|tower ladder|ladders? (?:up|raised|to the roof)|clearing ladders|throw(?:ing)? ladders)\b/i,
+  /\b(?:charged|second|third|back ?up|hand) line\b|\bline (?:in service|in operation|is charged)\b|\bstretch(?:ed|ing)? (?:a|the|another) line\b/i,
+  /\b(?:master stream|deck gun|water supply|supply line|drafting|hydrant|first stream|second stream)\b/i,
+  /\b(?:primary|secondary) search\b|\boverhaul\b|\bventilat\w*\b|\bopening up\b/i,
+  /\b(?:command (?:is )?established|fire command|incident command|transfer(?:ring)? (?:of )?command|command to (?:fire ?line|the fire)|have it in command)\b/i,
+  /\b(?:companies operating|all hands|under control|knock(?:ed)? down|tapp?ed out|working at the box)\b/i,
+];
+
+/* And what it sounds like when there is nothing there. A box that turns out
+   to be a pulled handle or burnt toast uses half the same vocabulary while
+   clearing, so the negative has to be checked before the positives count. */
+const FIRE_NOTHING = /\b(nothing showing|nothing at (?:that|this|the) location|nothing at \w+ street|all companies available|companies are in service|companies available|malicious|accidental|unfounded|alarm stop|false alarm|box puller|pulled (?:the )?box|no smoke|no fire|good intent)\b/i;
+
+/* How much fireground is on this scene: the count of transmissions carrying
+   an operations phrase, and whether anybody called it nothing. */
+function fireground(tx) {
+  let ops = 0, nothing = false;
+  for (const t of (tx || [])) {
+    const txt = String((t && t.text) || '');
+    if (!txt) continue;
+    if (FIRE_NOTHING.test(txt)) nothing = true;
+    for (const re of FIREGROUND) { if (re.test(txt)) { ops++; break; } }
+  }
+  return { ops, nothing };
+}
+
 function clamp(n) { return Math.max(0, Math.min(MAX, n)); }
 
 /* Everything the floor is allowed to look at, gathered by the caller:
@@ -94,6 +142,16 @@ function floor(ev) {
   else if (units >= 5) { s += 0.5; reasons.push(units + ' units'); }
   const span = Number(ev.spanMin) || 0;
   if (span >= 45 && s >= 2) { s += 0.5; reasons.push('running ' + Math.round(span) + ' minutes'); }
+
+  /* 3b. Fireground. Deliberately allowed to reach 3 on a single feed, because
+     requiring converged agencies is exactly what buried a twenty-five minute
+     structure fire behind a sleeping man in a U-Haul. */
+  const fg = fireground(tx);
+  if (fg.ops >= 2 && !fg.nothing) {
+    if (s < 3) { s = 3; reasons.push('fireground operations on ' + fg.ops + ' transmissions'); }
+    else { s += 0.5; reasons.push('fireground operations on ' + fg.ops + ' transmissions'); }
+    if (span >= 20) { s += 0.5; reasons.push('crews working it for ' + Math.round(span) + ' minutes'); }
+  }
 
   /* 4. The radio itself, with no words involved.
 
@@ -168,4 +226,4 @@ function label(score) {
   return 'routine';
 }
 
-module.exports = { floor, settle, pages, label, MAX, GRAVE, HEAVY };
+module.exports = { floor, settle, pages, label, MAX, GRAVE, HEAVY, fireground, FIREGROUND, FIRE_NOTHING };

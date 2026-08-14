@@ -826,6 +826,13 @@
   .dp-back:hover{color:#cfd6e4}
   .dp-chain{font:inherit;font-size:11.5px;background:transparent;border:1px solid #2f6f4f;
     color:#9fe3bd;border-radius:6px;padding:3px 10px;cursor:pointer;margin-left:auto}
+  /* A chip the floor scored a story or better. Not a colour the model can
+     ask for: it is set from lib/severity.js, the same arithmetic that decides
+     what reaches Situations, so the rail and this panel cannot disagree about
+     how big something is. */
+  .w-chip.hot{border-color:#8a5a2a;background:rgba(138,90,42,.16);color:#f0c98a}
+  .w-sev{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;
+    color:#f0a95a;border:1px solid #8a5a2a;border-radius:5px;padding:0 4px;margin-right:2px}
   .dp-unsure{margin-top:6px;font-size:11.5px;color:#c8b56a}
   .dp-meta{padding:0 13px 9px;font-size:11px;color:#6d7488;font-family:var(--mono)}
   /* The scroller. min-height:0 is the whole fix: a flex child will not shrink
@@ -3110,9 +3117,19 @@ async function deskLoad(){
       h+='<div class="dp-watch">watching: '+d.watching.map(function(w,i){
         const what=esc(w.what||String(w));
         if(!w||!w.n)return '<span class="w-flat">'+what+'</span>';
-        return '<button class="w-chip" data-w="'+i+'" title="hear the '+w.n
-          +' transmission'+(w.n===1?'':'s')+' behind this">'+what
-          +' <span class="w-n">&#9654; '+w.n+'</span></button>';
+        /* The badge is mechanical. The words next to it are the model's, and
+           on 14 August those words called a fireground 'large' on one poll
+           and 'wrapping up' on the next while the radio said neither. This
+           number comes from lib/severity.js reading the transmissions the
+           chip actually traces to, so a reader has something next to the
+           prose that the prose cannot talk into existence. */
+        const sv=Number(w.severity)||0;
+        const hot=sv>=3?' hot':'';
+        const tip='hear the '+w.n+' transmission'+(w.n===1?'':'s')+' behind this'
+          +(w.why&&w.why.length?' \u2014 '+w.why.join('; '):'');
+        return '<button class="w-chip'+hot+'" data-w="'+i+'" title="'+esc(tip)+'">'
+          +(sv>=3?'<span class="w-sev">'+esc(w.severityLabel||'story')+'</span> ':'')
+          +what+' <span class="w-n">&#9654; '+w.n+'</span></button>';
       }).join(' &middot; ')+'</div>';
     }
     if(d.unsure&&d.unsure.length){

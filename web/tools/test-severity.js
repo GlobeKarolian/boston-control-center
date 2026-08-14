@@ -94,5 +94,58 @@ const SOUTH_STATION = {
   ok('a surge with no legible traffic is still worth a glance', f.score >= 2, 'floor=' + f.score);
 }
 
+/* --- the fireground, which is a single-agency event by nature ------------
+ *
+ * 14 August, 01:43 to 02:08. A Needham/Brookline box ran for twenty-five
+ * minutes with command established and crews clearing ladders, and the board
+ * showed zero situations while the desk read called it "a fire line wrapping
+ * up" and spent its three watch slots on a sleeping man in a U-Haul.
+ *
+ * Two things buried it. lib/threat.js can only see a fire when somebody says
+ * "working fire" or "fully involved", and firefighters say "command to fire
+ * line" and "first stream is 207" instead. And the floor's strongest signal
+ * is agencies converging, which is a superb tell for violence and a useless
+ * one for fire, because fire does not need police to show up to be a fire.
+ */
+{
+  const T = (t) => ({ text: t, feed: 'needham-brookline-police-fire', units: [], signals: [] });
+  const scene = {
+    tx: [
+      T('For box 1-8, report of carbon monoxide. Attention engine 3, ladder 2. Respond to 108 Harvard Street.'),
+      T('Harbor, command to fire line. Fire line, I am answered, have it in command.'),
+      T('Ending 3 is going to remain on steam a while longer. I am going to be clearing ladders. First stream is 207.'),
+      T('Latitude of fire law. Latitude is returning. 208.'),
+    ],
+    feeds: ['needham-brookline-police-fire'],
+    units: ['E3', 'L2'], spanMin: 25, anomaly: { level: 'normal' },
+  };
+  const f = sev.floor(scene);
+  ok('a fireground on ONE feed still reaches a story', f.score >= 3, 'floor=' + f.score);
+  ok('and says why in words a person can check',
+     f.reasons.some(r => /fireground/.test(r)), JSON.stringify(f.reasons));
+  ok('minutes of work count once there is work',
+     f.reasons.some(r => /working it for/.test(r)), JSON.stringify(f.reasons));
+
+  /* The same vocabulary clearing a box that was nothing must not do this. */
+  const dud = {
+    tx: [
+      T('Box 2171, located 850 Cambridge Street. Response is Engine 5, Engine 3, Ladder 1, Division 1.'),
+      T('We have nothing at this location. Hold the Division 1 only.'),
+      T('Nothing at that location. A juvenile may have pulled that box. You can show all companies available.'),
+    ],
+    feeds: ['cambridge-ma-fire'], units: ['E5', 'E3', 'L1'], spanMin: 12, anomaly: { level: 'normal' },
+  };
+  ok('a box that turns out to be nothing stays down', sev.floor(dud).score < 3, 'floor=' + sev.floor(dud).score);
+
+  /* One line is not a fire. Two separate transmissions are required so a
+     single garbled sentence cannot conjure a fireground. */
+  const one = { tx: [T('Command to fire line, have it in command.')], feeds: ['boston-fire'], units: [], spanMin: 2, anomaly: { level: 'normal' } };
+  ok('one operations phrase alone is not a fireground', sev.floor(one).score < 3, 'floor=' + sev.floor(one).score);
+
+  const fg = sev.fireground(scene.tx);
+  ok('fireground() counts the operations transmissions', fg.ops >= 2, 'ops=' + fg.ops);
+  ok('and flags a scene somebody called nothing', sev.fireground(dud.tx).nothing === true);
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

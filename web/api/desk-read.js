@@ -29,6 +29,7 @@ const stream = require('../lib/stream');
 const llm = require('../lib/llm');
 const trace = require('../lib/trace');
 const et = require('../lib/etime');
+const severity = require('../lib/severity');
 
 const MAX_MINUTES = 60;
 const MAX_LINES = 260;
@@ -148,16 +149,35 @@ module.exports = async (req, res) => {
       /* Each watch item carries the transmissions it was traced to, with their
          audio, so it can be clicked into and heard rather than read and
          wondered about. */
-      watching: (Array.isArray(out.watching) ? out.watching.slice(0, 3) : []).map((x) => {
+      /* Each watch item carries the transmissions it traced to AND a
+         mechanical score for them, then they are ordered by that score.
+
+         The model picks these three strings with no memory between polls and
+         no sense of magnitude, so at 02:07 a twenty-five minute fireground
+         with ladders up was dropped from the list entirely in favour of a man
+         asleep in a vehicle, and the poll before that had called the same
+         fire "large" with nothing on the radio saying so. The prose is the
+         model's. The ORDER is not, and neither is the score printed next to
+         it: lib/severity.js reads the transmissions the item actually traced
+         to, which is the same floor that decides what reaches Situations. */
+      watching: (Array.isArray(out.watching) ? out.watching.slice(0, 6) : []).map((x) => {
         const what = String(x).slice(0, 140);
         const found = trace.toTransmissions(what, rows, { cap: 8 });
+        const feeds = [...new Set(found.map(r => r.feed || r.src).filter(Boolean))];
+        const units = [...new Set(found.flatMap(r => r.units || []))];
+        const span = found.length > 1
+          ? (+new Date(found[found.length - 1].at) - +new Date(found[0].at)) / 60000 : 0;
+        const fl = severity.floor({ tx: found, feeds, units, spanMin: span, anomaly: { level: 'normal' } });
         return {
           what,
           at: found.map(r => r.at),
           clips: found.filter(r => r.clip).map(r => r.clip),
           n: found.length,
+          severity: fl.score,
+          severityLabel: severity.label(fl.score),
+          why: fl.reasons.slice(0, 3),
         };
-      }),
+      }).sort((a, b) => (b.severity - a.severity) || (b.n - a.n)).slice(0, 3),
       quiet: out.quiet === true,
       unsure: Array.isArray(out.unsure) ? out.unsure.slice(0, 3).map(x => String(x).slice(0, 140)) : [],
       heard,
