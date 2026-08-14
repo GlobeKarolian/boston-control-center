@@ -134,6 +134,9 @@
     },
     "api/clip-download.js": {
       "maxDuration": 30
+    },
+    "api/desk-read.js": {
+      "maxDuration": 45
     }
   },
   "crons": [
