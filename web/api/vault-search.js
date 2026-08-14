@@ -91,6 +91,7 @@ function group(hits) {
   hits = [...hits].sort((a, b) => String(a.tx.at).localeCompare(String(b.tx.at)));
   const lastLoose = new Map();
   for (const h of hits) {
+    if (h.key) continue;                       // scene context: stays with its anchor
     if (h.tx.incidentId) { h.key = h.tx.incidentId; continue; }
     const feed = h.tx.feed || 'unknown';
     const at = +new Date(h.tx.at);
@@ -131,6 +132,70 @@ function group(hits) {
   })).sort((a, b) => b.score - a.score);
 }
 
+/* The scene around a strong hit.
+
+   A reporter who searches "stabbing lancaster street" is asking about an
+   EVENT, and the archive answers with the transmissions that contain those
+   words, which for Lancaster was exactly one: the EMS dispatch. The officers
+   confirming two victims, calling for tape, making notifications, none of
+   them ever said the street's name, because people at a scene don't address
+   their own location. Strict matching returned the one line and hid the
+   story around it.
+
+   So strong hits expand: every transmission from the same incident, plus
+   everything in the same city within forty-five minutes that speaks to the
+   same kind of call, rides along as context in the same card, chronological,
+   with its audio. Context is marked, adds no score, and only strong anchors
+   expand, so the weak tail cannot drag a whole evening in with it.
+
+   The city gate matters: a knife mentioned in Lowell twenty minutes after a
+   Boston stabbing is a different night in a different place, and without
+   that gate the expansion would rebuild the flood this search just stopped
+   returning. */
+const SCENE_MS = 45 * 60 * 1000;
+const SCENE_CAP = 40;
+
+function sceneExpand(hits, pool, f) {
+  if (!hits.length) return hits;
+  const strong = hits.filter(h => h.s >= (hits[0] ? Math.max(...hits.map(x => x.s)) : 0) * 0.6);
+  if (!strong.length) return hits;
+  const have = new Set(hits.map(h => h.tx));
+  const typed = (tx, hay) => {
+    if (!f.type) return true;
+    if (tx.callType === f.type) return true;
+    if (vq.TYPES[f.type] && vq.TYPES[f.type].test(hay)) return true;
+    return (vq.KIN[f.type] || []).includes(tx.callType);
+  };
+  const out = hits.slice();
+  for (const a of strong) {
+    const at = +new Date(a.tx.at);
+    const inc = a.tx.incidentId || null;
+    const city = String(a.tx.city || a.tx.town || '').toLowerCase();
+    /* The anchor names its card now, so the scene and the anchor cannot end
+       up grouped apart, which is exactly what happened on the first run of
+       the test below this feature was built against. */
+    a.key = a.key || inc || ('scene:' + (a.tx.feed || '') + ':' + a.tx.at);
+    let added = 0;
+    for (const tx of pool) {
+      if (added >= SCENE_CAP) break;
+      if (have.has(tx)) continue;
+      const t = +new Date(tx.at);
+      const sameInc = inc && tx.incidentId === inc;
+      if (!sameInc) {
+        if (Math.abs(t - at) > SCENE_MS) continue;
+        const c2 = String(tx.city || tx.town || '').toLowerCase();
+        if (city && c2 && c2 !== city) continue;
+        const hay = ((tx.text || '') + ' ' + (tx.address || '') + ' ' + (tx.matched || '')).toLowerCase();
+        if (!typed(tx, hay)) continue;
+      }
+      have.add(tx);
+      out.push({ tx: { ...tx, ctx: true }, s: 0.01, key: a.key });
+      added++;
+    }
+  }
+  return out;
+}
+
 module.exports = async (req, res) => {
   harden(res);
   if (!(await requireRead(req, res))) return;
@@ -168,11 +233,12 @@ module.exports = async (req, res) => {
   }
 
   const tx = await fetchAll(urls);
-  const hits = [];
+  let hits = [];
   for (const t of tx) {
     const s = vq.score(t, f);
     if (s > 0) hits.push({ tx: t, s });
   }
+  hits = sceneExpand(hits, tx, f);
   const groups = group(hits).slice(0, 40);
 
   /* What the archive actually holds for the window that was read.
@@ -197,6 +263,7 @@ module.exports = async (req, res) => {
       from: f.from.toISOString(),
       to: f.to.toISOString(),
       type: f.type, place: f.place, landmark: f.landmark, big: f.big, words: f.words,
+      phrases: (f.phrases || []).map(set => set[0]),
     },
     scanned: tx.length,
     matched: hits.length,
@@ -209,3 +276,6 @@ module.exports = async (req, res) => {
     ms: Date.now() - t0,
   }, { priv: 0 });
 };
+
+module.exports._sceneExpand = sceneExpand;
+module.exports._group = group;
