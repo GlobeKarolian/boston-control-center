@@ -766,6 +766,17 @@
   .sit.armed{background:rgba(192,124,255,.14);outline:1px dashed #c07cff;outline-offset:-2px}
   .sit.target:hover,.sit.target:focus{background:rgba(143,182,255,.12);outline:1px solid #8fb6ff;outline-offset:-2px}
   #situations.arming .sit{cursor:copy}
+  .mode-row{display:flex;align-items:center;gap:6px;padding:5px 9px 7px}
+  .mode-btn{font:inherit;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;
+    background:transparent;border:1px solid #2b3242;color:#8b93a7;border-radius:6px;
+    padding:3px 10px;cursor:pointer}
+  .mode-btn.on{border-color:#2f6f4f;color:#9fe3bd;background:rgba(47,111,79,.13)}
+  .mode-note{font-size:11px;color:#6d7488;margin-left:auto}
+  /* A held card is visibly provisional wherever it appears. Same information,
+     less confidence, and never mistakable for a verified one. */
+  .sit.sit-held{opacity:.82;border-left-color:#7a6a2e}
+  .sit-held-why{font-size:11.5px;color:#c8b56a;padding:3px 0 1px}
+  .sit-sev{font-size:10.5px;color:#8b93a7;margin-left:6px;font-weight:400;letter-spacing:.03em}
   .thr-drop{font-family:var(--mono);font-size:9px;color:#d6b3ff;margin-top:6px;line-height:1.4}
 
   /* big flashing alert for a new high-priority situation */
@@ -1202,6 +1213,20 @@
          is zero high, so it costs the rail nothing on the polls nobody has
          pressed anything. -->
     <div class="desk-say" id="deskSay" role="status" aria-live="polite"></div>
+    <!-- Everything Mode shows the desk editor's whole read. Situation Mode
+         shows only cards that cleared the severity floor on observed evidence
+         AND survived a second model from a different lab trying to knock them
+         down. The distinction is not cosmetic: on 14 August the board carried
+         a confirmed active shooter built from one unit clearing an address,
+         and Situation Mode is the promise that a card in this list stood up
+         to something. -->
+    <div class="mode-row">
+      <button class="mode-btn on" id="modeAll" data-mode="all"
+        title="Every card the desk editor built, including ones it could not stand up">Everything</button>
+      <button class="mode-btn" id="modeSit" data-mode="major"
+        title="Only major events that cleared the evidence floor and passed a second model">Situations</button>
+      <span class="mode-note" id="modeNote"></span>
+    </div>
     <div class="sit-body" id="situations"><div class="empty">Desk editor is reading the scanner&hellip;</div></div>
     <div class="rail-head sp-head"><span class="tag"></span><h2>State Police</h2><span class="count" id="spCount">0</span></div>
     <!-- One scroller, two lists. Cards come off situations.json every five
@@ -2845,10 +2870,44 @@ function paintBoard(list){
    the rail. app/threadui.js decides what a beat row says and which beat can be
    pulled out; this half only draws it. Every call into it is guarded, so the
    page still renders the old flat cards if that file fails to load. */
+/* 'all' or 'major'. Remembered across reloads because a desk that chose the
+   groomed view at 6pm should not be handed the raw one at midnight. */
+let SIT_MODE = 'all';
+let MODES_WIRED = false;
+try { SIT_MODE = localStorage.getItem('bcc.sitmode') === 'major' ? 'major' : 'all'; } catch (e) {}
+
+function wireModes(){
+  const set=function(m){
+    SIT_MODE=m;
+    try{ localStorage.setItem('bcc.sitmode',m); }catch(e){}
+    const a=document.getElementById('modeAll'),b=document.getElementById('modeSit');
+    if(a)a.classList.toggle('on',m==='all');
+    if(b)b.classList.toggle('on',m==='major');
+    paintSits();
+  };
+  const a=document.getElementById('modeAll'),b=document.getElementById('modeSit');
+  if(a)a.onclick=function(){set('all');};
+  if(b)b.onclick=function(){set('major');};
+  set(SIT_MODE);
+}
+
 function paintSits(){
-  const list=sitState.list||[];
+  if(!MODES_WIRED && document.getElementById('modeAll')){ MODES_WIRED=true; wireModes(); return; }
+  const all=sitState.list||[];
+  /* A card is major when the evidence floor scored it a story or better and a
+     second model stood the claim up. Anything short of both is Everything
+     Mode only. Cards written before this shipped carry neither field, so they
+     are treated as unverified rather than silently promoted. */
+  const list=(SIT_MODE==='major') ? all.filter(function(s){ return s && s.major===true; }) : all;
   const el=document.getElementById('situations'),cnt=document.getElementById('sitCount');
   if(cnt)cnt.textContent=list.length;
+  const note=document.getElementById('modeNote');
+  if(note){
+    const hidden=all.length-list.length;
+    note.textContent=(SIT_MODE==='major')
+      ? (hidden? hidden+' unverified hidden':'')
+      : (all.filter(function(s){return s&&s.held;}).length? all.filter(function(s){return s&&s.held;}).length+' held':'');
+  }
   if(!el)return;
   /* Held across the swap. innerHTML drops every child, which drops the scroll
      with it, so without this a poll landing while somebody reads the fourth
@@ -2856,7 +2915,10 @@ function paintSits(){
   const top=el.scrollTop;
   const keep=roveKeep();
   el.classList.toggle('arming',!!sitState.merge);
-  if(!list.length)el.innerHTML='<div class="empty">Nothing major right now. Watching&hellip;</div>';
+  if(!list.length)el.innerHTML='<div class="empty">'
+    +(SIT_MODE==='major'
+      ? 'Nothing has cleared the bar. Switch to Everything to see what the desk editor is chewing on.'
+      : 'Nothing major right now. Watching&hellip;')+'</div>';
   else el.innerHTML=list.map(s=>sitCard(s)).join('');
   el.scrollTop=top;
   keep();
@@ -2864,6 +2926,15 @@ function paintSits(){
 
 function sitCard(s){
   const T=window.BCCThread,id=s.id||'';
+  /* Held cards say so on their face. A reporter scanning the rail should never
+     have to open one to learn the system could not stand it up. */
+  const heldNote=s.held
+    ? '<div class="sit-held-why">held: '+esc(String(s.heldWhy||'could not be verified'))+'</div>'
+    : '';
+  const sevNote=(typeof s.severity==='number')
+    ? '<span class="sit-sev">'+esc(s.severityLabel||('severity '+s.severity))
+      +(s.severityCapped?' \u00b7 model overruled':'')+'</span>'
+    : '';
   const open=sitState.open.has(id),arm=sitState.merge,armed=(arm===id);
   /* Only a card with coordinates gets the role and the tab stop. The click does
      nothing without them, and a control that does nothing is a worse promise
@@ -2872,7 +2943,7 @@ function sitCard(s){
   const go=(s.lat!=null&&s.lon!=null)||(arm&&!armed);
   const n=T?T.count(s):0;
   const last=T?T.latest(s):null;
-  let h='<div class="sit'+(s.priority==='high'?' high':'')+(open?' open':'')+
+  let h='<div class="sit'+(s.priority==='high'?' high':'')+(s.held?' sit-held':'')+(open?' open':'')+
     (armed?' armed':'')+(arm&&!armed?' target':'')+'"'+
     (go?' role="button" tabindex="-1"':'')+
     (arm&&!armed?' title="Fold the armed card in here"':'')+' data-id="'+esc(id)+'">';
@@ -2881,7 +2952,7 @@ function sitCard(s){
     ' aria-expanded="'+(open?'true':'false')+'" title="'+(open?'Close this card':'Open the beats on this card and the desk controls')+'">'+
     esc(T.label(s))+'</button>';
   h+='<span class="sit-status">'+esc(s.status||'')+'</span></div>';
-  h+='<div class="sit-head-line">'+esc(s.headline||'')+'</div>';
+  h+='<div class="sit-head-line">'+esc(s.headline||'')+sevNote+'</div>'+heldNote;
   h+='<div class="sit-sum">'+esc(s.summary||'')+'</div>';
   if(s.location)h+='<div class="sit-loc">'+esc(s.location)+'</div>';
   /* The tick tock. Every clip this story's beats carry, oldest first, one

@@ -33,6 +33,10 @@ const { reconcile } = require('../../lib/threads');
    (api/analyst-work.js and api/analyst-report.js), so a model on one of the
    Macs and this cloud path can never drift apart on what a situation is. */
 const core = require('../../lib/analyst-core');
+const stream = require('../../lib/stream');
+const severity = require('../../lib/severity');
+const verify = require('../../lib/verify');
+const baseline = require('../../lib/baseline');
 
 const ANALYST_MODEL = process.env.ANALYST_MODEL || 'claude-sonnet-5';
 
@@ -41,6 +45,7 @@ const ANALYST_MODEL = process.env.ANALYST_MODEL || 'claude-sonnet-5';
 const LOCK = 'bcc:lock:analyst';
 
 // Fingerprint of the exact text last sent to the model.
+const CURSOR = 'bcc:analyst:cursor';
 const SIG = 'bcc:analyst:sig';
 
 // Stamped by api/analyst-report.js each time a Mac's model judges the board.
@@ -116,8 +121,32 @@ module.exports = async (req, res) => {
     if (!key) return await ageOnly('no ANTHROPIC_API_KEY');
     if (tr.length < 3) return await ageOnly('not enough traffic', { transcripts: tr.length });
 
-    const batch = tr.slice(0, 70);
-    const lines = core.linesOf(tr);
+    /* THE LISTENER'S INPUT.
+
+       This used to be tr.slice(0, 70) off bcc:out:transcripts, a buffer that
+       holds eighty. At rush hour more than eighty transmissions arrive between
+       two runs and the oldest fall off unseen, so the thing meant to be
+       listening to the city was blind in exactly the minutes it existed for.
+
+       lib/stream.js reads the vault from a cursor instead: append-only,
+       complete, and off Redis entirely. The buffer stays as the fallback for
+       the case where Blob is unreachable, because a degraded listener beats a
+       stopped one. */
+    let batch = tr.slice(0, 70);
+    let streamed = null;
+    try {
+      const cursor = (await kv.get(CURSOR)) || new Date(Date.now() - 10 * 60000).toISOString();
+      const got = await stream.since(cursor);
+      if (got.rows.length) {
+        streamed = got;
+        batch = got.rows.map(stream.forListening);
+      }
+    } catch (e) {
+      /* Vault unreachable: fall back to the buffer and say so in the response
+         rather than pretending the listener heard everything. */
+      streamed = { why: String(e.message || e).slice(0, 160) };
+    }
+    const lines = core.linesOf(batch.length ? batch : tr);
 
 
 
@@ -187,7 +216,61 @@ module.exports = async (req, res) => {
     /* The dispose pipeline, shared verbatim with the local path
        (lib/analyst-core.js): geocoding, feed verification, clip
        matching, reference discipline, the works. */
-    const fresh = await core.disposeReported(sits, { batch, prev });
+    let fresh = await core.disposeReported(sits, { batch, prev });
+
+    /* THE FLOOR, AND THE SECOND OPINION.
+
+       Two layers between a model's enthusiasm and a reporter's phone, run in
+       this order because the cheap one should reject before the expensive one
+       is asked.
+
+       lib/severity.js scores each situation on things that were observed:
+       signals in the transcripts, agencies converged, units, duration, and
+       how far above normal the radio is running. The model's own read is
+       capped at one notch above that, so "Active Shooter" built from one unit
+       clearing an address settles at a 1 rather than a 5.
+
+       lib/verify.js then shows the claim and the raw transcripts to a model
+       from a different lab, with the writer's confidence stripped out, and
+       asks whether the transcripts support it. Anything it cannot stand up is
+       held: it keeps its transmissions and its audio and says what failed. */
+    const anomalyByFeed = {};
+    try {
+      for (const f of [...new Set((streamed && streamed.rows ? streamed.rows : []).map(r => r.feed))]) {
+        if (!f) continue;
+        const d = stream.densityByFeed(streamed.rows)[f] || 0;
+        anomalyByFeed[f] = await baseline.score(f, new Date(), { n: d, mix: {} });
+      }
+    } catch (e) { /* no baseline yet is not a failure */ }
+
+    fresh = await Promise.all(fresh.map(async (f) => {
+      const mine = (streamed && streamed.rows ? streamed.rows : []).filter(r =>
+        (f.feeds || []).includes(r.feed));
+      const feeds = [...new Set(mine.map(r => r.feed))];
+      const units = [...new Set(mine.flatMap(r => r.units || []))];
+      const span = mine.length > 1
+        ? (+new Date(mine[mine.length - 1].at) - +new Date(mine[0].at)) / 60000 : 0;
+      const worst = feeds.map(x => anomalyByFeed[x]).filter(Boolean)
+        .sort((a, b) => (b.z || 0) - (a.z || 0))[0] || { level: 'normal' };
+
+      const fl = severity.floor({ tx: mine, feeds, units, spanMin: span, anomaly: worst });
+      const modelScore = f.priority === 'high' ? 4 : 2;
+      const settled = severity.settle(fl, { score: modelScore });
+      f.severity = settled.score;
+      f.severityLabel = severity.label(settled.score);
+      f.severityWhy = fl.reasons;
+      if (settled.capped) f.severityCapped = settled.why;
+      if (settled.score < 3) f.priority = 'normal';
+
+      /* Only claims that still look like news are worth a verifier call. */
+      if (!f.held && settled.score >= 3) {
+        const v = await verify.check(f.headline + '. ' + f.summary, mine.length ? mine : batch);
+        f = verify.apply(f, v);
+      }
+      /* What Situation Mode is allowed to show. */
+      f.major = !f.held && f.verified === true && settled.score >= 3;
+      return f;
+    }));
 
     /* The desk can drag a card while the model is thinking, and this handler has
        been holding a copy of the board from before that call. Writing it back
@@ -212,6 +295,9 @@ module.exports = async (req, res) => {
     await writeBoard(result.situations);
     // Recorded only after the write lands, so a failed run retries next minute.
     try { await kv.set(SIG, sig, 6 * 3600); } catch (e) {}
+    /* Only after the board is written. A failed run leaves the cursor where it
+       was, so the next one re-reads the gap instead of stepping over it. */
+    if (streamed && streamed.cursor) { try { await kv.set(CURSOR, streamed.cursor, 24 * 3600); } catch (e) {} }
 
     const out = result.situations;
     return json(res, {
