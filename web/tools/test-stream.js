@@ -109,6 +109,49 @@ const stream = require('../lib/stream.js');
      d['boston-police'] > 0 && d['boston-ems'] > 0 && d['mbta-transit-police'] > 0,
      JSON.stringify(d));
 
-  console.log('\n' + pass + ' passed, ' + fail + ' failed');
+  /* --- the sampler must never drop right now -------------------------------
+ *
+ * 14 August, 02:32. Somebody typed "stabbing" into the desk. The answer came
+ * back listing seven knife references from the previous morning and
+ * afternoon, opened with "there is no explicit confirmation of a stabbing",
+ * and did not contain the stabbing dispatched to a Dunkin' Donuts at 02:24,
+ * eight minutes earlier, with both an EMS and a BPD unit on it.
+ *
+ * It was not filtered out and it was not scored down. It was never fetched.
+ * A 48 hour window holds more objects than one read may take, so the even
+ * sampler strided across the whole list, and right now is a handful of
+ * objects at the very end of thousands. A stride does not care which end it
+ * drops.
+ */
+{
+  const urls = Array.from({ length: 4000 }, (_, i) => 'o' + String(i).padStart(4, '0'));
+  const newest = urls.slice(-40);
+  const r = stream.spread(urls, 2600);
+  const got = new Set(r.picked);
+
+  ok('the sampler still respects the cap', r.picked.length <= 2600, 'picked=' + r.picked.length);
+  ok('and still says it sampled', r.sampled === true);
+  ok('every one of the newest 40 objects survives',
+     newest.every(u => got.has(u)), 'missing ' + newest.filter(u => !got.has(u)).length);
+  ok('while the old half of the window is still covered',
+     r.picked.some(u => u < 'o0500') && r.picked.some(u => u > 'o1500' && u < 'o2500'));
+
+  /* The old behaviour, kept here so the regression is legible rather than
+     described. It dropped fourteen of the last forty. */
+  const strided = new Set((function (u, c) {
+    const st = u.length / c, p = [];
+    for (let i = 0; i < c; i++) p.push(u[Math.floor(i * st)]);
+    return p;
+  })(urls, 2600));
+  ok('a plain stride would have dropped some of them, which is the bug',
+     !newest.every(u => strided.has(u)));
+
+  /* Nothing changes when everything fits. */
+  const small = stream.spread(['a', 'b', 'c'], 10);
+  ok('an uncapped window is untouched and unflagged',
+     small.picked.length === 3 && small.sampled === false);
+}
+
+console.log('\n' + pass + ' passed, ' + fail + ' failed');
   process.exit(fail ? 1 : 0);
 })();

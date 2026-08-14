@@ -3511,9 +3511,25 @@ function paintSits(){
   const note=document.getElementById('modeNote');
   if(note){
     const hidden=all.length-list.length;
+    /* "unverified hidden" was one number doing two completely different jobs.
+       It counted every card that is not major, and there are two unrelated
+       ways to not be major: a second model looked at the claim and could not
+       stand it up, or the severity floor never rated it a story so no second
+       model was ever asked. The first is a judgement. The second is a
+       threshold. Reading "4 unverified hidden" and concluding the verifier
+       rejected four stories was reasonable and wrong. */
+    const nHeld=all.filter(function(s){return s&&s.held;}).length;
+    const nLow=all.filter(function(s){return s&&!s.held&&s.major!==true;}).length;
+    const bits=[];
+    if(nLow)bits.push(nLow+' below the bar');
+    if(nHeld)bits.push(nHeld+' held by the checker');
     note.textContent=(SIT_MODE==='major')
-      ? (hidden? hidden+' unverified hidden':'')
-      : (all.filter(function(s){return s&&s.held;}).length? all.filter(function(s){return s&&s.held;}).length+' held':'');
+      ? (hidden?bits.join(' \u00b7 '):'')
+      : (nHeld? nHeld+' held':'');
+    note.title=(SIT_MODE==='major'&&hidden)
+      ? 'Below the bar: the severity floor did not rate it a story, so it was never sent for checking. '
+        +'Held by the checker: a second model read the transcripts and could not stand the claim up.'
+      : '';
   }
   if(!el)return;
   /* Held across the swap. innerHTML drops every child, which drops the scroll

@@ -96,12 +96,42 @@ async function fetchAll(urls) {
    about two days, a reporter means both of them, and an answer built only
    from last night while claiming to cover two is worse than an answer that
    admits it sampled. */
+/* Fraction of the object budget held back for the newest traffic, whatever
+   else the sampler does with the rest. */
+const TAIL_SHARE = 0.35;
+
 function spread(urls, cap) {
   if (urls.length <= cap) return { picked: urls, sampled: false };
-  const step = urls.length / cap;
+
+  /* THE TAIL IS NEVER SAMPLED.
+   *
+   * Even sampling gives fair coverage of two days and quietly throws away
+   * right now, because right now is a handful of objects at the end of a list
+   * of thousands and a stride of 1-in-8 does not care which end it is
+   * dropping.
+   *
+   * On 14 August somebody typed "stabbing" at 02:32. The answer listed seven
+   * knife references from the previous morning and afternoon and did not
+   * contain the stabbing dispatched at 02:24, eight minutes earlier, which
+   * was the only one anybody was going to ask about. It was not filtered out
+   * or scored down. It was never fetched.
+   *
+   * So the newest third of the budget is reserved for the newest objects, and
+   * the sampler spreads over everything older. A question about a window
+   * still gets the window, and the thing happening while it is being asked is
+   * never the part that gets dropped. */
+  const tailN = Math.max(1, Math.min(cap - 1, Math.floor(cap * TAIL_SHARE)));
+  const tail = urls.slice(-tailN);
+  const head = urls.slice(0, urls.length - tailN);
+  const headCap = cap - tailN;
+
   const picked = [];
-  for (let i = 0; i < cap; i++) picked.push(urls[Math.floor(i * step)]);
-  return { picked, sampled: true };
+  if (headCap > 0 && head.length) {
+    const step = head.length / headCap;
+    for (let i = 0; i < headCap; i++) picked.push(head[Math.floor(i * step)]);
+  }
+  for (const u of tail) picked.push(u);
+  return { picked, sampled: true, tailKept: tail.length };
 }
 
 async function since(fromISO, toISO, opts) {
@@ -248,4 +278,4 @@ function densityByFeed(rows) {
   return n;
 }
 
-module.exports = { since, forListening, densityByFeed, MAX_ROWS, MAX_OBJECTS };
+module.exports = { spread, since, forListening, densityByFeed, MAX_ROWS, MAX_OBJECTS };
