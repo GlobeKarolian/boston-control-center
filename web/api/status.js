@@ -7,6 +7,7 @@
 
 const { requireRead, json } = require('../lib/http');
 const kv = require('../lib/kv');
+const llmlog = require('../lib/llmlog');
 const users = require('../lib/users');
 const store_io = require('../lib/store-io');
 
@@ -22,6 +23,7 @@ module.exports = async (req, res) => {
     commit: (process.env.VERCEL_GIT_COMMIT_SHA || '').slice(0, 7) || null,
     redis: { configured: kv.live, ok: false, ms: null, error: null, quota: false, meter: null },
     config: {
+      OPENROUTER_API_KEY: set('OPENROUTER_API_KEY'),
       ANTHROPIC_API_KEY: set('ANTHROPIC_API_KEY'),
       BESTTIME_API_KEY_PRIVATE: set('BESTTIME_API_KEY_PRIVATE'),
       AUTH_USER: set('AUTH_USER'),
@@ -66,7 +68,39 @@ module.exports = async (req, res) => {
   }
 
   if (!out.config.INGEST_TOKENS && !out.config.INGEST_SECRET) out.warnings.push('No ingest credential set, so no Mac can post transcripts.');
-  if (!out.config.ANTHROPIC_API_KEY) out.warnings.push('No ANTHROPIC_API_KEY, so extraction falls back to regex and the analyst pass will not run.');
+  /* Set is not the same as working, and every surface in this project used to
+     report the first as though it were the second.
+
+     A key that has been rotated at OpenRouter and not here is present, non
+     empty, and rejected on every call. llm-activity said configured: true,
+     status said the same, the board looked healthy, and extraction quietly ran
+     on regex for hours. The only honest answer comes from whether calls are
+     actually succeeding, so that is what is checked. */
+  if (!out.config.OPENROUTER_API_KEY && !out.config.ANTHROPIC_API_KEY) {
+    out.warnings.push('No OPENROUTER_API_KEY and no ANTHROPIC_API_KEY, so extraction falls back to regex, nothing is verified, and the desk panel cannot answer.');
+  } else if (!out.config.OPENROUTER_API_KEY) {
+    out.warnings.push('No OPENROUTER_API_KEY. Extraction, the desk read, the ask box and the verifier all route through OpenRouter.');
+  }
+  try {
+    const log = await llmlog.recent(40);
+    const calls = (log && log.calls) || [];
+    const auth = calls.filter(c => !c.ok && /\b401\b|unauthor|user not found|invalid.*key|no auth/i.test(String(c.why || '')));
+    if (auth.length) {
+      out.llm = { rejecting: true, since: auth[auth.length - 1].at, why: auth[0].why || null, of: calls.length };
+      out.warnings.push('The model key is SET and being REJECTED: ' + auth.length + ' of the last '
+        + calls.length + ' calls came back unauthorised. Adding the key again will not help until the'
+        + ' deployment is rebuilt, because Vercel bakes environment variables in at build time.'
+        + ' Set it for Production, then redeploy.');
+    } else if (calls.length) {
+      const bad = calls.filter(c => !c.ok).length;
+      out.llm = { rejecting: false, calls: calls.length, failures: bad, healthy: bad === 0 };
+    } else {
+      /* Nothing logged reads very differently from everything succeeding. */
+      out.llm = { rejecting: false, calls: 0, silent: true };
+      if (out.config.OPENROUTER_API_KEY) out.warnings.push('A model key is set but no model call has been logged recently, so nothing is exercising it.');
+    }
+  } catch (e) { out.llm = { error: String(e.message || e).slice(0, 160) }; }
+
   if (!out.config.CRON_SECRET) out.warnings.push('No CRON_SECRET, so anyone who guesses a cron URL can trigger a paid sweep.');
   if (!kv.live) out.warnings.push('No Redis configured. Run: vercel install upstash');
 
