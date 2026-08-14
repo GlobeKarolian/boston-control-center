@@ -193,13 +193,49 @@ function forListening(t) {
   const out = {
     at: t.at,
     src: t.feed,
+    /* THREE NAMES FOR ONE THING, AND ALL THREE ARE LOAD-BEARING.
+     *
+     * This shape is read by the UI, by lib/analyst-core.js and by
+     * lib/severity.js, and each of them learned a different name for the feed
+     * before they were ever used together. On 14 August that cost the whole
+     * editorial layer, silently:
+     *
+     *   analyst-core.linesOf() writes '[' + t.source + '] ' in front of every
+     *   line the analyst reads. With only `src` set, every line the model saw
+     *   was tagged "[undefined]". It copied that into `feeds`, exactly as it
+     *   was told to. feedsHeard() looked "undefined" up, found nothing, and
+     *   dropped it, so every situation came back with feeds: [].
+     *
+     *   The analyst then selects a situation's own transmissions with
+     *   rows.filter(r => f.feeds.includes(r.feed)), which with an empty feeds
+     *   list matches nothing. So the severity floor was scoring every
+     *   situation over ZERO transmissions, every situation settled below 3,
+     *   and f.major was false for all of them, forever. Situations Mode could
+     *   not have shown a card if the city had burned down.
+     *
+     *   It also cost verification: with no transmissions of its own, each
+     *   claim was checked against the whole eighty-line batch, which is how
+     *   an unambiguous stabbing dispatch came back unsupported.
+     *
+     * So the feed goes out under every name its readers use. Cheap, and the
+     * alternative is this failure again the next time two files meet. */
+    source: t.feed,
+    feed: t.feed,
     text: t.text,
   };
   if (t.units && t.units.length) out.units = t.units;
   if (t.callType) out.callType = t.callType;
   if (t.address || t.matched) out.where = t.matched || t.address;
   if (t.tier) out.tier = t.tier;
-  if (t.signals && t.signals.length) out.signals = t.signals.map(s => s.id || s.label).filter(Boolean);
+  /* Signals stay as objects. Flattening them to id strings here meant
+     lib/severity.js read g.id and g.tier off a string and got undefined for
+     both, so GRAVE and HEAVY never matched and a mass-casualty signal scored
+     the same as a noise complaint. The string list is kept alongside for
+     anything that just wants labels. */
+  if (t.signals && t.signals.length) {
+    out.signals = t.signals;
+    out.signalIds = t.signals.map(x => (x && (x.id || x.label)) || x).filter(Boolean);
+  }
   if (t.clip) out.clip = t.clip;
   return out;
 }

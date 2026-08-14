@@ -135,9 +135,19 @@ function openStoriesBlock(sits) {
    signature is computed over. One copy, used by the cron, the work endpoint
    and the report endpoint, because two implementations of "the same lines"
    is how a signature stops matching itself. Oldest first. */
+/* The feed tag in front of every line, which the model is explicitly told to
+   copy into `feeds` and which is the only evidence anywhere about which
+   agency worked a scene. It read t.source alone, and the vault shape calls it
+   `src` and `feed`, so every line said "[undefined]" and every situation came
+   back with no feeds at all. Belt and braces now, and an unnamed feed says so
+   rather than saying "undefined", which the model would dutifully copy. */
+function feedTag(t) {
+  return String((t && (t.source || t.src || t.feed)) || 'unknown-feed');
+}
+
 function linesOf(tr) {
   return (tr || []).slice(0, 70).reverse()
-    .map(t => '[' + t.source + '] ' + t.text).join('\n');
+    .map(t => '[' + feedTag(t) + '] ' + t.text).join('\n');
 }
 
 function sigOf(lines) {
@@ -380,7 +390,7 @@ function fitToBudget(sits) {
 
 module.exports = {
   SIT_SCHEMA, SIT_FORMAT_LOCAL, ANALYST_SYSTEM, WRITE_BUDGET,
-  openStoriesBlock, linesOf, sigOf, feedsHeard, locate, clipMatcher,
+  openStoriesBlock, linesOf, sigOf, feedsHeard, feedTag, locate, clipMatcher,
   disposeReported, fitToBudget, hhmm, ungrounded, saidOnAir,
   GROUNDED, CONFIRM_SUFFIX, CONFIRM_WORD,
 };

@@ -88,7 +88,21 @@ const stream = require('../lib/stream.js');
      v.text && v.src && v.clip && v.where === '30 LANCASTER ST');
   ok('and not the provenance it could hallucinate about',
      v.lat === undefined && v.by === undefined && v.machine === undefined);
-  ok('signals arrive as plain ids', Array.isArray(v.signals) && v.signals[0] === 'stabbing');
+  /* Signals used to be flattened to id strings here. That looked tidy and it
+     cost the severity floor everything: lib/severity.js reads g.id and g.tier
+     off each signal, and off a string both are undefined, so GRAVE and HEAVY
+     never matched and a mass-casualty signal weighed the same as a noise
+     complaint. Objects out, with a flat list alongside for callers that only
+     want labels. The model never sees either field. */
+  ok('signals keep their id and tier so the floor can read them',
+     Array.isArray(v.signals) && v.signals[0].id === 'stabbing' && v.signals[0].tier === 3,
+     JSON.stringify(v.signals));
+  ok('and a flat id list is still available', Array.isArray(v.signalIds) && v.signalIds[0] === 'stabbing');
+  /* The feed goes out under every name its three readers use. analyst-core
+     reads t.source, the analyst filters on r.feed, the UI prints t.src. One
+     missing alias emptied every situation's transmission list all night. */
+  ok('the feed answers to src, source and feed',
+     v.src === 'boston-ems' && v.source === 'boston-ems' && v.feed === 'boston-ems');
 
   const d = stream.densityByFeed(first.rows);
   ok('density is counted per feed for the severity floor',
