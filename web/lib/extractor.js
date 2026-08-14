@@ -51,7 +51,11 @@ const KEY = () => (process.env.ANTHROPIC_API_KEY || '').trim();
    bad slug, a deprecation, or one provider's outage degrades to the second
    opinion instead of to regex. */
 const OR_KEY = () => (process.env.OPENROUTER_API_KEY || '').trim();
-const OR_MODEL = process.env.EXTRACT_MODEL_OR || 'deepseek/deepseek-v4-flash-0731';
+/* Ling first, DeepSeek second, decided by a stopwatch rather than a brand:
+   in live testing DeepSeek's flash burned the whole 20-second budget without
+   answering, and extraction is a labeling task a small plain model does fine.
+   The order swaps back with two env vars the day the measurements change. */
+const OR_MODEL = process.env.EXTRACT_MODEL_OR || 'inclusionai/ling-2.6-flash';
 /* The fallback is deliberately a PLAIN model. The whole flash tier went
    reasoning-first in mid-2026, and a reasoner given a small budget spends
    all of it thinking and returns empty content, which is exactly how the
@@ -59,7 +63,7 @@ const OR_MODEL = process.env.EXTRACT_MODEL_OR || 'deepseek/deepseek-v4-flash-073
    reasoning switched off below; the fallback is one of the few models with
    no reasoning to switch off, so the failure modes stay different, which is
    the entire point of having a fallback. */
-const OR_FALLBACK = process.env.EXTRACT_MODEL_OR2 || 'inclusionai/ling-2.6-flash';
+const OR_FALLBACK = process.env.EXTRACT_MODEL_OR2 || 'deepseek/deepseek-v4-flash-0731';
 
 /* The daily budget, learned the hard way: the account ran its whole credit
    balance dry in ten days and the board spent an evening on regex without
@@ -437,8 +441,13 @@ async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr) {
     if (!modelId) return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK, msg);
     throw new Error((priorErr ? priorErr + ' ; then ' : '') + msg);
   };
-  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
+  /* The timeout is a failure like any other. Unwrapped, an AbortError flew
+     past the fallback and landed the whole batch on regex, which is how a
+     slow primary silently cost the archive its call types. */
+  let r;
+  try {
+    r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
     headers: {
       'content-type': 'application/json',
       authorization: 'Bearer ' + OR_KEY(),
@@ -453,6 +462,7 @@ async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr) {
       max_tokens: 2000,
       temperature: 0,
       reasoning: { enabled: false, exclude: true },
+      provider: { sort: 'latency' },
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system',
@@ -461,8 +471,11 @@ async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr) {
         { role: 'user', content: contextBlock(prior) + 'Current transmission transcript:\n\n' + String(text).slice(0, 4000) },
       ],
     }),
-    signal: AbortSignal.timeout(timeoutMs),
-  });
+      signal: AbortSignal.timeout(timeoutMs),
+    });
+  } catch (e) {
+    return fail(String((e && e.name === 'TimeoutError') ? 'timeout after ' + timeoutMs + 'ms' : (e && e.message) || e));
+  }
   if (!r.ok) return fail('http ' + r.status + ' ' + (await r.text()).slice(0, 200));
   const j = await r.json();
   const msg = (((j.choices || [])[0] || {}).message || {});
