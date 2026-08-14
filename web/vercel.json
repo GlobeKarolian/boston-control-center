@@ -77,6 +77,14 @@
     {
       "source": "/stops-count.json",
       "destination": "/api/stops-count"
+    },
+    {
+      "source": "/briefing",
+      "destination": "/api/briefing"
+    },
+    {
+      "source": "/briefing.html",
+      "destination": "/api/briefing?format=html"
     }
   ],
   "functions": {
@@ -140,6 +148,9 @@
     },
     "api/desk-ask.js": {
       "maxDuration": 120
+    },
+    "api/briefing.js": {
+      "maxDuration": 300
     }
   },
   "crons": [
