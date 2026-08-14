@@ -33,6 +33,7 @@ WHISPER="${WHISPER:-$(command -v whisper-cli || true)}"
 # Order matters only in that every file is handed to one compile.
 SOURCES=(
   "$HERE/src/Model.swift"
+  "$HERE/src/SpeechPrompt.swift"
   "$HERE/src/Models.swift"
   "$HERE/src/Ollama.swift"
   "$HERE/src/MP3Framer.swift"

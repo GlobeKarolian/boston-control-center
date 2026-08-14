@@ -514,9 +514,10 @@ private extension Capture {
         let threads = max(2, min(8, cores - 2))
         let audioSeconds = Double(pcm.count - 44) / 32_000.0
         let began = Date()
-        let r = Capture.run(whisper.path,
-                            ["-m", model.path, "-f", wav.path, "-l", "en",
-                             "-t", "\(threads)", "-nt", "-np"])
+        var args = ["-m", model.path, "-f", wav.path, "-l", "en",
+                    "-t", "\(threads)", "-nt", "-np"]
+        if Capture.promptSupported { args += ["--prompt", SpeechPrompt.text] }
+        let r = Capture.run(whisper.path, args)
         let wall = Date().timeIntervalSince(began)
         /* Reported even when the run fails, because a failed run still spent
            the machine's time and the readout should say so. */
@@ -589,6 +590,19 @@ extension Capture {
             return (p.terminationStatus, String(data: data, encoding: .utf8) ?? "")
         }
     }
+
+    /* Does this build of whisper-cli take an initial prompt?
+
+       Asked once, by reading the binary's own help, because guessing wrong is
+       expensive in both directions: passing a flag an older build rejects
+       fails every transcription on the machine, and skipping it on a build
+       that supports it throws away the single cheapest accuracy win available
+       here. The answer is cached for the life of the process. */
+    static let promptSupported: Bool = {
+        guard let w = whisperBinary else { return false }
+        let h = run(w.path, ["--help"])
+        return h.out.contains("--prompt")
+    }()
 
     /// Loudness of a sixteen bit mono WAV, sampled rather than summed whole.
     static func rms(_ wav: Data) -> Double {
