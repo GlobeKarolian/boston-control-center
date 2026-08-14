@@ -121,9 +121,14 @@ function floor(ev) {
   const grave = [...ids].filter(i => GRAVE.has(i));
   const heavy = [...ids].filter(i => HEAVY.has(i));
 
-  if (grave.length) { s = 4; reasons.push('heard on the radio: ' + grave.join(', ')); }
-  else if (heavy.length) { s = 3; reasons.push('heard on the radio: ' + heavy.join(', ')); }
-  else if (topTier >= 3) { s = 3; reasons.push('a tier 3 signal in the transcripts'); }
+  /* `heard` is the part of the floor that came from words somebody actually
+     said, as opposed to the parts inferred from convergence, volume and
+     duration. The distinction is the whole of settle()'s new behaviour: a
+     model may talk down an inference, and may not talk down a transcript. */
+  let heard = 0;
+  if (grave.length) { s = 4; heard = 4; reasons.push('heard on the radio: ' + grave.join(', ')); }
+  else if (heavy.length) { s = 3; heard = 3; reasons.push('heard on the radio: ' + heavy.join(', ')); }
+  else if (topTier >= 3) { s = 3; heard = 3; reasons.push('a tier 3 signal in the transcripts'); }
   else if (topTier === 2) { s = 2; reasons.push('a tier 2 signal in the transcripts'); }
   else if (tx.length) { s = 1; }
 
@@ -148,6 +153,8 @@ function floor(ev) {
      structure fire behind a sleeping man in a U-Haul. */
   const fg = fireground(tx);
   if (fg.ops >= 2 && !fg.nothing) {
+    /* Crews working a fire is a thing that was said too, not a pattern. */
+    if (heard < 3) heard = 3;
     if (s < 3) { s = 3; reasons.push('fireground operations on ' + fg.ops + ' transmissions'); }
     else { s += 0.5; reasons.push('fireground operations on ' + fg.ops + ' transmissions'); }
     if (span >= 20) { s += 0.5; reasons.push('crews working it for ' + Math.round(span) + ' minutes'); }
@@ -175,7 +182,7 @@ function floor(ev) {
     reasons.push('nothing legible, but the radio is not quiet');
   }
 
-  return { score: clamp(Math.round(s * 2) / 2), reasons, signals: [...ids], agencies: feeds.length };
+  return { score: clamp(Math.round(s * 2) / 2), heard: clamp(heard), reasons, signals: [...ids], agencies: feeds.length };
 }
 
 /* The model's read, reconciled with the floor.
@@ -187,15 +194,39 @@ function floor(ev) {
    board is what the second one looks like. */
 function settle(fl, model) {
   const f = (fl && typeof fl.score === 'number') ? fl.score : 0;
+  /* What the radio said out loud, as opposed to what the pattern implied. */
+  const heard = (fl && typeof fl.heard === 'number') ? fl.heard : 0;
   const m = (model && typeof model.score === 'number') ? clamp(model.score) : null;
-  if (m === null) return { score: f, source: 'floor', capped: false, reasons: (fl && fl.reasons) || [] };
+  if (m === null) return { score: f, source: 'floor', capped: false, heardSaid: heard, reasons: (fl && fl.reasons) || [] };
 
   const ceiling = clamp(f + 1);
-  const score = clamp(Math.min(m, ceiling));
+  /* THE FLOOR HAS TO BE A FLOOR FOR THINGS THAT WERE SAID.
+   *
+   * This took Math.min alone, so a model calling a card ordinary erased
+   * whatever the floor found, and the analyst hands in 4 for a high-priority
+   * card and 2 for everything else. A stabbing dispatched to a Dunkin' Donuts
+   * with an EMS unit and a BPD unit on it scored 5 on the floor, the writer
+   * filed it as normal priority, and it settled at 2. Below the bar, never
+   * verified, never in Situations. The floor named it perfectly and had no
+   * power.
+   *
+   * Down stays free for inference. Convergence, volume, duration and the
+   * baseline are all patterns, and a model that reads the words and concludes
+   * a busy block was nothing is usually right.
+   *
+   * Down is NOT free for a transcript. When a signal in GRAVE or HEAVY was
+   * literally spoken, or crews were plainly working a fire, no read of the
+   * same words gets to take it under a story. That is the difference between
+   * an opinion about evidence and the evidence. */
+  const raw = clamp(Math.min(m, ceiling));
+  const score = clamp(Math.max(raw, heard));
   return {
     score,
     source: score === m ? 'model' : 'floor',
     capped: m > ceiling,
+    /* True when the model tried to talk down something the radio said. */
+    held: score > raw,
+    heardSaid: heard,
     /* Named so a person can see the disagreement rather than infer it. The
        Walden card would have read: model 5, floor 0, published at 1. */
     modelSaid: m,
@@ -203,7 +234,9 @@ function settle(fl, model) {
     reasons: (fl && fl.reasons) || [],
     why: m > ceiling
       ? 'the model called this a ' + m + ' and the evidence supports ' + f
-      : null,
+      : (score > raw
+        ? 'the model called this a ' + m + ' and the radio plainly said otherwise'
+        : null),
   };
 }
 

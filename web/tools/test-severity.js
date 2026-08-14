@@ -147,5 +147,61 @@ const SOUTH_STATION = {
   ok('and flags a scene somebody called nothing', sev.fireground(dud.tx).nothing === true);
 }
 
+/* --- the floor has to be a floor --------------------------------------- */
+{
+  const T = (t, f) => ({ text: t, feed: f, units: [], signals: [{ id: 'stabbing', tier: 3 }], tier: 3 });
+  const stabbing = {
+    tx: [
+      T('Stabbing to Dunkin Donuts, 510 South Hampton Street. 224-21.', 'boston-ems'),
+      T('Calling in now, stating that he was stabbed. Can you start EMS?', 'boston-police'),
+    ],
+    feeds: ['boston-ems', 'boston-police'], units: ['A21', 'C112'],
+    spanMin: 4, anomaly: { level: 'normal' },
+  };
+  const f = sev.floor(stabbing);
+  ok('a stabbing said out loud is marked as heard, not merely scored',
+     f.heard >= 3, 'heard=' + f.heard);
+
+  /* settle() took Math.min alone, and the analyst hands in 4 for a
+     high-priority card and 2 for everything else. So a stabbing with an EMS
+     unit and a BPD unit on it scored 5 on the floor, was filed normal, and
+     settled at 2: below the bar, never verified, never in Situations. The
+     floor named it perfectly and had no power. */
+  ok('a model calling it ordinary cannot take it under a story',
+     sev.settle(f, { score: 2 }).score >= 3, 'settled=' + sev.settle(f, { score: 2 }).score);
+  ok('nor can a model calling it nothing',
+     sev.settle(f, { score: 1 }).score >= 3);
+  ok('and the disagreement is on the record rather than inferred',
+     sev.settle(f, { score: 1 }).held === true);
+  ok('a model that agrees is left alone', sev.settle(f, { score: 4 }).score === 4);
+
+  /* Down stays free for inference. Convergence, volume and duration are
+     patterns, and a model that reads the words and concludes a busy block was
+     nothing is usually right. That is the Walden protection and it must not
+     have been weakened by any of this. */
+  const pattern = {
+    tx: [{ text: 'units checking the area, nothing further', feed: 'boston-police', units: [], signals: [] }],
+    feeds: ['boston-police', 'boston-ems', 'boston-fire'], units: ['A', 'B', 'C', 'D', 'E'],
+    spanMin: 50, anomaly: { level: 'high' },
+  };
+  const g = sev.floor(pattern);
+  ok('a floor built only from patterns records nothing as heard', g.heard === 0, 'heard=' + g.heard);
+  ok('so a model can still talk a pattern all the way down',
+     sev.settle(g, { score: 1 }).score === 1, 'settled=' + sev.settle(g, { score: 1 }).score);
+  ok('and the Walden cap still holds in the other direction',
+     sev.settle({ score: 0, heard: 0, reasons: [] }, { score: 5 }).score <= 1);
+
+  /* A fireground is something that was heard too. */
+  const fire = {
+    tx: [
+      { text: 'command to fire line, have it in command', feed: 'boston-fire', units: [], signals: [] },
+      { text: 'clearing ladders, first stream is 207', feed: 'boston-fire', units: [], signals: [] },
+    ],
+    feeds: ['boston-fire'], units: ['E3'], spanMin: 25, anomaly: { level: 'normal' },
+  };
+  ok('crews working a fire counts as heard, not inferred', sev.floor(fire).heard >= 3);
+  ok('so a fire cannot be talked down either', sev.settle(sev.floor(fire), { score: 2 }).score >= 3);
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
