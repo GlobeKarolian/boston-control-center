@@ -223,12 +223,31 @@ module.exports = async (req, res) => {
        ageOnly path, situations close on schedule, and nothing new is judged
        until midnight UTC. The response says so in words, because a budget
        that silences a system without saying why is how tonight happened. */
-    const CAP = Math.max(0, parseInt(process.env.ANALYST_DAILY_CAP || '40', 10) || 40);
+    /* The backstop, not the budget. This exists to stop a runaway, a cron that
+       misfires in a loop or a broken signature guard that calls the model on
+       every fire, from draining the account. It is NOT meant to be reached in
+       normal operation.
+
+       At the every-5-minute cadence in vercel.json the theoretical ceiling is
+       288 fires a day, and most of those are skipped by the signature guard
+       when nothing new was said. The old default of 40 was spent in about
+       three hours and then produced nothing for the next twenty, which is how
+       a newsroom tool showed an empty board through a whole news cycle. The
+       default is now set above the daily ceiling so ordinary days never touch
+       it, while a genuine loop firing thousands of times still trips it.
+
+       And the window is Eastern, not UTC. A budget that reset at midnight UTC
+       reset at 8pm Eastern, right as the evening cycle started, which is the
+       worst possible time to zero a counter. The key is the Eastern date so
+       the day the budget covers is the newsroom's day. */
+    const CAP = Math.max(0, parseInt(process.env.ANALYST_DAILY_CAP || '400', 10) || 400);
     try {
-      const dk = 'bcc:spend:analyst:' + new Date().toISOString().slice(0, 10).replace(/-/g, '');
+      const etDay = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+        .format(new Date()).replace(/-/g, '');
+      const dk = 'bcc:spend:analyst:' + etDay;
       const [used] = await kv.raw([['INCR', dk], ['EXPIRE', dk, 172800]], 5000);
       if (Number(used) > CAP) {
-        return await ageOnly('daily analyst budget spent (' + CAP + ' runs), aging only until midnight UTC',
+        return await ageOnly('analyst backstop tripped at ' + CAP + ' runs today, which should not happen in normal use; check for a cron loop. Aging only until midnight Eastern',
           { transcripts: tr.length });
       }
     } catch (e) { /* a broken meter must not silence a working radio */ }
