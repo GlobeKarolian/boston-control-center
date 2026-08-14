@@ -29,6 +29,7 @@ const { requireRead, json, harden } = require('../lib/http');
 const stream = require('../lib/stream');
 const vq = require('../lib/vault-query');
 const llm = require('../lib/llm');
+const trace = require('../lib/trace');
 
 /* How many transmissions the model is allowed to read. Enough to answer a
    question about a night, small enough to stay honest and cheap. */
@@ -249,10 +250,20 @@ module.exports = async (req, res) => {
       timeoutMs: 30000,
       role: 'desk-ask',
     });
+    /* The transmissions the answer is actually about, computed from what it
+       says rather than asked for. This is what makes the answer listenable:
+       "a footchase down Geneva Street at 05:12" becomes a play-in-order
+       control over the four transmissions that carry those words and that
+       time. An answer that traces to nothing gets no control, which is also
+       how a fabricated one announces itself. */
+    const answerText = String(answer || '');
+    const heard = trace.cited(answerText, picked.hit.concat(picked.context), { cap: 14 });
+
     return json(res, {
       ok: true,
       q,
-      answer: String(answer || '').slice(0, 1400),
+      answer: answerText.slice(0, 1400),
+      cited: { at: heard.at, clips: heard.clips, n: heard.n },
       window: { from: from.toISOString(), to: to.toISOString(), named: namedTime, label: namedTime ? f.when : 'the last ' + DEFAULT_HOURS + ' hours' },
       considered: rows.length,
       shown: tx.length,

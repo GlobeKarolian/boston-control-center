@@ -2,18 +2,11 @@
 //
 //   node tools/test-watch-trace.js
 //
-// A watch item on the desk panel is a play button. It has to point at the
-// right audio or not exist, because a play button pointed at the wrong
-// transmission is worse than no play button.
+// lib/trace.js turns prose back into transmissions, and everything it returns
+// becomes a play button. It has to point at the right audio or at nothing,
+// because a play button that lies teaches a reporter the panel lies.
 
-const path = require('path');
-const src = require('fs').readFileSync(path.join(__dirname, '../api/desk-read.js'), 'utf8');
-/* traceWatch is module-private on purpose; lift it out rather than widening
-   the endpoint's surface just to test it. */
-const traceWatch = new Function('WATCH_STOP_SRC', `
-  ${src.match(/const WATCH_STOP[\s\S]*?return hits\.slice\(0, 8\)[\s\S]*?\n}/)[0]}
-  return traceWatch;
-`)();
+const trace = require('../lib/trace.js');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {
@@ -22,33 +15,45 @@ const ok = (name, cond, detail) => {
 };
 
 const ROWS = [
-  { at: '2026-08-14T05:03:00Z', text: 'Report of a possible burglary in progress, 2565 Washington Street', clip: 'c1' },
-  { at: '2026-08-14T05:04:00Z', text: 'We have an alarm going off at 592 East 3rd Street, unknown type', clip: 'c2' },
-  { at: '2026-08-14T05:05:00Z', text: 'All set on Washington Street, we are clear', clip: 'c3' },
-  { at: '2026-08-14T05:06:00Z', text: 'Yeah, thanks. Have a good night.', clip: 'c4' },
-  { at: '2026-08-14T05:07:00Z', text: '2565 Washington, units on scene, nothing showing', clip: 'c5' },
+  { at: '2026-08-14T05:09:00Z', text: 'At the Four Corners Geneva area, four Hispanic males, one went into the building', clip: 'c1' },
+  { at: '2026-08-14T05:12:00Z', text: 'Footchase down Geneva Street toward the back of the apartment building on Columbia', clip: 'c2' },
+  { at: '2026-08-14T05:13:00Z', text: 'Units responding to 405 Geneva', clip: 'c3' },
+  { at: '2026-08-14T05:21:00Z', text: 'So if I can swing by 7-Eleven and see if this employee wants to file a report', clip: 'c4' },
+  { at: '2026-08-14T05:20:00Z', text: 'Daniel, it is 22, Boston, 240 Mount Vernon Street on Lobby Hill 2', clip: 'c5' },
+  { at: '2026-08-14T04:03:00Z', text: 'Report of a possible burglary in progress, 2565 Washington Street', clip: 'c6' },
+  { at: '2026-08-14T04:04:00Z', text: 'We have an alarm going off at 592 East 3rd Street, unknown type', clip: 'c7' },
 ];
 
-const burg = traceWatch('possible burglary at 2565 Washington Street', ROWS);
-ok('a street number finds its transmissions', burg.length === 2, 'n=' + burg.length);
-ok('and only the ones carrying that number',
-   burg.every(r => /2565/.test(r.text)), burg.map(r => r.text).join(' | '));
-ok('in the order they were said', burg[0].at < burg[1].at);
+/* The real answer from the desk on 14 August, verbatim. */
+const ANSWER = 'At 05:12Z Boston Police reported a footchase down Geneva Street toward '
+  + 'the back of the apartment building on Columbia, units responding to 405 Geneva. '
+  + 'At 05:09Z at the Four Corners/Geneva area, an officer observed four Hispanic males; '
+  + 'one went into the building and through the backyard into the basement door.';
 
-const alarm = traceWatch('alarm going off at 592 East 3rd Street', ROWS);
-ok('a second item finds its own', alarm.length === 1 && /592/.test(alarm[0].text));
+const cited = trace.cited(ANSWER, ROWS);
+ok('an answer finds the transmissions it describes', cited.n >= 3, 'n=' + cited.n);
+ok('including the two it cited by clock time',
+   cited.at.includes('2026-08-14T05:12:00Z') && cited.at.includes('2026-08-14T05:09:00Z'),
+   JSON.stringify(cited.at));
+ok('and the street number it named', cited.at.includes('2026-08-14T05:13:00Z'));
+ok('the 7-Eleven call is not part of it', !cited.at.includes('2026-08-14T05:21:00Z'));
+ok('nor is the unrelated Mount Vernon run', !cited.at.includes('2026-08-14T05:20:00Z'));
+ok('nor the burglary an hour earlier', !cited.at.includes('2026-08-14T04:03:00Z'));
+ok('it comes back in the order it was said',
+   cited.at.every((a, i, arr) => i === 0 || arr[i - 1] <= a), JSON.stringify(cited.at));
+ok('and it carries audio', cited.clips.length === cited.n);
 
-/* The case that matters most: the model made something up. */
-const ghost = traceWatch('active shooter at 81 Walden Street', ROWS);
-ok('an untraceable claim gets no audio', ghost.length === 0, 'n=' + ghost.length);
+/* Watch items, the other caller. */
+const burg = trace.toTransmissions('possible burglary at 2565 Washington Street', ROWS);
+ok('a street number alone is a citation', burg.length === 1 && /2565/.test(burg[0].text));
 
-const vague = traceWatch('some kind of situation', ROWS);
-ok('a vague item gets no audio either', vague.length === 0, 'n=' + vague.length);
-
-/* "Washington Street" alone is in three of five rows: common words must not
-   masquerade as a citation. */
-const common = traceWatch('something on Street', ROWS);
-ok('a single common word is not a citation', common.length === 0, 'n=' + common.length);
+/* The failures that matter. */
+ok('a fabricated claim traces to nothing',
+   trace.toTransmissions('active shooter at 81 Walden Street', ROWS).length === 0);
+ok('a vague claim traces to nothing',
+   trace.toTransmissions('some kind of situation downtown', ROWS).length === 0);
+ok('a single echoed word is not a citation',
+   trace.toTransmissions('something about a building', ROWS).length === 0);
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

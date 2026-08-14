@@ -802,6 +802,13 @@
   .dp-answer .a{border-left:2px solid #2f6f4f;background:rgba(47,111,79,.10);
     padding:9px 11px;border-radius:0 7px 7px 0;margin:6px 0 2px}
   .dp-answer .src{font-size:11px;color:#6d7488;font-family:var(--mono);padding:3px 0 6px}
+  .a-hear{display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap}
+  .a-chain{font:inherit;font-size:12px;background:rgba(47,111,79,.2);border:1px solid #2f6f4f;
+    color:#9fe3bd;border-radius:7px;padding:5px 12px;cursor:pointer}
+  .a-chain:hover{background:rgba(47,111,79,.34)}
+  .a-only{font:inherit;font-size:11.5px;background:transparent;border:0;color:#7c8598;cursor:pointer;padding:0}
+  .a-only:hover{color:#cfd6e4}
+  .a-none{margin-top:8px;font-size:11.5px;color:#c8b56a}
   .dp-read{padding:12px 13px;font-size:13.5px;line-height:1.5;color:#e7ebf2}
   .dp-read.quiet{color:#9aa3b5}
   .dp-watch{margin-top:8px;font-size:12px;color:#9fe3bd;line-height:1.9}
@@ -2971,6 +2978,9 @@ function deskPanel(){ return document.getElementById('deskPanel'); }
 /* The watch items from the last read, so a click can find their
    transmissions without asking the server again. */
 let DESK_WATCH=[];
+/* The transmissions the last answer was traced to, so "show just these" can
+   narrow the list without another request. */
+let DESK_CITED={};
 
 /* Narrow the list to one watch item and offer to play it straight through. */
 function deskFocus(i){
@@ -3083,7 +3093,24 @@ async function deskAsk(q){
       headers:{'content-type':'application/json'},body:JSON.stringify({q:q})});
     const d=await r.json();
     if(!d.ok){ ans.innerHTML='<div class="a">'+esc(d.why||'that did not work')+'</div>'; return; }
-    ans.innerHTML='<div class="a">'+esc(d.answer||('No answer this time'+(d.why?': '+d.why:'')+'. The transmissions it looked at are below.'))+'</div>'
+    /* The answer, and directly under it a control that plays the transmissions
+       it was built from. This is the whole point of the panel: a sentence a
+       reporter cannot hear is a sentence they have to take on faith, and
+       nothing in this system has earned that. An answer that traced to
+       nothing gets no button, which is also how a fabricated one shows
+       itself. */
+    const cited=d.cited||{};
+    const chain=(cited.clips||[]).filter(function(u){ return u&&window.BCCClips&&BCCClips.ok(u); });
+    DESK_CITED=cited;
+    ans.innerHTML='<div class="a">'+esc(d.answer||('No answer this time'+(d.why?': '+d.why:'')+'. The transmissions it looked at are below.'))
+      +(chain.length
+        ? '<div class="a-hear">'
+          +'<button class="dchain a-chain" data-chain="'+esc(JSON.stringify(chain))
+          +'" title="Play the transmissions this answer was built from, in order">'
+          +'&#9654; hear this incident ('+chain.length+')</button>'
+          +'<button class="a-only" id="dpOnly">show just these</button></div>'
+        : (d.answer?'<div class="a-none">No transmission in the window could be tied to this answer, so there is nothing to play.</div>':''))
+      +'</div>'
       +'<div class="src">read '+d.shown+' of '+d.considered+' transmissions'
       +(d.matched!=null?' \u00b7 '+d.matched+' matched the question':'')
       +' \u00b7 '+esc((d.window&&d.window.label)||'')
@@ -3123,9 +3150,16 @@ function deskToggle(force){
     const panel=document.getElementById('deskPanel');
     if(panel)panel.addEventListener('click',function(e){
       const c=e.target&&e.target.closest&&e.target.closest('.w-chip');
-      if(!c)return;
-      e.preventDefault();
-      deskFocus(+c.getAttribute('data-w'));
+      if(c){ e.preventDefault(); deskFocus(+c.getAttribute('data-w')); return; }
+      const only=e.target&&e.target.closest&&e.target.closest('#dpOnly');
+      if(only){
+        e.preventDefault();
+        const times=new Set((DESK_CITED&&DESK_CITED.at)||[]);
+        const rows=(DESK_TX||[]).filter(function(t){ return times.has(t.at); });
+        deskPaintTx(rows);
+        const meta=document.getElementById('dpMeta');
+        if(meta)meta.textContent=rows.length+' transmission'+(rows.length===1?'':'s')+' behind that answer';
+      }
     });
     const form=document.getElementById('dpAskForm');
     if(form)form.onsubmit=function(e){ e.preventDefault(); deskAsk((document.getElementById('dpAsk')||{}).value); };
