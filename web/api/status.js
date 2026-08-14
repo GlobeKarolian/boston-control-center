@@ -81,6 +81,30 @@ module.exports = async (req, res) => {
   } else if (!out.config.OPENROUTER_API_KEY) {
     out.warnings.push('No OPENROUTER_API_KEY. Extraction, the desk read, the ask box and the verifier all route through OpenRouter.');
   }
+  /* Why the editorial layer is empty, which has never had a surface.
+     Situations come only from api/cron/analyst.js, and that cron has three
+     configuration gates it can fail silently: no ANTHROPIC_API_KEY, a local
+     analyst still holding the lease, and ANALYST_CLOUD unset. In every one of
+     those cases the board keeps aging, the rail says 'Nothing major right
+     now', and nothing anywhere says that nothing is being judged. */
+  try {
+    const raw = await kv.get('bcc:analyst:last');
+    const a = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+    if (a) {
+      out.analyst = a;
+      const stale = Date.now() - Date.parse(a.at || 0) > 30 * 60000;
+      if (a.ran === false && a.why) {
+        out.warnings.push('Nothing is judging the radio: the analyst last run was skipped because ' + a.why
+          + '. Situations will stay empty until that is fixed.');
+      } else if (stale) {
+        out.warnings.push('The analyst has not run in over 30 minutes, so the Situations board is only aging.');
+      }
+    } else {
+      out.analyst = null;
+      out.warnings.push('The analyst has never reported a run, so nothing is producing Situations.');
+    }
+  } catch (e) { out.analyst = { error: String(e.message || e).slice(0, 160) }; }
+
   try {
     const log = await llmlog.recent(40);
     const calls = (log && log.calls) || [];

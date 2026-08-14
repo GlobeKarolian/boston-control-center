@@ -3377,37 +3377,60 @@ function wireModes(){
   set(SIT_MODE);
 }
 
-/* An empty Situations rail has two causes that look identical and mean
-   opposite things.
+/* An empty Situations rail is the least informative thing this app can show,
+   and until now it said the same sentence for causes that mean opposite
+   things.
 
-   One is a quiet night: the verifier ran, weighed what came across, and
-   nothing earned promotion. That is the system working, and "nothing has
-   cleared the bar" is the correct thing to say.
+   A quiet night is one of them, and it is the rare one. The others are all
+   configuration, and in every one of them nothing is being judged at all:
 
-   The other is that nothing is being weighed at all. lib/verify.js holds any
-   claim a second model did not stand up, and it holds rather than promotes
-   when the model is unreachable, because silence is not consent. When the
-   OpenRouter key is dead every card is held, the rail empties, and the
-   sentence on screen still reads like a quiet night. On the morning of the
-   14th the key had been rotated in the dashboard and not in production and
-   the board looked exactly as healthy as it had an hour earlier.
+     api/cron/analyst.js is the only thing that writes Situations, and it is
+     the one judgment in this system that never moved to OpenRouter. It calls
+     api.anthropic.com directly, so a perfectly healthy OpenRouter key and a
+     busy model activity log tell you nothing about whether the board is
+     alive. On the 14th the log was full of extract and desk-read calls, and
+     there was not one analyst or verify call in it, because the analyst had
+     never started.
 
-   So the rail says which of the two it is. An editor reading "nothing is
-   being verified" behaves completely differently from one reading "nothing
-   qualified", and the difference is the whole value of the panel. */
-function sitEmptyMajor(all){
+     It also stands down when a local analyst on the Mac has reported in the
+     last ten minutes, and it refuses to run at all unless ANALYST_CLOUD=1.
+     Either of those leaves a board that ages correctly and never fills.
+
+   So the rail asks /api/status, which now carries the analyst's own last
+   words, and prints them. Only when the list is empty, and at most once a
+   minute, because this is a rare state and not worth a poll. */
+let SIT_WHY=null, SIT_WHY_AT=0;
+function sitWhyRefresh(){
+  const now=Date.now();
+  if(now-SIT_WHY_AT<60000)return;
+  SIT_WHY_AT=now;
+  fetch('./api/status',{credentials:'include',cache:'no-store'})
+    .then(r=>r.ok?r.json():null)
+    .then(d=>{
+      if(!d)return;
+      const a=d.analyst;
+      const next=(a&&a.ran===false&&a.why)?a.why:null;
+      if(next!==SIT_WHY){SIT_WHY=next;paintSits();}
+    }).catch(()=>{});
+}
+
+function sitEmptyText(all){
+  sitWhyRefresh();
+  if(SIT_WHY){
+    return '<b>Nothing is judging the radio.</b><br>'
+      +'The analyst is not running: '+esc(SIT_WHY)+'<br>'
+      +'This is not a quiet night. Transmissions are still being recorded and '
+      +'searchable in Archive, but no Situations will be written until this is fixed.';
+  }
   const n=(all||[]).length;
   const held=(all||[]).filter(function(s){return s&&s.held;}).length;
-  /* Everything on the board held, and enough of it that this is a stuck
-     verifier rather than three genuinely marginal calls. */
-  if(n>=3&&held===n){
-    return '<b>Nothing is being verified right now.</b><br>'
-      +'All '+n+' stories are held because the second model could not be reached, '
-      +'so none of them can clear the bar. This is not a quiet night. '
-      +'Check LLM activity in <b>Under The Hood</b>, then switch to Everything '
-      +'to see what is actually coming across.';
+  if(SIT_MODE==='major'&&n>=3&&held===n){
+    return '<b>Nothing has been verified.</b><br>All '+n+' stories are held because '
+      +'a second model could not stand any of them up. Switch to Everything to see them.';
   }
-  return 'Nothing has cleared the bar. Switch to Everything to see what the desk editor is chewing on.';
+  return SIT_MODE==='major'
+    ? 'Nothing has cleared the bar. Switch to Everything to see what the desk editor is chewing on.'
+    : 'Nothing major right now. Watching&hellip;';
 }
 
 function paintSits(){
@@ -3435,7 +3458,7 @@ function paintSits(){
   const keep=roveKeep();
   el.classList.toggle('arming',!!sitState.merge);
   if(!list.length)el.innerHTML='<div class="empty">'
-    +(SIT_MODE==='major' ? sitEmptyMajor(all) : 'Nothing major right now. Watching&hellip;')+'</div>';
+    +sitEmptyText(all)+'</div>';
   else el.innerHTML=list.map(s=>sitCard(s)).join('');
   el.scrollTop=top;
   keep();

@@ -38,6 +38,15 @@ const severity = require('../../lib/severity');
 const verify = require('../../lib/verify');
 const baseline = require('../../lib/baseline');
 
+/* The last thing this cron did, where a person can see it. Never throws: a
+   broken note must not break the run it is describing. */
+const LAST_RUN = 'bcc:analyst:last';
+async function noteRun(o) {
+  try {
+    await kv.set(LAST_RUN, JSON.stringify(Object.assign({ at: new Date().toISOString() }, o)), 26 * 3600);
+  } catch (e) {}
+}
+
 const ANALYST_MODEL = process.env.ANALYST_MODEL || 'claude-sonnet-5';
 
 // One analyst run at a time. Two crons overlapping would double the model
@@ -110,6 +119,14 @@ module.exports = async (req, res) => {
       const body = JSON.stringify(r.situations);
       let aged = false;
       if (body !== JSON.stringify(prev)) { await writeBoard(r.situations); aged = true; }
+      /* On the record, because an empty Situations rail and a rail that is
+         empty for a reason look identical from the outside, and this endpoint
+         has been telling nobody but the cron log for its whole life. Three of
+         these skips are configuration, not weather: no ANTHROPIC_API_KEY, a
+         local analyst holding the lease, and ANALYST_CLOUD unset. Any one of
+         them means nothing is being judged at all, and the board says
+         'Nothing major right now' the entire time. */
+      await noteRun({ ran: false, why: why, situations: r.situations.length });
       return json(res, Object.assign({
         skipped: why, situations: r.situations.length,
         closed: r.situations.filter(s => s.status === 'closed').length,
@@ -117,8 +134,13 @@ module.exports = async (req, res) => {
       }, extra || {}));
     };
 
+    /* The analyst is the one judgment in this system that never moved to
+       OpenRouter: it still calls api.anthropic.com directly. So Situations
+       depends on a completely different credential from extraction, the desk
+       read, the ask box and the verifier, and a project with a perfectly
+       healthy OpenRouter key can still have an empty board. */
     const key = (process.env.ANTHROPIC_API_KEY || '').trim();
-    if (!key) return await ageOnly('no ANTHROPIC_API_KEY');
+    if (!key) return await ageOnly('no ANTHROPIC_API_KEY, so nothing is being judged and Situations cannot fill');
     if (tr.length < 3) return await ageOnly('not enough traffic', { transcripts: tr.length });
 
     /* THE LISTENER'S INPUT.
@@ -172,7 +194,7 @@ module.exports = async (req, res) => {
       });
     }
     if (process.env.ANALYST_CLOUD !== '1') {
-      return await ageOnly('cloud analyst disabled: the local model owns judgment (set ANALYST_CLOUD=1 to allow cloud fallback)', {
+      return await ageOnly('cloud analyst disabled and no local analyst has reported in 10 minutes, so nothing is judging the radio (set ANALYST_CLOUD=1)', {
         transcripts: tr.length,
       });
     }
@@ -300,6 +322,7 @@ module.exports = async (req, res) => {
     if (streamed && streamed.cursor) { try { await kv.set(CURSOR, streamed.cursor, 24 * 3600); } catch (e) {} }
 
     const out = result.situations;
+    await noteRun({ ran: true, why: null, situations: out.length, model: ANALYST_MODEL });
     return json(res, {
       ok: true, model: ANALYST_MODEL,
       situations: out.length,
