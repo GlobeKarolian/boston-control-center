@@ -39,6 +39,21 @@
 const MODEL = process.env.EXTRACT_MODEL || 'claude-haiku-4-5';
 const KEY = () => (process.env.ANTHROPIC_API_KEY || '').trim();
 
+/* OpenRouter is the model layer now. One key, one bill, one dashboard where
+   the spend cap lives, and the model behind any role is a config change
+   rather than a code change. When OPENROUTER_API_KEY is set it takes
+   priority; the Anthropic path below survives untouched as the fallback for
+   a key-less deploy, and regex remains the floor under everything.
+
+   Two model slots, because a gateway with one model is a single point of
+   wrong: the primary is the cheap flash tier that handles structured
+   extraction fine, and the fallback is a different family entirely, so a
+   bad slug, a deprecation, or one provider's outage degrades to the second
+   opinion instead of to regex. */
+const OR_KEY = () => (process.env.OPENROUTER_API_KEY || '').trim();
+const OR_MODEL = process.env.EXTRACT_MODEL_OR || 'deepseek/deepseek-v4-flash-0731';
+const OR_FALLBACK = process.env.EXTRACT_MODEL_OR2 || 'qwen/qwen3.7-flash-20260727';
+
 /* The daily budget, learned the hard way: the account ran its whole credit
    balance dry in ten days and the board spent an evening on regex without
    anyone deciding that. The editor's ceiling is $100 a month for everything,
@@ -401,6 +416,55 @@ async function callAnthropic(text, timeoutMs, prior) {
   return mapFields(use.input, 'cloud', text);
 }
 
+/* The same extraction through OpenRouter's OpenAI-shaped endpoint. No tool
+   forcing here: the schema rides in the prompt and the reply is constrained
+   to a JSON object, which the flash tier honors reliably and mapFields
+   validates anyway, so a model that drifts off schema produces a retry and
+   then a regex row, never a corrupt one. A failed primary retries once on
+   the fallback model before giving up, so one dead slug or one provider
+   outage costs latency, not the batch. */
+async function callOpenRouter(text, timeoutMs, prior, modelId) {
+  const model = modelId || OR_MODEL;
+  const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: 'Bearer ' + OR_KEY(),
+      'http-referer': 'https://www.scan.boston',
+      'x-title': 'Boston Newsroom Control Center',
+    },
+    body: JSON.stringify({
+      model,
+      max_tokens: 512,
+      temperature: 0,
+      response_format: { type: 'json_object' },
+      messages: [
+        { role: 'system',
+          content: SYSTEM + '\n\nReply with ONLY one JSON object, no prose, no code fences, '
+            + 'matching this JSON Schema:\n' + JSON.stringify(SCHEMA) },
+        { role: 'user', content: contextBlock(prior) + 'Current transmission transcript:\n\n' + String(text).slice(0, 4000) },
+      ],
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
+  });
+  if (!r.ok) {
+    const body = (await r.text()).slice(0, 200);
+    if (!modelId && (r.status === 404 || r.status === 400 || /model/i.test(body))) {
+      return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK);
+    }
+    throw new Error('openrouter ' + model + ' ' + r.status + ' ' + body);
+  }
+  const j = await r.json();
+  let raw = String((((j.choices || [])[0] || {}).message || {}).content || '').trim();
+  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  let obj;
+  try { obj = JSON.parse(raw); } catch (e) {
+    if (!modelId) return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK);
+    throw new Error('openrouter ' + model + ': unparseable reply ' + raw.slice(0, 120));
+  }
+  return mapFields(obj, 'cloud', text);
+}
+
 // Extract a whole batch. Runs concurrently, but the first failure trips a
 // breaker shared by the rest of THIS batch so a dead API costs one timeout
 // instead of one per item.
@@ -425,9 +489,9 @@ async function extractBatch(items, { concurrency = 6, timeoutMs = 20000, priorBy
     if (isNoise(rows[i].text)) { out[i] = { ...regexExtract(rows[i].text), noise: true, _by: 'noise' }; skipped++; }
   }
 
-  if (!KEY()) {
+  if (!OR_KEY() && !KEY()) {
     for (let i = 0; i < rows.length; i++) if (!out[i]) out[i] = regexExtract(texts[i]);
-    return { results: out, by: 'regex', errors: ['ANTHROPIC_API_KEY not set'], skipped };
+    return { results: out, by: 'regex', errors: ['no OPENROUTER_API_KEY or ANTHROPIC_API_KEY set'], skipped };
   }
 
   /* The budget rung. Ask the meter for this batch's allowance in one round
@@ -451,7 +515,7 @@ async function extractBatch(items, { concurrency = 6, timeoutMs = 20000, priorBy
       allow--;
       const prior = priorFor(src);
       try {
-        out[i] = await callAnthropic(text, timeoutMs, prior);
+        out[i] = await (OR_KEY() ? callOpenRouter : callAnthropic)(text, timeoutMs, prior);
       } catch (e) {
         down = true;
         if (errors.length < 3) errors.push(String(e.message || e).slice(0, 200));
