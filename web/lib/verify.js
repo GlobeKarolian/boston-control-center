@@ -94,6 +94,7 @@ async function check(claim, batch, opts = {}) {
         user,
         maxTokens: 500,
         timeoutMs: opts.timeoutMs || 20000,
+        role: 'verify',
         model,
       });
       return {

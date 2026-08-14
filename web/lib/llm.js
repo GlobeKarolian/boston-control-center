@@ -16,6 +16,8 @@
 
 'use strict';
 
+const llmlog = require('./llmlog');
+
 const KEY = () => (process.env.OPENROUTER_API_KEY || '').trim();
 const PRIMARY = process.env.LLM_MODEL || 'inclusionai/ling-2.6-flash';
 const FALLBACK = process.env.LLM_MODEL2 || 'deepseek/deepseek-v4-flash-0731';
@@ -25,12 +27,18 @@ function enabled() { return !!KEY(); }
 /* One chat turn. Returns the assistant's text, or throws with both models'
    stories attached so a failure names what actually happened rather than
    whichever half was noticed last. */
-async function chat({ system, user, maxTokens = 700, json = false, timeoutMs = 20000 }, modelId, priorErr) {
-  if (!KEY()) throw new Error('OPENROUTER_API_KEY not set');
-  const model = modelId || PRIMARY;
+async function chat(opts, modelId, priorErr) {
+  const { system, user, maxTokens = 700, json = false, timeoutMs = 20000, role = 'chat' } = opts || {};
+  if (!KEY()) {
+    llmlog.record(role, { model: modelId || PRIMARY, ms: 0, ok: false, why: 'OPENROUTER_API_KEY not set' });
+    throw new Error('OPENROUTER_API_KEY not set');
+  }
+  const model = modelId || opts.model || PRIMARY;
+  const began = Date.now();
   const fail = (why) => {
     const msg = 'openrouter ' + model + ': ' + why;
-    if (!modelId) return chat({ system, user, maxTokens, json, timeoutMs }, FALLBACK, msg);
+    llmlog.record(role, { model, ms: Date.now() - began, ok: false, why });
+    if (!modelId) return chat(opts, FALLBACK, msg);
     throw new Error((priorErr ? priorErr + ' ; then ' : '') + msg);
   };
 
@@ -69,6 +77,9 @@ async function chat({ system, user, maxTokens = 700, json = false, timeoutMs = 2
   if (Array.isArray(out)) out = out.map(p => (p && (p.text || p.content)) || '').join('');
   out = String(out || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   if (!out) return fail('empty content (finish: ' + ((j.choices || [])[0] || {}).finish_reason + ')');
+  const u = j.usage || {};
+  llmlog.record(role, { model, ms: Date.now() - began, ok: true,
+    inTok: u.prompt_tokens, outTok: u.completion_tokens });
   return out;
 }
 

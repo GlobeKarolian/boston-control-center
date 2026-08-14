@@ -50,6 +50,7 @@ const KEY = () => (process.env.ANTHROPIC_API_KEY || '').trim();
    extraction fine, and the fallback is a different family entirely, so a
    bad slug, a deprecation, or one provider's outage degrades to the second
    opinion instead of to regex. */
+const llmlog = require('./llmlog');
 const OR_KEY = () => (process.env.OPENROUTER_API_KEY || '').trim();
 /* Ling first, DeepSeek second, decided by a stopwatch rather than a brand:
    in live testing DeepSeek's flash burned the whole 20-second budget without
@@ -436,8 +437,10 @@ async function callAnthropic(text, timeoutMs, prior) {
    outage costs latency, not the batch. */
 async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr) {
   const model = modelId || OR_MODEL;
+  const began = Date.now();
   const fail = (why) => {
     const msg = 'openrouter ' + model + ': ' + why;
+    llmlog.record('extract', { model, ms: Date.now() - began, ok: false, why });
     if (!modelId) return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK, msg);
     throw new Error((priorErr ? priorErr + ' ; then ' : '') + msg);
   };
@@ -485,6 +488,9 @@ async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr) {
   if (!raw) return fail('empty content (finish: ' + ((j.choices || [])[0] || {}).finish_reason + ')');
   let obj;
   try { obj = JSON.parse(raw); } catch (e) { return fail('unparseable reply ' + raw.slice(0, 120)); }
+  const u = j.usage || {};
+  llmlog.record('extract', { model, ms: Date.now() - began, ok: true,
+    inTok: u.prompt_tokens, outTok: u.completion_tokens });
   return mapFields(obj, 'cloud', text);
 }
 

@@ -769,6 +769,14 @@
   .sit.armed{background:rgba(192,124,255,.14);outline:1px dashed #c07cff;outline-offset:-2px}
   .sit.target:hover,.sit.target:focus{background:rgba(143,182,255,.12);outline:1px solid #8fb6ff;outline-offset:-2px}
   #situations.arming .sit{cursor:copy}
+  .llm-row{display:flex;gap:9px;align-items:baseline;padding:3px 0;font-size:11.5px;font-family:var(--mono)}
+  .llm-row .r{flex:0 0 92px;color:#9aa3b5}
+  .llm-row .m{flex:1 1 auto;color:#5f8fbf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .llm-row .d{flex:0 0 54px;text-align:right;color:#6d7488}
+  .llm-row.bad .r{color:#e8a9a9}
+  .llm-why{font-size:11px;color:#e8a9a9;padding:0 0 4px 101px;font-family:var(--mono);word-break:break-word}
+  .llm-ok{color:#9fe3bd}
+  .llm-bad{color:#e8a9a9}
   #bezos{cursor:pointer}
   #bezos:hover{border-color:#2f6f4f}
   #deskPanel{position:fixed;right:14px;bottom:212px;z-index:1101;width:min(430px,calc(100vw - 28px));
@@ -1410,6 +1418,15 @@
       <div class="be-feeds" id="beFeeds"><div class="be-idle">connecting&hellip;</div></div>
       <div class="be-h">Throughput</div>
       <div class="be-grid" id="beStats"></div>
+      <!-- Model activity. Tonight a rotated OpenRouter key took extraction,
+           verification and the desk read offline at once, and every surface on
+           the board looked exactly as healthy as it had an hour before. A
+           dependency you cannot watch is a dependency that fails silently, so
+           every model call is on the record here: what it was for, which
+           model, how long, and what it said when it failed. -->
+      <div class="be-h">Models<span id="llmState" style="text-transform:none;letter-spacing:0"></span></div>
+      <div class="be-grid" id="llmStats"></div>
+      <div id="llmCalls"><div class="be-idle">reading the model log&hellip;</div></div>
       <div class="be-h">Live pipeline<span id="beExtractor" style="color:var(--text-dim);text-transform:none;letter-spacing:0"></span></div>
       <div id="beEvents"><div class="be-idle">Waiting for the first transmission&hellip;</div></div>
     </div>
@@ -2543,7 +2560,8 @@ function roleBadge(role){ return (role==='dispatch'||role==='field') ? '<span cl
 /* Tab switch. Each non-map view is a fixed overlay that shows on .show, and
    each one polls only while it is the visible tab, so a newsroom leaving the
    map up all night pays for the map alone. */
-const VIEWS={ stops:{el:'stopsview',poll:()=>pollStops()}, backend:{el:'backend',poll:()=>pollPipeline()},
+const VIEWS={ stops:{el:'stopsview',poll:()=>pollStops()},
+  backend:{el:'backend',poll:()=>{ pollPipeline(); llmWatch(true); },stop:()=>llmWatch(false)},
   desk:{el:'deskview',poll:()=>deskPaint()}, story:{el:'storyview',poll:()=>deskPaint()},
   /* The archive opens on whatever was last asked and otherwise on nothing. It
      runs no timer: this is the one surface here that answers a question rather
@@ -2846,6 +2864,55 @@ async function pollPipeline(){
         '<div class="be-ev-st"><div class="sk">Incident</div><div class="sv">'+incHtml+'</div></div>'+
       '</div></div>';
   }).join('');
+}
+
+/* Model activity for Under The Hood. Polls only while that tab is showing,
+   because a debugging surface should not cost anything when nobody is
+   debugging. The question it exists to answer in one glance is whether the
+   models are running at all: silence and success look identical in a list of
+   zero failures, so "configured" and "silent" are stated outright. */
+async function paintLLM(){
+  const state=document.getElementById('llmState');
+  const stats=document.getElementById('llmStats');
+  const calls=document.getElementById('llmCalls');
+  if(!state||!stats||!calls)return;
+  try{
+    const d=await (await fetch('./api/llm-activity?limit=40',{credentials:'include'})).json();
+    if(!d.ok){ state.innerHTML=' <span class="llm-bad">'+esc(d.why||'unavailable')+'</span>'; return; }
+    const c=d.configured||{}, sm=d.summary||{};
+    if(!c.openrouter){
+      state.innerHTML=' <span class="llm-bad">no OPENROUTER_API_KEY \u2014 everything is falling back to regex</span>';
+    } else if(sm.silent){
+      state.innerHTML=' <span class="llm-bad">key present, but no model call has been logged \u2014 nothing is running</span>';
+    } else if(sm.failures){
+      state.innerHTML=' <span class="llm-bad">'+sm.failures+' of '+sm.calls+' calls failing</span>';
+    } else {
+      state.innerHTML=' <span class="llm-ok">'+sm.calls+' calls, all good</span>';
+    }
+    const cells=[];
+    for(const role in (sm.byRole||{})){
+      const r=sm.byRole[role];
+      cells.push('<div class="be-cell"><div class="be-k">'+esc(role)+'</div><div class="be-v">'
+        +r.n+(r.fail?' <span class="llm-bad">('+r.fail+' failed)</span>':'')
+        +'</div><div class="be-k">'+r.avgMs+'ms avg</div></div>');
+    }
+    cells.push('<div class="be-cell"><div class="be-k">extract model</div><div class="be-v" style="font-size:11px">'
+      +esc(c.extractModel||'')+'</div><div class="be-k">cap '+esc(String(c.dailyCap))+'/day</div></div>');
+    stats.innerHTML=cells.join('');
+    calls.innerHTML=(d.calls||[]).map(function(x){
+      return '<div class="llm-row'+(x.ok?'':' bad')+'">'
+        +'<span class="r">'+esc(String(x.at||'').slice(11,19))+'</span>'
+        +'<span class="m">'+esc(x.role)+' \u00b7 '+esc(x.model)
+        +(x.in?' \u00b7 '+x.in+'\u2192'+(x.out||0)+' tok':'')+'</span>'
+        +'<span class="d">'+(x.ok?'':'\u2717 ')+x.ms+'ms</span></div>'
+        +(x.why?'<div class="llm-why">'+esc(x.why)+'</div>':'');
+    }).join('')||'<div class="be-idle">No model calls logged yet.</div>';
+  }catch(e){ state.innerHTML=' <span class="llm-bad">'+esc(String(e.message||e))+'</span>'; }
+}
+let LLM_TIMER=null;
+function llmWatch(on){
+  if(LLM_TIMER){clearInterval(LLM_TIMER);LLM_TIMER=null;}
+  if(on){ paintLLM(); LLM_TIMER=setInterval(paintLLM,15000); }
 }
 
 /* ===================== At the desk: the running read =====================

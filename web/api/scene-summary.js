@@ -66,6 +66,7 @@ module.exports = async (req, res) => {
       user: 'Scanner traffic, in order:\n\n' + lines,
       maxTokens: 700,
       timeoutMs: 25000,
+      role: 'scene-summary',
     });
     return json(res, {
       ok: true,

@@ -113,6 +113,7 @@ module.exports = async (req, res) => {
       user: 'The last ' + minutes + ' minutes, in order:\n\n' + lines,
       maxTokens: 800,
       timeoutMs: 28000,
+      role: 'desk-read',
     });
     return json(res, {
       ok: true,
