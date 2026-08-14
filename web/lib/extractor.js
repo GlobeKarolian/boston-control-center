@@ -52,7 +52,14 @@ const KEY = () => (process.env.ANTHROPIC_API_KEY || '').trim();
    opinion instead of to regex. */
 const OR_KEY = () => (process.env.OPENROUTER_API_KEY || '').trim();
 const OR_MODEL = process.env.EXTRACT_MODEL_OR || 'deepseek/deepseek-v4-flash-0731';
-const OR_FALLBACK = process.env.EXTRACT_MODEL_OR2 || 'qwen/qwen3.7-flash-20260727';
+/* The fallback is deliberately a PLAIN model. The whole flash tier went
+   reasoning-first in mid-2026, and a reasoner given a small budget spends
+   all of it thinking and returns empty content, which is exactly how the
+   first live test produced "unparseable reply" twice. The primary gets
+   reasoning switched off below; the fallback is one of the few models with
+   no reasoning to switch off, so the failure modes stay different, which is
+   the entire point of having a fallback. */
+const OR_FALLBACK = process.env.EXTRACT_MODEL_OR2 || 'inclusionai/ling-2.6-flash';
 
 /* The daily budget, learned the hard way: the account ran its whole credit
    balance dry in ten days and the board spent an evening on regex without
@@ -423,8 +430,13 @@ async function callAnthropic(text, timeoutMs, prior) {
    then a regex row, never a corrupt one. A failed primary retries once on
    the fallback model before giving up, so one dead slug or one provider
    outage costs latency, not the batch. */
-async function callOpenRouter(text, timeoutMs, prior, modelId) {
+async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr) {
   const model = modelId || OR_MODEL;
+  const fail = (why) => {
+    const msg = 'openrouter ' + model + ': ' + why;
+    if (!modelId) return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK, msg);
+    throw new Error((priorErr ? priorErr + ' ; then ' : '') + msg);
+  };
   const r = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -435,8 +447,12 @@ async function callOpenRouter(text, timeoutMs, prior, modelId) {
     },
     body: JSON.stringify({
       model,
-      max_tokens: 512,
+      /* Room to answer even if the provider reasons anyway, and an explicit
+         request not to. exclude keeps any thinking that happens regardless
+         out of the content field. */
+      max_tokens: 2000,
       temperature: 0,
+      reasoning: { enabled: false, exclude: true },
       response_format: { type: 'json_object' },
       messages: [
         { role: 'system',
@@ -447,21 +463,15 @@ async function callOpenRouter(text, timeoutMs, prior, modelId) {
     }),
     signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!r.ok) {
-    const body = (await r.text()).slice(0, 200);
-    if (!modelId && (r.status === 404 || r.status === 400 || /model/i.test(body))) {
-      return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK);
-    }
-    throw new Error('openrouter ' + model + ' ' + r.status + ' ' + body);
-  }
+  if (!r.ok) return fail('http ' + r.status + ' ' + (await r.text()).slice(0, 200));
   const j = await r.json();
-  let raw = String((((j.choices || [])[0] || {}).message || {}).content || '').trim();
-  raw = raw.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  const msg = (((j.choices || [])[0] || {}).message || {});
+  let raw = msg.content;
+  if (Array.isArray(raw)) raw = raw.map(p => (p && (p.text || p.content)) || '').join('');
+  raw = String(raw || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
+  if (!raw) return fail('empty content (finish: ' + ((j.choices || [])[0] || {}).finish_reason + ')');
   let obj;
-  try { obj = JSON.parse(raw); } catch (e) {
-    if (!modelId) return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK);
-    throw new Error('openrouter ' + model + ': unparseable reply ' + raw.slice(0, 120));
-  }
+  try { obj = JSON.parse(raw); } catch (e) { return fail('unparseable reply ' + raw.slice(0, 120)); }
   return mapFields(obj, 'cloud', text);
 }
 
