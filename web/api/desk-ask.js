@@ -33,8 +33,18 @@ const llm = require('../lib/llm');
 /* How many transmissions the model is allowed to read. Enough to answer a
    question about a night, small enough to stay honest and cheap. */
 const SHOW = 150;
-/* How far back a bare question reaches when it names no time of its own. */
-const DEFAULT_HOURS = 8;
+/* How far back a bare question reaches when it names no time of its own.
+   Two days, because that is the span a reporter means by "recently" and the
+   span an editor is asked about at the start of a shift. It is also six
+   thousand transmissions, which is the reason for everything below. */
+const DEFAULT_HOURS = 48;
+
+/* A question is allowed to read far more of the radio than the live listener,
+   because it is a deliberate act by a person waiting for an answer rather than
+   a loop running every few minutes. Roughly 2,500 batch objects covers two
+   busy days; past that the reader samples evenly and says so. */
+const ASK_ROWS = 9000;
+const ASK_OBJECTS = 2600;
 
 const SYSTEM = [
   'You are a Boston Globe desk editor who has been listening to police, fire,',
@@ -178,7 +188,12 @@ module.exports = async (req, res) => {
 
   let got;
   try {
-    got = await stream.since(from.toISOString(), to.toISOString());
+    /* evenly: when a window is too big to read whole, cover all of it thinly
+       rather than the end of it thickly. Asked about two days, a reporter
+       means both, and an answer built only from last night while claiming to
+       cover two is worse than one that admits it sampled. */
+    got = await stream.since(from.toISOString(), to.toISOString(),
+                             { maxRows: ASK_ROWS, maxObjects: ASK_OBJECTS, evenly: true });
   } catch (e) {
     return json(res, { ok: false, why: 'could not read the archive: ' + String(e.message || e).slice(0, 160) }, { status: 503 });
   }
@@ -216,7 +231,15 @@ module.exports = async (req, res) => {
     user += '\nFor context, the most significant OTHER traffic in the same window. '
       + 'These do not answer the question; use them only to say what did happen:\n\n' + ctxLines + '\n';
   }
-  user += '\nWindow: ' + from.toISOString().slice(11, 16) + 'Z to ' + to.toISOString().slice(11, 16) + 'Z, Eastern times in the answer.';
+  user += '\nWindow: ' + from.toISOString().slice(0, 16).replace('T', ' ') + 'Z to '
+    + to.toISOString().slice(0, 16).replace('T', ' ') + 'Z. Use Eastern times in the answer.';
+  if (!got.complete) {
+    /* Said to the model as well as to the reader, so a sampled window is not
+       described as an exhaustive one. */
+    user += '\nNOTE: the archive held more than could be read at once, so this is an'
+      + ' even sample across the window rather than every transmission. Say so if the'
+      + ' answer depends on completeness.';
+  }
 
   try {
     const answer = await llm.chat({
@@ -235,6 +258,8 @@ module.exports = async (req, res) => {
       shown: tx.length,
       matched: picked.hit.length,
       complete: got.complete,
+      sampled: !!got.sampled,
+      objects: got.objects,
       tx,
       ms: Date.now() - t0,
     }, { priv: 0 });

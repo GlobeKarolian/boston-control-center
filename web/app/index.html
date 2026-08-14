@@ -3075,15 +3075,20 @@ async function deskAsk(q){
   const go=document.getElementById('dpAskGo'), meta=document.getElementById('dpMeta');
   if(!q||!q.trim()||!ans)return;
   if(go){go.disabled=true;go.textContent='\u2026';}
-  ans.innerHTML='<div class="a">reading the night&hellip;</div>';
+  /* Two days of radio takes real seconds to read. Saying so beats a spinner
+     that looks stuck. */
+  ans.innerHTML='<div class="a">reading the last two days of radio, this takes a few seconds&hellip;</div>';
   try{
     const r=await fetch('./api/desk-ask',{method:'POST',credentials:'include',
       headers:{'content-type':'application/json'},body:JSON.stringify({q:q})});
     const d=await r.json();
     if(!d.ok){ ans.innerHTML='<div class="a">'+esc(d.why||'that did not work')+'</div>'; return; }
     ans.innerHTML='<div class="a">'+esc(d.answer||('No answer this time'+(d.why?': '+d.why:'')+'. The transmissions it looked at are below.'))+'</div>'
-      +'<div class="src">read '+d.shown+' of '+d.considered+' transmissions \u00b7 '
-      +esc((d.window&&d.window.label)||'')+' \u00b7 '+(d.ms||0)+'ms</div>';
+      +'<div class="src">read '+d.shown+' of '+d.considered+' transmissions'
+      +(d.matched!=null?' \u00b7 '+d.matched+' matched the question':'')
+      +' \u00b7 '+esc((d.window&&d.window.label)||'')
+      +(d.sampled?' \u00b7 sampled, the window was too big to read whole':'')
+      +' \u00b7 '+Math.round((d.ms||0)/100)/10+'s</div>';
     if(meta)meta.textContent='showing the '+d.shown+' transmissions behind that answer';
     if(txEl&&d.tx){
       txEl.innerHTML=d.tx.slice().reverse().map(function(t){

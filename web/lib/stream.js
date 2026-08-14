@@ -38,8 +38,19 @@ const BATCH_SLACK_MS = 30 * 60 * 1000;
 /* A ceiling on one read. Passing this means the listener fell far behind, a
    long outage or a cold start, and the honest move is to take the most recent
    slice and say how much was skipped rather than silently truncate or stall
-   forever trying to catch up. */
+   forever trying to catch up.
+
+   Callers asking a QUESTION rather than tailing the radio pass their own,
+   much larger, because "what were the biggest calls in the last two days" is
+   six thousand transmissions and answering it off the freshest twelve hundred
+   would silently drop the first day, which is the half most likely to hold
+   the thing being asked about. */
 const MAX_ROWS = 1200;
+
+/* Objects fetched in one read. Each is a batch of a few transmissions and a
+   round trip, so this is the real cost of a long window: a 48-hour question
+   is roughly twelve hundred of them. */
+const MAX_OBJECTS = 2400;
 
 function stampOf(path) {
   const base = String(path || '').split('/').pop() || '';
@@ -77,7 +88,28 @@ async function fetchAll(urls) {
  * behind, because a listener that silently drops the middle of a busy hour is
  * the bug this file was written to end.
  */
-async function since(fromISO, toISO) {
+/* When a window holds more objects than one read may fetch, take them EVENLY
+   across the window rather than from the end.
+
+   Taking the tail is right for a listener catching up, because the newest
+   traffic is the traffic still developing. It is wrong for a question: asked
+   about two days, a reporter means both of them, and an answer built only
+   from last night while claiming to cover two is worse than an answer that
+   admits it sampled. */
+function spread(urls, cap) {
+  if (urls.length <= cap) return { picked: urls, sampled: false };
+  const step = urls.length / cap;
+  const picked = [];
+  for (let i = 0; i < cap; i++) picked.push(urls[Math.floor(i * step)]);
+  return { picked, sampled: true };
+}
+
+async function since(fromISO, toISO, opts) {
+  const maxRows = Math.max(50, (opts && opts.maxRows) || MAX_ROWS);
+  const maxObjects = Math.max(50, (opts && opts.maxObjects) || MAX_OBJECTS);
+  /* A question wants coverage of the whole window; a listener wants the end
+     of it. The caller says which, and the default stays the listener's. */
+  const evenly = !!(opts && opts.evenly);
   const from = new Date(fromISO);
   const to = toISO ? new Date(toISO) : new Date();
   if (isNaN(+from) || isNaN(+to)) return { rows: [], from: null, to: null, cursor: fromISO, complete: true, skipped: 0, objects: 0, why: 'bad window' };
@@ -96,7 +128,7 @@ async function since(fromISO, toISO) {
      reports a busy hour that never happened. The severity floor reads these
      counts, so a duplicate is not a cosmetic error. */
   const seen = new Set();
-  const urls = [];
+  let urls = [];
   for (const d of days) {
     const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 4000 });
     for (const b of (r.blobs || [])) {
@@ -106,6 +138,22 @@ async function since(fromISO, toISO) {
       if (seen.has(key)) continue;
       seen.add(key);
       urls.push(b.url);
+    }
+  }
+
+  /* Newest-first when taking a tail, so the cap keeps the freshest. */
+  urls.sort();
+  let sampled = false;
+  let dropped = 0;
+  if (urls.length > maxObjects) {
+    if (evenly) {
+      const r = spread(urls, maxObjects);
+      dropped = urls.length - r.picked.length;
+      urls = r.picked;
+      sampled = true;
+    } else {
+      dropped = urls.length - maxObjects;
+      urls = urls.slice(-maxObjects);
     }
   }
 
@@ -119,16 +167,21 @@ async function since(fromISO, toISO) {
     })
     .sort((a, b) => String(a.at).localeCompare(String(b.at)));
 
-  let skipped = 0;
-  let complete = true;
-  if (rows.length > MAX_ROWS) {
-    skipped = rows.length - MAX_ROWS;
-    rows = rows.slice(-MAX_ROWS);      // the freshest, because the radio is live
+  let skipped = dropped;
+  let complete = !sampled && !dropped;
+  if (rows.length > maxRows) {
+    skipped += rows.length - maxRows;
+    if (evenly) {
+      const r = spread(rows, maxRows);
+      rows = r.picked;
+    } else {
+      rows = rows.slice(-maxRows);     // the freshest, because the radio is live
+    }
     complete = false;
   }
 
   const cursor = rows.length ? rows[rows.length - 1].at : fromISO;
-  return { rows, from, to, cursor, complete, skipped, objects: urls.length };
+  return { rows, from, to, cursor, complete, skipped, sampled, objects: urls.length };
 }
 
 /* The listener's view of a transmission: what was said, when, on which radio,
@@ -159,4 +212,4 @@ function densityByFeed(rows) {
   return n;
 }
 
-module.exports = { since, forListening, densityByFeed, MAX_ROWS };
+module.exports = { since, forListening, densityByFeed, MAX_ROWS, MAX_OBJECTS };

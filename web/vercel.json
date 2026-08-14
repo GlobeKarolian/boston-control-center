@@ -139,7 +139,7 @@
       "maxDuration": 45
     },
     "api/desk-ask.js": {
-      "maxDuration": 60
+      "maxDuration": 120
     }
   },
   "crons": [
