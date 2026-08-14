@@ -117,6 +117,24 @@ function group(hits) {
     if (!g.place && (tx.matched || tx.address)) g.place = tx.matched || tx.address;
     for (const u of (tx.units || [])) g.units.add(u);
   }
+  /* A card is named by its strongest transmission, not its earliest. The
+     Lancaster card called itself MEDICAL in Boston, because the EMS dispatch
+     that anchored it carried no call type and the first ambient line that did
+     got to speak for a double stabbing. */
+  for (const g of byInc.values()) {
+    let best = null;
+    for (const h of hits) {
+      if (h.key !== g.id) continue;
+      if (!best || h.s > best.s) best = h;
+    }
+    if (best && best.s > 0.01) {
+      if (best.tx.callType) g.type = best.tx.callType;
+      const place = best.tx.matched || best.tx.address || best.tx.street;
+      if (place) g.place = place;
+      if (best.tx.town || best.tx.city) g.town = best.tx.town || best.tx.city;
+    }
+  }
+
   return [...byInc.values()].map(g => ({
     ...g,
     /* Ranked on its best transmission, nudged by how many others agreed.
@@ -160,11 +178,35 @@ function sceneExpand(hits, pool, f) {
   const strong = hits.filter(h => h.s >= (hits[0] ? Math.max(...hits.map(x => x.s)) : 0) * 0.6);
   if (!strong.length) return hits;
   const have = new Set(hits.map(h => h.tx));
-  const typed = (tx, hay) => {
-    if (!f.type) return true;
-    if (tx.callType === f.type) return true;
-    if (vq.TYPES[f.type] && vq.TYPES[f.type].test(hay)) return true;
-    return (vq.KIN[f.type] || []).includes(tx.callType);
+  /* Context has to be LINKED, not merely nearby and vaguely related.
+
+     The first cut let kinship alone qualify, and on a citywide police channel
+     forty-five minutes of kin is most of the channel: a strangulation from
+     three that morning, a Canal Street follow-up, the fire department's chest
+     pains, all riding into a stabbing's card. So a transmission joins the
+     scene only by a real thread: the pipeline already tied it to the same
+     incident, it shares a unit with the anchor, it names the anchor's street,
+     or it plainly says the thing the question asked about.
+
+     That last one is what carries cross-agency knitting, and it is why this
+     still works: the officers at Lancaster never said the address, but they
+     said stab, knife, and stabbing, and the EMS dispatch said the address, so
+     the two halves of the scene arrive by different threads and land in the
+     same card. */
+  const streetWords = (tx) => {
+    const a = String(tx.address || tx.street || tx.matched || '').toLowerCase();
+    return a.split(/[^a-z0-9]+/).filter(w => w.length > 3 && !/^(street|road|avenue|boston|drive|place|court|lane)$/.test(w));
+  };
+  const linked = (tx, hay, anchor, anchorStreet, anchorUnits) => {
+    if (anchorUnits.size) {
+      for (const u of (tx.units || [])) if (anchorUnits.has(String(u).toUpperCase())) return true;
+    }
+    if (anchorStreet.length && anchorStreet.some(w => hay.includes(w))) return true;
+    if (f.type) {
+      if (tx.callType === f.type) return true;
+      if (vq.TYPES[f.type] && vq.TYPES[f.type].test(hay)) return true;
+    }
+    return false;
   };
   const out = hits.slice();
   for (const a of strong) {
@@ -175,6 +217,8 @@ function sceneExpand(hits, pool, f) {
        up grouped apart, which is exactly what happened on the first run of
        the test below this feature was built against. */
     a.key = a.key || inc || ('scene:' + (a.tx.feed || '') + ':' + a.tx.at);
+    const anchorStreet = streetWords(a.tx);
+    const anchorUnits = new Set((a.tx.units || []).map(u => String(u).toUpperCase()));
     let added = 0;
     for (const tx of pool) {
       if (added >= SCENE_CAP) break;
@@ -186,7 +230,7 @@ function sceneExpand(hits, pool, f) {
         const c2 = String(tx.city || tx.town || '').toLowerCase();
         if (city && c2 && c2 !== city) continue;
         const hay = ((tx.text || '') + ' ' + (tx.address || '') + ' ' + (tx.matched || '')).toLowerCase();
-        if (!typed(tx, hay)) continue;
+        if (!linked(tx, hay, a.tx, anchorStreet, anchorUnits)) continue;
       }
       have.add(tx);
       out.push({ tx: { ...tx, ctx: true }, s: 0.01, key: a.key });

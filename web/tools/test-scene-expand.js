@@ -44,18 +44,25 @@ hits = vs._sceneExpand(hits, POOL, f);
 const texts = hits.map(h => h.tx.text);
 ok('the two-victims traffic rides along', texts.some(t => /two victims/.test(t)), texts.join('|'));
 ok('the notifications call rides along', texts.some(t => /full notifications/.test(t)));
-ok('kin medical at the scene rides along', texts.some(t => /Auto investigator/.test(t)));
+/* Kinship alone is NOT a thread. This line is a medical near the scene that
+   never names the street, never shares a unit, and never says the word: on a
+   citywide channel forty-five minutes of that is most of the channel, and
+   letting it in is how a stabbing card filled up with a strangulation, a
+   Canal Street follow-up and the fire department's chest pains. */
+ok('kin-only chatter does NOT ride along', !texts.some(t => /Auto investigator/.test(t)));
 ok('Lowell stays in Lowell', !texts.some(t => /needle/.test(t)));
 ok('unrelated Boston chatter stays out', !texts.some(t => /alleyway/.test(t)));
 ok('the 6am domestic stays out of the scene', !texts.some(t => /ex-boyfriend/.test(t)));
-ok('context is marked as context', hits.filter(h => h.tx.ctx).length === 3,
+ok('context is marked as context', hits.filter(h => h.tx.ctx).length === 2,
    'ctx=' + hits.filter(h => h.tx.ctx).length);
 
 const groups = vs._group(hits);
-ok('one card, the whole scene', groups.length === 1 && groups[0].tx.length === 4,
+ok('one card, the whole scene', groups.length === 1 && groups[0].tx.length === 3,
    'groups=' + groups.length + ' tx=' + (groups[0] && groups[0].tx.length));
 ok('chronological inside the card',
-   groups[0].tx[0].at <= groups[0].tx[1].at && groups[0].tx[2].at <= groups[0].tx[3].at);
+   groups[0].tx[0].at <= groups[0].tx[1].at && groups[0].tx[1].at <= groups[0].tx[2].at);
+ok('the card is named for its anchor, not its first line',
+   groups[0].place && /Lancaster/i.test(groups[0].place), 'place=' + groups[0].place);
 ok('every clip in the scene is playable in order',
    groups[0].clips ? groups[0].clips.length === groups[0].tx.filter(t => t.clip).length : true);
 

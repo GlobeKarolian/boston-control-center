@@ -532,6 +532,20 @@
   .ar-wrap::-webkit-scrollbar{width:9px}.ar-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
   .ar-bar{display:flex;gap:8px;max-width:840px;margin:0 0 9px}
   .ar-more{margin:14px 0}
+  .ar-sum{margin:0 0 6px;padding:9px 11px;border-left:2px solid #2f6f4f;background:rgba(47,111,79,.09);border-radius:0 6px 6px 0}
+  .ar-sum:empty{display:none}
+  .ar-sum-wait{color:#7c8598;font-size:12.5px}
+  .ar-sum-head{font-weight:600;margin-bottom:3px}
+  .ar-sum-body{font-size:13.5px;line-height:1.45}
+  .ar-sum-unclear{margin-top:5px;font-size:12px;color:#b9a05a}
+  .ar-sum-conf{font-size:11px;padding:1px 6px;border-radius:9px;margin-left:5px;vertical-align:1px}
+  .ar-conf-clear{background:#1e5b3c;color:#9fe3bd}
+  .ar-conf-likely{background:#4a4420;color:#e0d08a}
+  .ar-conf-murky{background:#512a2a;color:#e8a9a9}
+  .ar-dl{margin-left:5px;color:#7c8598;text-decoration:none;font-size:12px}
+  .ar-dl:hover{color:#9fe3bd}
+  .ar-dlall{margin-left:8px;font:inherit;font-size:12px;background:transparent;border:1px solid #2f6f4f;color:#9fe3bd;border-radius:5px;padding:3px 9px;cursor:pointer}
+  .ar-line.ar-ctx{opacity:.72}
   .ar-more summary{cursor:pointer;color:var(--muted,#8b93a7);font-size:13px;padding:6px 2px}
   .ar-input{flex:1;background:#0e1420;border:1px solid var(--border);border-radius:7px;color:var(--text);
     font-family:inherit;font-size:14px;padding:11px 13px}
@@ -2337,6 +2351,47 @@ async function arSearch(q){
    control that plays the whole thing in order. The play buttons are the same
    .cplay and .dchain the rest of the board uses, so the one audio delegate
    already handles them and nothing here wires a listener. */
+/* The desk's read on a card, fetched after the card is already on screen.
+
+   Never inside the search: a reporter gets their transmissions in the time
+   the archive takes to read them, and the summary lands a beat later into a
+   card they are already looking at. A model call in the search path would
+   trade the part that works for the part that is nice. */
+async function arSummarize(id, tx){
+  const el=document.getElementById(id);
+  if(!el||!tx.length)return;
+  el.innerHTML='<span class="ar-sum-wait">reading the scene&hellip;</span>';
+  try{
+    const r=await fetch('./api/scene-summary',{method:'POST',credentials:'include',
+      headers:{'content-type':'application/json'},
+      body:JSON.stringify({tx:tx.slice(0,60).map(t=>({at:t.at,feed:t.feed,text:t.text}))})});
+    const d=await r.json();
+    if(!d.ok){ el.innerHTML='<span class="ar-sum-wait">no read on this one ('+esc(d.why||'')+')</span>'; return; }
+    el.innerHTML='<div class="ar-sum-head">'+esc(d.headline||'')
+      +' <span class="ar-sum-conf ar-conf-'+esc(d.confidence)+'">'+esc(d.confidence)+'</span></div>'
+      +'<div class="ar-sum-body">'+esc(d.summary||'')+'</div>'
+      +((d.unclear&&d.unclear.length)
+        ? '<div class="ar-sum-unclear">confirm before writing: '+d.unclear.map(esc).join(' &middot; ')+'</div>'
+        : '');
+  }catch(e){ el.innerHTML='<span class="ar-sum-wait">no read on this one</span>'; }
+}
+
+/* Every clip in this call, saved one after another. Cross-origin blob URLs
+   ignore the download attribute, so each one goes through our own route,
+   which sets the attachment header and a filename with the feed and the
+   Eastern time in it. Spaced out because browsers throttle a burst of
+   downloads from one gesture. */
+function arDownloadAll(urls){
+  urls.forEach(function(u,i){
+    setTimeout(function(){
+      const a=document.createElement('a');
+      a.href='./api/clip-download?u='+encodeURIComponent(u);
+      a.style.display='none';
+      document.body.appendChild(a); a.click(); a.remove();
+    }, i*350);
+  });
+}
+
 function arCall(c){
   const chain=(c.clips||[]).map(x=>x.u).filter(u=>u&&window.BCCClips&&BCCClips.ok(u));
   const listen=chain.length
@@ -2348,23 +2403,46 @@ function arCall(c){
     const play=clip
       ? '<button class="cplay" data-clip="'+esc(clip)+'" title="hear this transmission">&#9654;</button>'
       : '<span class="tnoclip" title="no audio kept for this one">txt</span>';
-    return '<div class="ar-line"><span class="ar-t">'+play+' '+arClock(t.at)+'</span>'
+    /* Saving one transmission is a different act from playing it, and a
+       reporter building a story folder needs the file, not the tab. */
+    const save=clip
+      ? '<a class="ar-dl" href="./api/clip-download?u='+esc(encodeURIComponent(clip))
+        +'" title="save this clip">&#8595;</a>'
+      : '';
+    /* Context arrived because it was linked to the anchor, not because it
+       matched what was typed. Saying so keeps a card honest about which
+       lines answered the question and which came along with them. */
+    const ctx=t.ctx?' ar-ctx':'';
+    return '<div class="ar-line'+ctx+'"><span class="ar-t">'+play+save+' '+arClock(t.at)+'</span>'
       +'<span class="ar-feed">'+esc(t.feed||'')+'</span>'
       +'<span class="ar-text">'+esc(t.text||'')+'</span></div>';
   }).join('');
   const span=arWhen(c.from)+(c.to&&c.to!==c.from?' &ndash; '+arClock(c.to):'');
+  const sumId='arsum-'+Math.random().toString(36).slice(2,9);
+  const dlAll=chain.length
+    ? '<button class="ar-dlall" data-urls="'+esc(JSON.stringify(chain))
+      +'" title="save every clip in this call">&#8595; save all ('+chain.length+')</button>'
+    : '';
+  setTimeout(function(){ arSummarize(sumId,(c.tx||[]).filter(t=>t.text)); },0);
   return '<div class="ar-call"><div class="ar-head">'
     +'<span class="ar-type">'+esc(c.type||(c.loose?'unmatched':'call'))+'</span>'
     +'<span class="ar-where">'+esc(c.place||c.town||c.feed||'location unknown')+'</span>'
     +(c.units&&c.units.length?'<span class="ar-units">'+esc(c.units.join(', '))+'</span>':'')
     +'<span class="ar-when">'+span+'</span>'
-    +'</div><div class="ar-tx">'+listen+lines+'</div></div>';
+    +'</div><div class="ar-sum" id="'+sumId+'"></div>'
+    +'<div class="ar-tx">'+listen+dlAll+lines+'</div></div>';
 }
 
 (function arWire(){
   const go=document.getElementById('arGo'), q=document.getElementById('arQ');
   if(!go||!q)return;
   go.onclick=()=>arSearch(q.value);
+  document.addEventListener('click',function(e){
+    const b=e.target&&e.target.closest&&e.target.closest('.ar-dlall');
+    if(!b)return;
+    e.preventDefault();
+    try{ arDownloadAll(JSON.parse(b.getAttribute('data-urls'))); }catch(err){}
+  });
   wireBrowse();
   q.addEventListener('keydown',e=>{ if(e.key==='Enter')arSearch(q.value); });
   document.querySelectorAll('.ar-chip').forEach(c=>{

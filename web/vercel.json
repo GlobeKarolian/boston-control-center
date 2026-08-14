@@ -128,6 +128,12 @@
     },
     "api/vault-browse.js": {
       "maxDuration": 60
+    },
+    "api/scene-summary.js": {
+      "maxDuration": 30
+    },
+    "api/clip-download.js": {
+      "maxDuration": 30
     }
   },
   "crons": [
