@@ -28,6 +28,7 @@ const { requireRead, json, harden } = require('../lib/http');
 const stream = require('../lib/stream');
 const llm = require('../lib/llm');
 const trace = require('../lib/trace');
+const et = require('../lib/etime');
 
 const MAX_MINUTES = 60;
 const MAX_LINES = 260;
@@ -126,7 +127,10 @@ module.exports = async (req, res) => {
   }
 
   const lines = tx.map(t => {
-    const clock = String(t.at || '').slice(11, 16) + 'Z';
+    /* Eastern. A running read is compared against a wall clock by whoever is
+       sitting in front of it, and a four hour offset makes every line of it
+       look like it is about some other night. */
+    const clock = et.clock(t.at) + ' ET';
     return clock + ' [' + t.src + '] ' + String(t.text || '').slice(0, 300);
   }).join('\n');
 

@@ -31,6 +31,7 @@
 'use strict';
 
 const llm = require('./llm');
+const et = require('./etime');
 
 /* Deliberately not the writer's family. The writer is Sonnet-tier; the
    skeptic is DeepSeek's flash, which is cheap, fast, and wrong in different
@@ -68,7 +69,7 @@ const SYSTEM = [
 function transcriptBlock(batch) {
   return (batch || []).slice(0, 80).map((t) => {
     const at = String((t && (t.at || t.time)) || '');
-    const clock = at.length >= 16 ? at.slice(11, 16) + 'Z ' : '';
+    const clock = at ? et.clock(at) + ' ET ' : '';
     return clock + '[' + String((t && (t.src || t.source || t.feed)) || '?') + '] '
       + String((t && t.text) || '').slice(0, 400);
   }).join('\n');

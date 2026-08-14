@@ -2368,6 +2368,18 @@ function arWhen(iso){
   return isNaN(+d)?'':d.toLocaleString('en-US',{timeZone:'America/New_York',
     month:'short',day:'numeric',hour:'numeric',minute:'2-digit'});
 }
+/* Eastern HH:MM for the desk panel.
+
+   These rows used to print String(t.at).slice(11,16), which is the UTC clock
+   sliced out of the stored ISO string with nothing converting it. At 1:22am a
+   transmission rendered as 05:22 and looked like it belonged to a different
+   night. Every other timestamp in this file already goes through
+   toLocaleTimeString with America/New_York; these three were the exceptions. */
+function etHM(iso){
+  const d=new Date(iso);
+  return isNaN(+d)?'':d.toLocaleTimeString('en-US',{timeZone:'America/New_York',
+    hour:'2-digit',minute:'2-digit',hour12:false});
+}
 function arClock(iso){
   const d=new Date(iso);
   return isNaN(+d)?'':d.toLocaleTimeString('en-US',{timeZone:'America/New_York',
@@ -2999,7 +3011,7 @@ function deskFocus(i){
     +rows.map(function(t){
       const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
       return '<div class="dp-line">'
-        +'<span class="t">'+esc(String(t.at||'').slice(11,16))+'</span>'
+        +'<span class="t">'+esc(etHM(t.at))+'</span>'
         +'<span class="f">'+esc(t.src||'')+'</span>'
         +'<span class="x">'+(clip?'<button class="cplay" data-clip="'+esc(clip)+'" title="hear this">&#9654;</button> ':'')
         +esc(t.text||'')+'</span></div>';
@@ -3018,7 +3030,7 @@ function deskPaintTx(list){
   txEl.innerHTML=(list||[]).slice().reverse().map(function(t){
     const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
     return '<div class="dp-line">'
-      +'<span class="t">'+esc(String(t.at||'').slice(11,16))+'</span>'
+      +'<span class="t">'+esc(etHM(t.at))+'</span>'
       +'<span class="f">'+esc(t.src||'')+'</span>'
       +'<span class="x">'+(clip?'<button class="cplay" data-clip="'+esc(clip)+'" title="hear this">&#9654;</button> ':'')
       +esc(t.text||'')+'</span></div>';
@@ -3121,7 +3133,7 @@ async function deskAsk(q){
       txEl.innerHTML=d.tx.slice().reverse().map(function(t){
         const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
         return '<div class="dp-line">'
-          +'<span class="t">'+esc(String(t.at||'').slice(11,16))+'</span>'
+          +'<span class="t">'+esc(etHM(t.at))+'</span>'
           +'<span class="f">'+esc(t.src||'')+'</span>'
           +'<span class="x">'+(clip?'<button class="cplay" data-clip="'+esc(clip)+'" title="hear this">&#9654;</button> ':'')
           +esc(t.text||'')+'</span></div>';

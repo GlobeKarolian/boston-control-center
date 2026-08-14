@@ -204,6 +204,10 @@ function ingestAuth(req) {
 
 function harden(res) {
   res.setHeader('X-Robots-Tag', 'noindex, nofollow, noarchive');
+  /* Stays no-referrer on purpose. The webcam iframes carry their own
+     element level referrerpolicy, which is what YouTube's player needs and
+     which overrides this for those elements alone, so the document can keep
+     the strictest setting without breaking the embeds. */
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Content-Type-Options', 'nosniff');
 }

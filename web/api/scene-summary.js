@@ -21,6 +21,7 @@
 
 const { requireRead, json, harden } = require('../lib/http');
 const llm = require('../lib/llm');
+const et = require('../lib/etime');
 
 const MAX_TX = 60;
 
@@ -56,7 +57,7 @@ module.exports = async (req, res) => {
 
   const lines = rows.slice(0, MAX_TX).map(t => {
     const at = String(t.at || '');
-    const clock = at.length >= 16 ? at.slice(11, 16) + 'Z' : '';
+    const clock = at ? et.clock(at) + ' ET' : '';
     return clock + ' [' + String(t.feed || '?').slice(0, 40) + '] ' + String(t.text || '').slice(0, 400);
   }).join('\n');
 

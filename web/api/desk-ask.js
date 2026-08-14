@@ -30,6 +30,7 @@ const stream = require('../lib/stream');
 const vq = require('../lib/vault-query');
 const llm = require('../lib/llm');
 const trace = require('../lib/trace');
+const et = require('../lib/etime');
 
 /* How many transmissions the model is allowed to read. Enough to answer a
    question about a night, small enough to stay honest and cheap. */
@@ -66,7 +67,10 @@ const SYSTEM = [
   '    an answer, and do not stop at "there is nothing" when there is context.',
   '',
   'Write 2-5 sentences of plain English. No preamble, no bullet points unless',
-  'the answer is genuinely a list. Times are Eastern.',
+  'the answer is genuinely a list.',
+  '',
+  'Every transmission below is stamped with the Eastern time it was said. Copy',
+  'those times through unchanged. Do not convert, offset or relabel them.',
 ].join('\n');
 
 /* Which transmissions could answer this. Pure arithmetic over fields the
@@ -211,8 +215,12 @@ module.exports = async (req, res) => {
 
   const picked = shortlist(rows, f);
   const tx = picked.hit.concat(picked.context).map(stream.forListening);
+  /* Eastern, because that is what the answer has to be written in and what an
+     editor will check against the clock on the wall. Handing the model UTC
+     under an instruction to answer in Eastern is how a 1:22am fire came back
+     as a 5:22am one. */
   const fmt = (t) => {
-    const clock = String(t.at || '').slice(11, 16) + 'Z';
+    const clock = et.clock(t.at) + ' ET';
     return clock + ' [' + t.src + ']'
       + (t.where ? ' (' + String(t.where).slice(0, 60) + ')' : '')
       + ' ' + String(t.text || '').slice(0, 320);
@@ -232,8 +240,9 @@ module.exports = async (req, res) => {
     user += '\nFor context, the most significant OTHER traffic in the same window. '
       + 'These do not answer the question; use them only to say what did happen:\n\n' + ctxLines + '\n';
   }
-  user += '\nWindow: ' + from.toISOString().slice(0, 16).replace('T', ' ') + 'Z to '
-    + to.toISOString().slice(0, 16).replace('T', ' ') + 'Z. Use Eastern times in the answer.';
+  user += '\nWindow: ' + et.full(from) + ' to ' + et.full(to) + ', Eastern.'
+    + ' Every clock time above is ALREADY Eastern. Quote them exactly as given.'
+    + ' Do not shift them by any number of hours and do not append Z or UTC.';
   if (!got.complete) {
     /* Said to the model as well as to the reader, so a sampled window is not
        described as an exhaustive one. */
