@@ -804,7 +804,17 @@
   .dp-answer .src{font-size:11px;color:#6d7488;font-family:var(--mono);padding:3px 0 6px}
   .dp-read{padding:12px 13px;font-size:13.5px;line-height:1.5;color:#e7ebf2}
   .dp-read.quiet{color:#9aa3b5}
-  .dp-watch{margin-top:8px;font-size:12px;color:#9fe3bd}
+  .dp-watch{margin-top:8px;font-size:12px;color:#9fe3bd;line-height:1.9}
+  .w-chip{font:inherit;font-size:12px;background:rgba(47,111,79,.16);border:1px solid #2f6f4f;
+    color:#9fe3bd;border-radius:20px;padding:2px 10px;cursor:pointer;text-align:left}
+  .w-chip:hover{background:rgba(47,111,79,.3)}
+  .w-n{opacity:.75;font-size:10.5px;font-family:var(--mono)}
+  .w-flat{opacity:.75}
+  .dp-focus{display:flex;gap:8px;padding:7px 13px;border-bottom:1px solid var(--border-soft);align-items:center}
+  .dp-back{font:inherit;font-size:11.5px;background:transparent;border:0;color:#7c8598;cursor:pointer;padding:0}
+  .dp-back:hover{color:#cfd6e4}
+  .dp-chain{font:inherit;font-size:11.5px;background:transparent;border:1px solid #2f6f4f;
+    color:#9fe3bd;border-radius:6px;padding:3px 10px;cursor:pointer;margin-left:auto}
   .dp-unsure{margin-top:6px;font-size:11.5px;color:#c8b56a}
   .dp-meta{padding:0 13px 9px;font-size:11px;color:#6d7488;font-family:var(--mono)}
   .dp-tx{overflow-y:auto;border-top:1px solid var(--border-soft);padding:6px 0 10px}
@@ -2951,6 +2961,55 @@ let DESK_OPEN = false, DESK_TIMER = null, DESK_BUSY = false;
 
 function deskPanel(){ return document.getElementById('deskPanel'); }
 
+/* The watch items from the last read, so a click can find their
+   transmissions without asking the server again. */
+let DESK_WATCH=[];
+
+/* Narrow the list to one watch item and offer to play it straight through. */
+function deskFocus(i){
+  const w=DESK_WATCH[i];
+  const txEl=document.getElementById('dpTx'), meta=document.getElementById('dpMeta');
+  if(!w||!txEl)return;
+  const times=new Set(w.at||[]);
+  const rows=(DESK_TX||[]).filter(function(t){ return times.has(t.at); });
+  const chain=(w.clips||[]).filter(function(u){ return u&&window.BCCClips&&BCCClips.ok(u); });
+  txEl.innerHTML=
+    '<div class="dp-focus">'
+    +'<button class="dp-back" id="dpBack">&larr; all transmissions</button>'
+    +(chain.length?'<button class="dchain dp-chain" data-chain="'+esc(JSON.stringify(chain))
+      +'" title="Play these in order">&#9654; hear it ('+chain.length+')</button>':'')
+    +'</div>'
+    +rows.map(function(t){
+      const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
+      return '<div class="dp-line">'
+        +'<span class="t">'+esc(String(t.at||'').slice(11,16))+'</span>'
+        +'<span class="f">'+esc(t.src||'')+'</span>'
+        +'<span class="x">'+(clip?'<button class="cplay" data-clip="'+esc(clip)+'" title="hear this">&#9654;</button> ':'')
+        +esc(t.text||'')+'</span></div>';
+    }).join('');
+  if(meta)meta.textContent=rows.length+' transmission'+(rows.length===1?'':'s')+' behind: '+(w.what||'');
+  const back=document.getElementById('dpBack');
+  if(back)back.onclick=function(){ deskPaintTx(DESK_TX); };
+}
+
+/* The window list, newest first. Kept as a function because the focus view
+   needs a way back to it without another request. */
+let DESK_TX=[];
+function deskPaintTx(list){
+  const txEl=document.getElementById('dpTx'), meta=document.getElementById('dpMeta');
+  if(!txEl)return;
+  txEl.innerHTML=(list||[]).slice().reverse().map(function(t){
+    const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
+    return '<div class="dp-line">'
+      +'<span class="t">'+esc(String(t.at||'').slice(11,16))+'</span>'
+      +'<span class="f">'+esc(t.src||'')+'</span>'
+      +'<span class="x">'+(clip?'<button class="cplay" data-clip="'+esc(clip)+'" title="hear this">&#9654;</button> ':'')
+      +esc(t.text||'')+'</span></div>';
+  }).join('')||'<div class="dp-line"><span class="x">Nothing came across in that window.</span></div>';
+  if(meta&&DESK_META)meta.textContent=DESK_META;
+}
+let DESK_META='';
+
 async function deskLoad(){
   if(DESK_BUSY)return;
   DESK_BUSY=true;
@@ -2964,7 +3023,20 @@ async function deskLoad(){
     if(d.read){ h+=esc(d.read); }
     else { h+='<span class="quiet">No read this time'+(d.why?': '+esc(d.why):'')+'. The transmissions are below.</span>'; }
     if(d.watching&&d.watching.length){
-      h+='<div class="dp-watch">watching: '+d.watching.map(esc).join(' &middot; ')+'</div>';
+      /* Each thing the desk is watching is a handle, not a sentence. Clicking
+         one narrows the list below to the transmissions it was traced from and
+         plays them in order, which is the whole distance between "there was a
+         burglary call" and hearing the dispatcher say it. An item that could
+         not be traced to any transmission stays plain text, because a play
+         button pointed at the wrong audio is worse than none. */
+      DESK_WATCH=d.watching;
+      h+='<div class="dp-watch">watching: '+d.watching.map(function(w,i){
+        const what=esc(w.what||String(w));
+        if(!w||!w.n)return '<span class="w-flat">'+what+'</span>';
+        return '<button class="w-chip" data-w="'+i+'" title="hear the '+w.n
+          +' transmission'+(w.n===1?'':'s')+' behind this">'+what
+          +' <span class="w-n">&#9654; '+w.n+'</span></button>';
+      }).join(' &middot; ')+'</div>';
     }
     if(d.unsure&&d.unsure.length){
       h+='<div class="dp-unsure">could not make out: '+d.unsure.map(esc).join(' &middot; ')+'</div>';
@@ -2972,18 +3044,13 @@ async function deskLoad(){
     read.innerHTML=h;
     read.classList.toggle('quiet',d.quiet===true);
     const feeds=Object.keys(d.heard||{}).sort(function(a,b){return d.heard[b]-d.heard[a];});
-    meta.textContent=(d.tx||[]).length+' transmissions \u00b7 '+feeds.length+' feeds \u00b7 '
+    DESK_META=(d.tx||[]).length+' transmissions \u00b7 '+feeds.length+' feeds \u00b7 '
       +(d.complete===false?'incomplete window \u00b7 ':'')+(d.ms||0)+'ms';
+    meta.textContent=DESK_META;
     /* Newest first, because somebody who just opened this wants the last
        thing said, not the first. */
-    txEl.innerHTML=(d.tx||[]).slice().reverse().map(function(t){
-      const clip=(t.clip&&window.BCCClips&&BCCClips.ok(t.clip))?t.clip:'';
-      return '<div class="dp-line">'
-        +'<span class="t">'+esc(String(t.at||'').slice(11,16))+'</span>'
-        +'<span class="f">'+esc(t.src||'')+'</span>'
-        +'<span class="x">'+(clip?'<button class="cplay" data-clip="'+esc(clip)+'" title="hear this">&#9654;</button> ':'')
-        +esc(t.text||'')+'</span></div>';
-    }).join('')||'<div class="dp-line"><span class="x">Nothing came across in that window.</span></div>';
+    DESK_TX=d.tx||[];
+    deskPaintTx(DESK_TX);
     const say=document.getElementById('bezosSay');
     if(say)say.textContent=d.quiet===true?'quiet right now':'monitoring the situation';
   }catch(e){
@@ -3040,6 +3107,13 @@ function deskToggle(force){
     pill.onclick=function(){deskToggle();};
     const c=document.getElementById('dpClose');if(c)c.onclick=function(){deskToggle(false);};
     const w=document.getElementById('dpWindow');if(w)w.onchange=function(){deskLoad();};
+    const panel=document.getElementById('deskPanel');
+    if(panel)panel.addEventListener('click',function(e){
+      const c=e.target&&e.target.closest&&e.target.closest('.w-chip');
+      if(!c)return;
+      e.preventDefault();
+      deskFocus(+c.getAttribute('data-w'));
+    });
     const form=document.getElementById('dpAskForm');
     if(form)form.onsubmit=function(e){ e.preventDefault(); deskAsk((document.getElementById('dpAsk')||{}).value); };
     document.addEventListener('keydown',function(e){ if(e.key==='Escape'&&DESK_OPEN)deskToggle(false); });

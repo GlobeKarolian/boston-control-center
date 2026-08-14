@@ -31,6 +31,51 @@ const llm = require('../lib/llm');
 const MAX_MINUTES = 60;
 const MAX_LINES = 260;
 
+/* Tying a watch item back to the radio it came from.
+ *
+ * The desk says "possible burglary at 2565 Washington Street" and a reporter
+ * immediately wants to hear it. Asking the model to cite which transmissions
+ * it meant is the obvious approach and the wrong one: a citation is another
+ * thing it can get confidently wrong, and a play button pointed at the wrong
+ * audio is worse than no play button.
+ *
+ * So the match is computed here, from the words. Digit runs do most of the
+ * work because they are the most distinctive thing on a scanner and the
+ * hardest to invent: "2565" appears in exactly one transmission tonight,
+ * while "street" appears in forty. A watch item that cannot be traced back to
+ * any transmission comes back with no audio attached rather than with a guess,
+ * which also quietly surfaces when the model has made something up. */
+const WATCH_STOP = new Set(('a an the at in on of to for and or with possible reported'
+  + ' report call caller unclear meaning going off location street st ave avenue road rd'
+  + ' unit units officer officers').split(' '));
+
+function watchTokens(s) {
+  const out = { nums: new Set(), words: new Set() };
+  for (const w of String(s || '').toLowerCase().split(/[^a-z0-9]+/)) {
+    if (!w) continue;
+    if (/^\d{2,}$/.test(w)) out.nums.add(w);
+    else if (w.length > 3 && !WATCH_STOP.has(w)) out.words.add(w);
+  }
+  return out;
+}
+
+function traceWatch(what, rows) {
+  const t = watchTokens(what);
+  if (!t.nums.size && t.words.size < 2) return [];
+  const hits = [];
+  for (const r of rows) {
+    const hay = String(r.text || '').toLowerCase();
+    let score = 0;
+    for (const n of t.nums) if (hay.includes(n)) score += 5;
+    for (const w of t.words) if (hay.includes(w)) score += 1;
+    /* A bare word overlap is coincidence; a digit run, or three words
+       together, is a citation. */
+    if (score >= 5 || score >= 3) hits.push({ r, score });
+  }
+  hits.sort((a, b) => b.score - a.score || String(a.r.at).localeCompare(String(b.r.at)));
+  return hits.slice(0, 8).map(h => h.r).sort((a, b) => String(a.at).localeCompare(String(b.at)));
+}
+
 const SYSTEM = [
   'You are a Boston Globe desk editor who has been listening to police, fire,',
   'EMS and transit scanners for the last few minutes. Someone just walked up',
@@ -118,7 +163,19 @@ module.exports = async (req, res) => {
     return json(res, {
       ok: true,
       read: String(out.read || '').slice(0, 900),
-      watching: Array.isArray(out.watching) ? out.watching.slice(0, 3).map(x => String(x).slice(0, 140)) : [],
+      /* Each watch item carries the transmissions it was traced to, with their
+         audio, so it can be clicked into and heard rather than read and
+         wondered about. */
+      watching: (Array.isArray(out.watching) ? out.watching.slice(0, 3) : []).map((x) => {
+        const what = String(x).slice(0, 140);
+        const found = traceWatch(what, rows);
+        return {
+          what,
+          at: found.map(r => r.at),
+          clips: found.filter(r => r.clip).map(r => r.clip),
+          n: found.length,
+        };
+      }),
       quiet: out.quiet === true,
       unsure: Array.isArray(out.unsure) ? out.unsure.slice(0, 3).map(x => String(x).slice(0, 140)) : [],
       heard,
