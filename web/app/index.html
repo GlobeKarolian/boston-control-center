@@ -1260,6 +1260,32 @@
   .sp-rad.hit .sp-rad-x{color:#fff}
   .sp-rad.hit .sp-rad-t{color:#9cc8f5}
 </style>
+<!-- Production error monitoring. Every uncaught error and unhandled rejection
+     goes to llmlog so the Under the Hood panel shows it next to the model
+     failures. A page that throws silently is a page that looks healthy while
+     it breaks. -->
+<script>
+(function(){
+  const buf=[];
+  function send(){
+    if(!buf.length)return;
+    const batch=buf.splice(0,buf.length);
+    fetch('./api/llm-activity?client=error',{
+      method:'POST',headers:{'content-type':'application/json'},
+      body:JSON.stringify({errors:batch})
+    }).catch(function(){});
+  }
+  window.addEventListener('error',function(e){
+    buf.push({t:'error',m:String(e.message||'').slice(0,200),f:String(e.filename||'').split('/').pop(),l:e.lineno,at:new Date().toISOString()});
+    if(buf.length>=5)send();
+  },true);
+  window.addEventListener('unhandledrejection',function(e){
+    buf.push({t:'reject',m:String(e.reason||'').slice(0,200),at:new Date().toISOString()});
+    if(buf.length>=5)send();
+  });
+  setInterval(send,30000);
+})();
+</script>
 <!-- The Desk and the Story. Loaded after the block above so its overrides of
      .hud-top land, and scoped entirely under #deskview and #storyview so the
      board that is already working cannot inherit a single rule from it. -->

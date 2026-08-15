@@ -19,6 +19,25 @@ module.exports = async (req, res) => {
   harden(res);
   if (!(await requireRead(req, res))) return;
 
+  /* Client-side error monitoring. The dashboard posts uncaught errors and
+     unhandled rejections here so they land in the same log as the model
+     failures, and the Under the Hood panel can show them. A page that throws
+     silently is a page that looks healthy while it breaks. */
+  if (req.method === 'POST' && req.query && req.query.client === 'error') {
+    let body = req.body;
+    if (typeof body === 'string') { try { body = JSON.parse(body); } catch (e) { body = null; } }
+    const errs = (body && Array.isArray(body.errors)) ? body.errors : [];
+    for (const e of errs.slice(0, 10)) {
+      llmlog.record('client-error', {
+        model: e.f || 'unknown',
+        ms: 0,
+        ok: false,
+        why: (e.t || 'error') + ': ' + String(e.m || '').slice(0, 200),
+      });
+    }
+    return json(res, { ok: true, recorded: Math.min(errs.length, 10) }, { status: 200 });
+  }
+
   const limit = Math.max(5, Math.min(120, parseInt((req.query && req.query.limit) || '60', 10) || 60));
   const log = await llmlog.recent(limit);
 
@@ -27,6 +46,7 @@ module.exports = async (req, res) => {
     anthropic: !!(process.env.ANTHROPIC_API_KEY || '').trim(),
     extractModel: process.env.EXTRACT_MODEL_OR || 'inclusionai/ling-2.6-flash',
     verifyModel: process.env.VERIFY_MODEL || 'deepseek/deepseek-v4-flash-0731',
+    sceneModel: process.env.SCENE_MODEL || 'anthropic/claude-haiku-4-5',
     dailyCap: parseInt(process.env.EXTRACT_DAILY_CAP || '500', 10) || 500,
   };
 
