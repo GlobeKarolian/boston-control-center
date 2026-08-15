@@ -255,6 +255,45 @@ console.log('\nthe lancaster street flood');
      hits2.map(h => h.tx.text).join('|'));
 }
 
+console.log('\nthe pedestrian "shooting" that was a struck');
+{
+  /* The failure of August 15: a reporter asked for "a pedestrian shooting
+     reported at Back Bay near 145 Dartmouth Street around 5:37 p.m" and got a
+     40-line card of bomb squads, cardiacs, and a missing juvenile, because a
+     pedestrian-STRUCK call is kin to a shooting (medical) and matched "back
+     bay" and "pedestrian", and kin + named > 0 was enough to get in. */
+  const NOW3 = '2026-08-14T22:10:00Z';   // 6:10pm ET on the 14th, after the calls
+  const T3 = (h, m) => new Date(Date.UTC(2026, 7, 14, 20 + h, m || 0)).toISOString();
+  const CORPUS3 = [
+    { at: T3(0, 54), feed: 'boston-ems', callType: 'medical', town: 'Boston',
+      address: '145 Dartmouth Street', matched: '145 DARTMOUTH ST, BOSTON, MA, 02116',
+      text: 'A8, pedestrian struck near Back Bay, 145 Dartmouth Street' },
+    { at: T3(1, 3), feed: 'boston-ems', callType: 'medical', town: 'Boston',
+      text: 'We have been dismissed by the bomb squad. Everyone dismissed by the bomb squad' },
+    { at: T3(1, 1), feed: 'boston-ems', callType: 'medical', town: 'Charlestown',
+      text: 'Start back into Charlestown for the cardiac, 42 Tufts' },
+    { at: T3(1, 30), feed: 'boston-police', callType: 'shooting', town: 'Boston',
+      address: '145 Dartmouth Street', matched: '145 DARTMOUTH ST, BOSTON, MA, 02116',
+      text: 'Shots fired, pedestrian hit, 145 Dartmouth Street, Back Bay' },
+  ];
+  const f = vq.parse('a pedestrian shooting reported at Back Bay near 145 Dartmouth Street around 5:37 p.m', NOW3);
+  const hits = CORPUS3.map(tx => ({ tx, s: vq.score(tx, f) })).filter(x => x.s > 0)
+    .sort((a, b) => b.s - a.s);
+  /* The real shooting is the strongest hit. The struck is a valid answer to
+     "pedestrian near 145 Dartmouth" and sorts below it. The bomb squad and
+     the cardiac share nothing with the question and stay out. */
+  eq('two hits: the shooting and the struck', hits.length, 2);
+  ok('the shooting sorts first', /Shots fired/.test(hits[0].tx.text), hits.map(h => h.tx.text).join('|'));
+  ok('the struck sorts second', /pedestrian struck/.test(hits[1].tx.text), hits.map(h => h.tx.text).join('|'));
+  /* A plain "shootings today" finds the shooting and NOT the struck: kin is
+     a tiebreak, never a door, and a pedestrian struck is a car accident,
+     not a shooting that arrived as a medical. */
+  const f2 = vq.parse('shootings today', NOW3);
+  const hits2 = CORPUS3.map(tx => ({ tx, s: vq.score(tx, f2) })).filter(x => x.s > 0);
+  eq('a type-only shooting query finds only the shooting', hits2.length, 1);
+  ok('and it is the shots fired line', /Shots fired/.test(hits2[0].tx.text), hits2.map(h => h.tx.text).join('|'));
+}
+
 console.log('\ntokens');
 {
   const bag = vq.tokenize('Can somebody check the tablet');

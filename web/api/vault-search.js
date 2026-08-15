@@ -198,9 +198,12 @@ function sceneExpand(hits, pool, f) {
     return a.split(/[^a-z0-9]+/).filter(w => w.length > 3 && !/^(street|road|avenue|boston|drive|place|court|lane)$/.test(w));
   };
   const linked = (tx, hay, anchor, anchorStreet, anchorUnits) => {
-    if (anchorUnits.size) {
-      for (const u of (tx.units || [])) if (anchorUnits.has(String(u).toUpperCase())) return true;
-    }
+    /* A unit number is not a thread. A8 works all night across a dozen calls,
+       and "shares a unit with the anchor" pulled a Charlestown cardiac and a
+       bomb squad dismissal into a Back Bay shooting card on 15 August 2026.
+       The threads that survive are the ones a reporter would recognise: the
+       pipeline tied it to the same incident, it names the anchor's street,
+       or it plainly says the thing the question asked about. */
     if (anchorStreet.length && anchorStreet.some(w => hay.includes(w))) return true;
     if (f.type) {
       if (tx.callType === f.type) return true;
