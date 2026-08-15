@@ -99,7 +99,9 @@ const ANALYST_SYSTEM = [
   'A second vehicle struck at the scene of a crash is `relatedTo` the crash.',
   'A road closure around a working fire is `relatedTo` the fire.',
   'Set neither when the thing is genuinely new.',
-  'When in doubt between `relatedTo` and a brand new situation, choose `relatedTo`: a wrongly linked beat is a small editing problem, and a wrongly separate one puts a false emergency on a newsroom wall.',
+  'CRITICAL: Two incidents at different addresses are NOT the same story, even if they are close together. A stabbing at 510 South Hampton Street and a disturbance at New York Pizza on Tremont Street are DIFFERENT incidents. Do not link them. Do not say one "came in shortly after" the other. They are separate events that happen to be in the same city.',
+  'CRITICAL: The same type of incident at two different locations is TWO situations, not one. Two crashes on the same highway are two situations. Two assaults in the same neighborhood are two situations. Only link when the radio explicitly says one is a development of the other, or when a unit says it is moving from one to the other.',
+  'When in doubt between `relatedTo` and a brand new situation, choose a NEW situation: a wrongly separate incident is a small editing problem (two cards on the board), but a wrongly linked one makes the board claim causality where there is none, which is a lie told confidently.',
 
   'CONFIDENCE.',
   "Mark `confidence` 'confirmed' only when units on scene are describing what they can see.",

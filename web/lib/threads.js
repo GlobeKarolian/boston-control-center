@@ -43,8 +43,11 @@ const LINK_MAX_M = 3000;
 // Geometric fallback for when the model says nothing about a link. Tighter
 // than the model-proposed limits on purpose: this is a guess with no language
 // behind it, so it only fires when two things are close in space, close in
-// time, and the same kind of thing.
-const MATCH_MAX_M = 500;
+// time, and the same kind of thing. 250 meters, not 500: Boston is small
+// enough that 500 meters covers multiple unrelated incidents in the same
+// neighborhood, and a stabbing at one restaurant must not merge with a
+// disturbance at another.
+const MATCH_MAX_M = 250;
 const MATCH_WINDOW_MS = 45 * 60 * 1000;
 
 const MAX_EVENTS = 40;
