@@ -21,6 +21,13 @@ const llmlog = require('./llmlog');
 const KEY = () => (process.env.OPENROUTER_API_KEY || '').trim();
 const PRIMARY = process.env.LLM_MODEL || 'inclusionai/ling-2.6-flash';
 const FALLBACK = process.env.LLM_MODEL2 || 'deepseek/deepseek-v4-flash-0731';
+/* Scene summaries are editorial judgment, not labeling. A model that reasons
+   internally burns the token budget thinking and returns empty content. The
+   extractor solved this by using a plain model; the scene-summary path gets
+   the same treatment, with a budget big enough for the 60-line transcripts
+   it reads. */
+const SCENE_MODEL = process.env.SCENE_MODEL || 'anthropic/claude-haiku-4-5';
+const SCENE_FALLBACK = process.env.SCENE_MODEL2 || 'openai/gpt-4o-mini';
 
 function enabled() { return !!KEY(); }
 
@@ -34,11 +41,12 @@ async function chat(opts, modelId, priorErr) {
     throw new Error('OPENROUTER_API_KEY not set');
   }
   const model = modelId || opts.model || PRIMARY;
+  const fallback = opts.fallback || FALLBACK;
   const began = Date.now();
   const fail = (why) => {
     const msg = 'openrouter ' + model + ': ' + why;
     llmlog.record(role, { model, ms: Date.now() - began, ok: false, why });
-    if (!modelId) return chat(opts, FALLBACK, msg);
+    if (!modelId) return chat(opts, fallback, msg);
     throw new Error((priorErr ? priorErr + ' ; then ' : '') + msg);
   };
 
@@ -90,4 +98,4 @@ async function chatJSON(opts) {
   }
 }
 
-module.exports = { chat, chatJSON, enabled, PRIMARY, FALLBACK };
+module.exports = { chat, chatJSON, enabled, PRIMARY, FALLBACK, SCENE_MODEL, SCENE_FALLBACK };

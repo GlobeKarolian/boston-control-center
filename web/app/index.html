@@ -136,6 +136,9 @@
   /* right layer control */
   .layers{position:fixed;top:58px;right:14px;z-index:900;width:232px;max-height:calc(100vh - 400px);overflow-y:auto;background:var(--panel);backdrop-filter:blur(12px);
     border:1px solid var(--border);border-radius:12px;overflow-x:hidden;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+  /* The alert bar sits between the header and the panel, so the cap has to drop
+     when it shows or the bottom rows slide under the console. */
+  body:has(.big-alert.show) .layers{max-height:calc(100vh - 480px)}
   /* The height cap added above is what keeps this panel off the zoom control on a
      short window, but the rule it was written into ended in overflow:hidden, so
      capping the height did not make the panel scroll, it made it swallow the last
@@ -1283,7 +1286,7 @@
     <div class="spacer"></div>
     <div class="hud-meta">
       <span id="alertMount"></span>
-      <span class="status-pill" id="status"><span class="sdot"></span><span class="stxt">live</span></span>
+      <span class="status-pill" id="status" role="button" tabindex="0" title="Feed health — click for details" onclick="document.querySelector('.tab[data-view=backend]').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"><span class="sdot"></span><span class="stxt">live</span></span>
       <span id="updated">&nbsp;</span>
       <span class="clock" id="clock">--:--:--</span>
     </div>
@@ -1311,7 +1314,7 @@
         title="Only major events that cleared the evidence floor and passed a second model">Situations</button>
       <span class="mode-note" id="modeNote"></span>
     </div>
-    <div class="sit-body" id="situations"><div class="empty">Desk editor is reading the scanner&hellip;</div></div>
+    <div class="sit-body" id="situations" role="listbox" tabindex="0" aria-label="Situations list"><div class="empty">Desk editor is reading the scanner&hellip;</div></div>
     <!-- The State Police rail is gone, both halves of it: the scenes list that
          said "no state police scenes on the board" almost every hour of every
          day, and the raw radio panel under it that filled the space with
@@ -1369,7 +1372,7 @@
 
   <div class="console">
     <div class="chead"><span class="rec"></span><h3>Live Audio</h3><button id="radioBtn" class="radiobtn" onclick="radioToggle()" title="Play each new transmission out loud as it lands, about half a minute behind the air. Off plays nothing until you press a row's arrow.">&#9654; radio</button><span class="sub2" id="consoleSub">connecting&hellip;</span></div>
-    <div class="clog" id="clog"><div class="cline">Waiting for transmissions&hellip;</div></div>
+    <div class="clog" id="clog" role="listbox" tabindex="0" aria-label="Live audio console"><div class="cline">Waiting for transmissions&hellip;</div></div>
   </div>
   <!-- The two live regions, and the one panel that deliberately is not one.
        Toasts get polite: a toast is a duplicate of a feed row that is already on
@@ -1447,9 +1450,9 @@
       </div>
       <div class="st-grid" id="stStats"></div>
       <div class="st-h">Out now<span class="n" id="stOpenN">0</span></div>
-      <div class="st-open" id="stOpen"><div class="st-empty">Nobody is out with anyone right now.</div></div>
+      <div class="st-open" id="stOpen" role="listbox" tabindex="0" aria-label="Open traffic stops"><div class="st-empty">Nobody is out with anyone right now.</div></div>
       <div class="st-h">Tonight<span class="n" id="stLogN">0</span></div>
-      <div id="stLog"><div class="st-empty">Waiting for the first stop&hellip;</div></div>
+      <div id="stLog" role="listbox" tabindex="0" aria-label="Tonight's traffic stops"><div class="st-empty">Waiting for the first stop&hellip;</div></div>
     </div>
   </div>
 
@@ -2214,7 +2217,16 @@ function clipPlay(url){
       const r=b.closest('.tl-item,.cline');if(r)r.classList.add('playing');
     }
   });
-  p.play().catch(()=>{clipStop();clipNext();});
+  p.play().catch(err=>{
+    /* A play that fails must not look like a play that succeeded. The button
+       goes back to the triangle, the row dims, and the dial says why. */
+    clipStop();
+    clipNext();
+    const btn=document.getElementById('dialBtn');
+    if(btn){btn.style.borderColor='var(--crash)';setTimeout(()=>{btn.style.borderColor='';},2000);}
+    const st=document.getElementById('dialState');
+    if(st){st.textContent='PLAY FAILED';st.style.color='var(--crash)';setTimeout(()=>{dialPaint();},2000);}
+  });
   dialPaint();
   return true;
 }
@@ -2225,6 +2237,7 @@ function dialPaint(){
         tm=document.getElementById('dialTime'),ln=document.getElementById('dialLine'),
         q=document.getElementById('dialQ'),sk=document.getElementById('dialSkip'),
         dial=document.getElementById('dial');
+  if(!st||!fd||!tm||!ln||!q||!sk||!dial)return;
   const playing=!!CLIP_NOW;
   /* The glyph used to read RADIO_ON alone, so a clip could be playing, the
      button could be lit green by the three lines below, and it still showed
@@ -2260,7 +2273,8 @@ function dialPaint(){
 }
 function dialTick(){
   const tm=document.getElementById('dialTime');
-  if(tm&&CLIP_PLAYER&&CLIP_NOW){
+  if(!tm)return;
+  if(CLIP_PLAYER&&CLIP_NOW){
     const f=s=>isFinite(s)?Math.floor(s/60)+':'+String(Math.floor(s%60)).padStart(2,'0'):'';
     tm.textContent=f(CLIP_PLAYER.currentTime)+(isFinite(CLIP_PLAYER.duration)?' / '+f(CLIP_PLAYER.duration):'');
   }
@@ -2392,6 +2406,7 @@ async function pollConsole(){
   if(sub){const s0=(newest&&(Date.now()-newest.getTime()<25000))?'ingesting live':'idle';
     sub.textContent=RADIO_ON?(s0+' · radio on'+(CLIP_Q.length?' · '+CLIP_Q.length+' queued':'')):s0;}
   const keep=roveKeep();
+  if(!el){ keep(); return; }
   el.innerHTML=list.map(t=>{
     const hit=!!t.incidentId, cleared=t.tags&&t.tags.clear;
     /* Only a URL on the one trusted host gets to become a control. A row
@@ -2799,14 +2814,17 @@ function renderStops(){
      tape by keyboard land you back on the same row, now reading as expanded, instead
      of at the top of the document. */
   const keep=roveKeep();
-  const q=(document.getElementById('stFind').value||'').trim().toLowerCase();
+  const stFind=document.getElementById('stFind');
+  if(!stFind){ keep(); return; }
+  const q=(stFind.value||'').trim().toLowerCase();
   const open=(STOPS.open||[]).filter(r=>stMatch(r,q));
   const log=(STOPS.closed||[]).filter(r=>stMatch(r,q));
   const s=STOPS.summary||{};
 
   const card=(k,v,sm)=>'<div class="st-card"><div class="k">'+k+'</div><div class="v'+(sm?' sm':'')+'">'+v+'</div></div>';
   const lg=s.longest;
-  document.getElementById('stStats').innerHTML=
+  const stStats=document.getElementById('stStats');
+  if(stStats)stStats.innerHTML=
     card('Out now',s.openNow||0)+
     card('Tonight',s.total||0)+
     card('Median',s.medianSeconds!=null?stDur(s.medianSeconds):'--')+
@@ -2816,9 +2834,9 @@ function renderStops(){
     card('Searches',s.withSearch||0)+
     card('Never cleared',s.stale||0);
 
-  document.getElementById('stOpenN').textContent=open.length;
-  document.getElementById('stLogN').textContent=log.length;
-  document.getElementById('stHit').textContent=q?(open.length+log.length)+' matching':'';
+  const stOpenN=document.getElementById('stOpenN'); if(stOpenN)stOpenN.textContent=open.length;
+  const stLogN=document.getElementById('stLogN'); if(stLogN)stLogN.textContent=log.length;
+  const stHit=document.getElementById('stHit'); if(stHit)stHit.textContent=q?(open.length+log.length)+' matching':'';
   stBadge((STOPS.open||[]).length);
 
   /* These two lists are the reason roveKeep exists rather than being a nicety. A row
@@ -2833,7 +2851,8 @@ function renderStops(){
      carries no id of its own, and inventing one to point at buys nothing a reader acts
      on, since support for following aria-controls is thin. Expanded is the fact that
      matters and expanded is the one that is here. */
-  document.getElementById('stOpen').innerHTML=open.length?open.map(r=>{
+  const stOpen=document.getElementById('stOpen');
+  if(stOpen)stOpen.innerHTML=open.length?open.map(r=>{
     const el=(stNow()-r.start)/1000;
     return '<div class="st-live'+(el>1800?' vlong':el>900?' long':'')+'" role="button" tabindex="-1" aria-expanded="'+(ST_TAPE.has(r.id)?'true':'false')+'" data-sid="'+esc(r.id)+'">'+
       '<div class="top"><span class="clk" data-start="'+r.start+'">'+stDur(el)+'</span>'+
@@ -2845,7 +2864,8 @@ function renderStops(){
       '</div>'+(ST_TAPE.has(r.id)?stTape(r):'');
   }).join(''):'<div class="st-empty">'+(q?'No open stop matches that.':'Nobody is out with anyone right now.')+'</div>';
 
-  document.getElementById('stLog').innerHTML=log.length?log.map(r=>
+  const stLog=document.getElementById('stLog');
+  if(stLog)stLog.innerHTML=log.length?log.map(r=>
     '<div class="st-row" role="button" tabindex="-1" aria-expanded="'+(ST_TAPE.has(r.id)?'true':'false')+'" data-sid="'+esc(r.id)+'">'+
       '<span class="t">'+stHM(r.start)+'</span>'+
       '<span class="u">'+esc(r.unitSpoken||r.unit)+'</span>'+
@@ -2879,7 +2899,9 @@ function stTick(){
    word Stops all evening reads as a broken feature rather than a quiet night. */
 function stBadge(n){
   const el=document.getElementById('tabStops');
-  if(el)el.textContent=n>0?String(n):'';
+  if(!el)return;
+  el.textContent=n>0?String(n):'';
+  el.title=n>0?(n+' open traffic stop'+(n===1?'':'s')):'';
 }
 
 async function pollStops(){
@@ -3107,6 +3129,7 @@ async function deskLoad(){
   if(DESK_BUSY)return;
   DESK_BUSY=true;
   const read=document.getElementById('dpRead'), meta=document.getElementById('dpMeta'), txEl=document.getElementById('dpTx');
+  if(!read||!meta){ DESK_BUSY=false; return; }
   const mins=(document.getElementById('dpWindow')||{}).value||'20';
   try{
     const r=await fetch('./api/desk-read?minutes='+encodeURIComponent(mins),{credentials:'include'});

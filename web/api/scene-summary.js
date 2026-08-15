@@ -65,9 +65,11 @@ module.exports = async (req, res) => {
     const out = await llm.chatJSON({
       system: SYSTEM,
       user: 'Scanner traffic, in order:\n\n' + lines,
-      maxTokens: 700,
+      maxTokens: 1200,
       timeoutMs: 25000,
       role: 'scene-summary',
+      model: llm.SCENE_MODEL,
+      fallback: llm.SCENE_FALLBACK,
     });
     return json(res, {
       ok: true,
