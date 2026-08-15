@@ -1,0 +1,400 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shift Change — Boston Newsroom</title>
+<style>
+  :root{
+    --bg:#05070b; --panel:rgba(14,18,26,.86); --panel-solid:#0e121a;
+    --border:#232c3b; --border-soft:#1a2230;
+    --text:#e9edf4; --text-dim:#9aa4b6; --text-faint:#5f6a7e;
+    --crash:#ff4d4d; --road:#ffb020; --transit:#4da3ff; --scanner:#34d399;
+    --alert:#c07cff; --wire:#ff3b30; --stale:#e8a33d;
+    --fire:#ff8c42;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --serif:Georgia,"Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  a{color:var(--transit);text-decoration:none}
+  a:hover{text-decoration:underline}
+
+  /* ---- top strip ---- */
+  .top{position:sticky;top:0;z-index:10;background:var(--panel-solid);border-bottom:1px solid var(--border);backdrop-filter:blur(12px)}
+  .top-inner{max-width:1200px;margin:0 auto;padding:11px 24px;display:flex;align-items:center;gap:14px}
+  .mast{font-family:var(--serif);font-weight:700;font-size:17px;white-space:nowrap}
+  .sub{font-family:var(--mono);font-size:9px;letter-spacing:2.5px;text-transform:uppercase;color:var(--text-faint);white-space:nowrap}
+  .shift-badge{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--scanner);letter-spacing:1px}
+  .shift-badge b{color:var(--text);font-weight:600}
+  .unverified{font-family:var(--mono);font-size:10px;letter-spacing:1px;color:var(--road);border:1px solid rgba(255,176,32,.35);padding:3px 9px;border-radius:4px}
+
+  /* ---- shift picker ---- */
+  .picker{max-width:1200px;margin:0 auto;padding:20px 24px 0;display:flex;align-items:baseline;gap:20px;flex-wrap:wrap}
+  .picker h1{font-family:var(--serif);font-size:26px;font-weight:700;letter-spacing:-.01em}
+  .picker .win{font-family:var(--mono);font-size:12.5px;color:var(--text-dim)}
+  .shift-switch{margin-left:auto;display:flex;background:var(--panel-solid);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .shift-switch button{font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--text-dim);background:none;border:0;padding:8px 18px;cursor:pointer;text-transform:uppercase}
+  .shift-switch button.on{background:var(--scanner);color:#05070b;font-weight:600}
+  .shift-switch button:hover:not(.on){background:rgba(255,255,255,.04);color:var(--text)}
+
+  /* ---- layout ---- */
+  .sheet{max-width:1200px;margin:0 auto;padding:24px}
+  .cols{display:grid;grid-template-columns:1.6fr 1fr;gap:24px;align-items:start}
+  @media(max-width:900px){.cols{grid-template-columns:1fr}}
+
+  /* ---- lead ---- */
+  .lead{border-left:3px solid var(--wire);padding:2px 0 2px 16px;margin:6px 0 22px;font-family:var(--serif);font-size:15.5px;line-height:1.6;color:var(--text)}
+  .lead em{color:var(--text-dim);font-style:italic}
+
+  /* ---- sections ---- */
+  .sect{margin-bottom:8px}
+  .sect-head{display:flex;align-items:baseline;gap:10px;padding-bottom:7px;border-bottom:1px solid var(--border);margin-bottom:2px}
+  .sect-head h2{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:2px;text-transform:uppercase}
+  .sect-head .n{font-family:var(--mono);font-size:11px;color:var(--text-faint)}
+  .sect-head.crit h2{color:var(--crash)} .sect-head.crit{border-bottom-color:rgba(255,77,77,.3)}
+  .sect-head.fire h2{color:var(--fire)} .sect-head.fire{border-bottom-color:rgba(255,140,66,.3)}
+  .sect-head.chase h2{color:var(--transit)} .sect-head.chase{border-bottom-color:rgba(77,163,255,.3)}
+  .sect-head.odd h2{color:var(--alert)} .sect-head.odd{border-bottom-color:rgba(192,124,255,.3)}
+
+  /* ---- item ---- */
+  .item{padding:13px 0 13px;border-bottom:1px solid var(--border-soft)}
+  .item:last-child{border-bottom:0}
+  .item-top{display:flex;align-items:baseline;gap:10px}
+  .item-rank{font-family:var(--mono);font-size:11px;color:var(--text-faint);flex:0 0 18px}
+  .item-head{font-family:var(--serif);font-size:15px;font-weight:700;line-height:1.35;flex:1}
+  .item-time{font-family:var(--mono);font-size:11px;color:var(--text-dim);white-space:nowrap}
+  .item-what{margin:5px 0 0 28px;font-size:13.5px;color:var(--text-dim);line-height:1.55}
+  .item-meta{margin:6px 0 0 28px;display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-family:var(--mono);font-size:10.5px}
+  .chip{padding:2px 8px;border-radius:3px;border:1px solid var(--border);color:var(--text-dim);letter-spacing:.5px}
+  .chip.sev4{color:var(--crash);border-color:rgba(255,77,77,.4)}
+  .chip.sev3{color:var(--road);border-color:rgba(255,176,32,.35)}
+  .chip.play{color:var(--scanner);border-color:rgba(52,211,153,.4);cursor:pointer}
+  .chip.play:hover{background:rgba(52,211,153,.12)}
+  .chip.src{color:var(--text-faint)}
+  .item-unsure{margin:6px 0 0 28px;font-size:12px;color:var(--stale)}
+  .item-unsure::before{content:"⚠ ";}
+  .item-why{margin:4px 0 0 28px;font-size:11px;color:var(--text-faint);font-family:var(--mono)}
+
+  /* ---- right rail ---- */
+  .rail{position:sticky;top:64px}
+  .panel{background:var(--panel);border:1px solid var(--border);border-radius:12px;overflow:hidden;margin-bottom:18px}
+  .panel-h{padding:10px 14px;border-bottom:1px solid var(--border-soft);font-family:var(--mono);font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim)}
+  .panel-b{padding:12px 14px}
+  .stat{display:flex;justify-content:space-between;align-items:baseline;padding:4px 0;font-family:var(--mono);font-size:12px}
+  .stat .k{color:var(--text-dim)} .stat .v{color:var(--text);font-variant-numeric:tabular-nums}
+  .stat .v.warn{color:var(--road)} .stat .v.bad{color:var(--crash)} .stat .v.good{color:var(--scanner)}
+  .divider{height:1px;background:var(--border-soft);margin:8px 0}
+  .feedline{display:flex;align-items:center;gap:8px;font-family:var(--mono);font-size:11.5px;padding:3px 0;color:var(--text-dim)}
+  .feedline .dot{width:7px;height:7px;border-radius:50%;flex:0 0 auto}
+  .feedline .dot.live{background:var(--scanner)} .feedline .dot.off{background:var(--crash)}
+  .feedline .nm{color:var(--text)} .feedline .ct{margin-left:auto;color:var(--text-faint);font-variant-numeric:tabular-nums}
+
+  /* ---- map strip ---- */
+  .map-strip{height:170px;background:
+    radial-gradient(circle at 62% 55%, rgba(255,77,77,.18), transparent 60px),
+    radial-gradient(circle at 40% 70%, rgba(255,140,66,.14), transparent 50px),
+    radial-gradient(circle at 75% 35%, rgba(77,163,255,.14), transparent 46px),
+    repeating-linear-gradient(0deg, transparent, transparent 21px, rgba(35,44,59,.4) 21px, rgba(35,44,59,.4) 22px),
+    repeating-linear-gradient(90deg, transparent, transparent 21px, rgba(35,44,59,.4) 21px, rgba(35,44,59,.4) 22px),
+    #070a10;
+    border-radius:8px;position:relative;overflow:hidden;border:1px solid var(--border)}
+  .map-pin{position:absolute;width:10px;height:10px;border-radius:50%;transform:translate(-50%,-50%)}
+  .map-pin::after{content:"";position:absolute;inset:-7px;border-radius:50%;border:1px solid currentColor;opacity:.35}
+  .map-tag{position:absolute;transform:translate(-50%,-140%);font-family:var(--mono);font-size:9px;color:var(--text-dim);white-space:nowrap;background:rgba(5,7,11,.8);padding:1px 5px;border-radius:3px}
+
+  /* ---- print / paste ---- */
+  .foot{margin-top:26px;padding-top:14px;border-top:2px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text-faint);line-height:1.7}
+  .copybar{margin-left:auto}
+  .btn{font-family:var(--mono);font-size:10.5px;letter-spacing:1px;text-transform:uppercase;background:var(--panel-solid);border:1px solid var(--border);color:var(--text-dim);padding:6px 13px;border-radius:6px;cursor:pointer}
+  .btn:hover{color:var(--text);border-color:var(--text-dim)}
+
+  @media print{
+    .top,.picker,.copybar,.map-strip{display:none}
+    body{background:#fff;color:#111}
+    .lead,.item-what{color:#333}
+    .item-head{color:#000}
+    .sect-head h2{color:#000 !important}
+  }
+</style>
+</head>
+<body>
+
+<div class="top">
+  <div class="top-inner">
+    <span class="mast">Boston</span>
+    <span class="sub">Control Center</span>
+    <span class="sub" style="color:var(--scanner)">▸ Shift Change</span>
+    <span class="shift-badge">DAY SHIFT · <b>6:00 AM – 6:00 PM ET</b> · THU AUG 14</span>
+    <span class="unverified">UNVERIFIED · NOT FOR PUBLICATION</span>
+  </div>
+</div>
+
+<div class="picker">
+  <h1>Shift change</h1>
+  <span class="win">Thursday · 6:00 AM – 6:00 PM</span>
+  <div class="shift-switch">
+    <button class="on" onclick="switchShift(this)">Day</button>
+    <button onclick="switchShift(this)">Night</button>
+  </div>
+</div>
+
+<div class="sheet">
+  <p class="lead">
+    Two shot on King Street in Worcester, one critical — came in at 4:41, the 6pm crew is already on it.
+    A toddler pulled from a car on Meridian Street is the one to hear first (12:51p).
+    One pursuit, terminated. One working two-alarm, still running.
+    Every line below has audio. Nothing is confirmed until you confirm it.
+  </p>
+
+  <div class="cols">
+    <div>
+
+      <!-- CRIMES -->
+      <div class="sect">
+        <div class="sect-head crit"><h2>Crimes</h2><span class="n">4 cleared the bar</span></div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">1</span>
+            <span class="item-head">Two shot on King Street in Worcester, one critical; second scene taped at a Harrison Street address</span>
+            <span class="item-time">4:41p</span>
+          </div>
+          <p class="item-what">Worcester PD working two connected scenes mid-afternoon — a double shooting on King Street and a taped-off address on Harrison Street where they were "looking for the gun, interviewing people." One victim described as critical. State Police asked to assist on the perimeter because the crowd kept pushing through the tape line.</p>
+          <div class="item-meta">
+            <span class="chip sev4">BIG STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 6 clips</span>
+            <span class="chip src">worcester-pd · mass-state-police</span>
+          </div>
+          <p class="item-unsure">Confirm victim count and whether the Harrison Street scene is the shooter or a second victim.</p>
+          <p class="item-why">why it's here: two scenes · three agencies · gun sought · perimeter requested · ran 90 minutes</p>
+        </div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">2</span>
+            <span class="item-head">Armed carjacking at the South Bay Target lot; victim's Audi taken at gunpoint toward Dorchester</span>
+            <span class="item-time">11:52a</span>
+          </div>
+          <p class="item-what">Boston PD aired a lookout for a grey Audi Q5 taken at gunpoint in the South Bay parking lot, two male suspects, last seen toward Dorchester. Units held the lot for the K-9 track. Plate was read on the air twice — flagged in the tracker as a plate-read.</p>
+          <div class="item-meta">
+            <span class="chip sev4">BIG STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 5 clips</span>
+            <span class="chip src">boston-police</span>
+          </div>
+          <p class="item-unsure">Suspects still outstanding as of last transmission — confirm before publishing any description.</p>
+          <p class="item-why">why it's here: gun shown · K-9 track · lookout aired citywide · plate read</p>
+        </div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">3</span>
+            <span class="item-head">Stabbing on Geneva Avenue; one in custody an hour later after a foot chase through the Bowdoin Street back lots</span>
+            <span class="item-time">1:04p</span>
+          </div>
+          <p class="item-what">Initially called in as an assault. BPD units found a victim with stab wounds to the arm at 50 Geneva Ave. Suspect fled on foot; units chased through the yards behind Bowdoin Street. "Got one in custody, 50 Geneva" aired at 2:09p — the tracker logged it as an arrest.</p>
+          <div class="item-meta">
+            <span class="chip sev3">STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 9 clips</span>
+            <span class="chip src">boston-police</span>
+          </div>
+          <p class="item-why">why it's here: stabbing signal · foot chase · custody on air · 65-minute arc</p>
+        </div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">4</span>
+            <span class="item-head">Breaking-and-entering in progress on Blue Hill Avenue turned out to be the homeowner's locksmith</span>
+            <span class="item-time">9:21a</span>
+          </div>
+          <p class="item-what">A caller reported two men forcing a door on Blue Hill Ave. Four units. Twenty minutes of perimeter traffic ended with "all set, it's the locksmith, homeowner is on scene." Kept here because the radio ran hot for half an hour and a desk watching would have called the precinct.</p>
+          <div class="item-meta">
+            <span class="chip sev3">STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 4 clips</span>
+            <span class="chip src">boston-police</span>
+          </div>
+          <p class="item-why">why it's here: 4 units · 30 min of perimeter traffic · good-intent close</p>
+        </div>
+      </div>
+
+      <!-- FIRES -->
+      <div class="sect">
+        <div class="sect-head fire"><h2>Fires</h2><span class="n">2 working</span></div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">5</span>
+            <span class="item-head">Two-alarm fire in a three-decker on Brookford Street, Dorchester; one firefighter to the hospital with burns</span>
+            <span class="item-time">2:17p</span>
+          </div>
+          <p class="item-what">Box 44 struck at 2:17, second alarm nine minutes later when command reported fire on two floors. Ladders to the roof, two lines stretched, primary search complete at 2:41. A firefighter was taken with burns to the hand — "member being transported" aired at 2:58. Companies still operating at shift change.</p>
+          <div class="item-meta">
+            <span class="chip sev4">BIG STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 14 clips</span>
+            <span class="chip src">boston-fire · boston-ems</span>
+          </div>
+          <p class="item-unsure">Extent of the firefighter's injuries — EMS traffic called it "minor" but a burn transport is a burn transport.</p>
+          <p class="item-why">why it's here: second alarm · member transported · 2+ hours running · still active at handoff</p>
+        </div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">6</span>
+            <span class="item-head">Car fire on the I-93 northbound ramp at Columbia Road snarled the evening commute build</span>
+            <span class="item-time">4:02p</span>
+          </div>
+          <p class="item-what">Engine 3 to a fully-involved sedan on the ramp. One lane blocked, no injuries, knocked down in twelve minutes. Worth a line only because a photog could have had it from the overpass and traffic backed to the tunnel.</p>
+          <div class="item-meta">
+            <span class="chip sev3">STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 3 clips</span>
+            <span class="chip src">boston-fire · mass-state-police</span>
+          </div>
+          <p class="item-why">why it's here: fully involved · highway closure · commute window</p>
+        </div>
+      </div>
+
+      <!-- CHASES -->
+      <div class="sect">
+        <div class="sect-head chase"><h2>Chases</h2><span class="n">1 pursuit, terminated</span></div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">7</span>
+            <span class="item-head">State Police pursuit of a stolen Camry up 93 North into Somerville, terminated at the Medford line</span>
+            <span class="item-time">10:38a</span>
+          </div>
+          <p class="item-what">MSP took up a pursuit on a stolen Toyota Camry north on 93 — speeds past 90 through the Zakim. Terminated at the Medford line per policy, plate aired to all cities. Somerville PD found the car abandoned on Thurston Street forty minutes later, ignition punched.</p>
+          <div class="item-meta">
+            <span class="chip sev3">STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 7 clips</span>
+            <span class="chip src">mass-state-police · somerville-pd</span>
+          </div>
+          <p class="item-why">why it's here: pursuit · multi-jurisdiction · vehicle recovered · policy termination</p>
+        </div>
+      </div>
+
+      <!-- ODDBALL -->
+      <div class="sect">
+        <div class="sect-head odd"><h2>Oddball</h2><span class="n">the desk will ask about these</span></div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">8</span>
+            <span class="item-head">Toddler locked in a car on Meridian Street, out through the window before the ladder company arrived</span>
+            <span class="item-time">12:44p</span>
+          </div>
+          <p class="item-what">East Boston units to a child locked in a running car at Meridian and Lexington. Engine 9 was mid-air on a ladder when the caller's brother got in through a cracked window and popped the lock. Child fine, "sweaty but smiling." The clip at 12:51 — a firefighter singing to the kid through the window while they worked — is the one for the morning meeting.</p>
+          <div class="item-meta">
+            <span class="chip sev3">STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 6 clips · <b>hear 12:51p</b></span>
+            <span class="chip src">boston-fire</span>
+          </div>
+          <p class="item-why">why it's here: child locked in vehicle · ladder truck · resolved on scene · the radio was lovely</p>
+        </div>
+
+        <div class="item">
+          <div class="item-top">
+            <span class="item-rank">9</span>
+            <span class="item-head">"Goat in the road" on the Jamaicaway, three units, one very unimpressed goat</span>
+            <span class="item-time">7:58a</span>
+          </div>
+          <p class="item-what">Morning commute. Three BPD units and animal control to a goat standing in the middle of the Jamaicaway near the pond, refusing every approach. A unit aired the "be advised, the goat is... large" read at 8:11. Animal control got it into a van at 8:40. Origin unknown — nobody claimed a missing goat all day.</p>
+          <div class="item-meta">
+            <span class="chip sev3">STORY</span>
+            <span class="chip play" onclick="playClip(this)">▶ 4 clips · <b>hear 8:11a</b></span>
+            <span class="chip src">boston-police</span>
+          </div>
+          <p class="item-why">why it's here: the desk is going to hear about it anyway · 42 minutes of goat</p>
+        </div>
+      </div>
+
+      <div class="foot">
+        Machine-transcribed and machine-located from public safety radio. Every item links to the audio it came from. Nothing on this page is confirmed or for publication until the desk checks it against the department. Ranking is mechanical — by signals heard, agencies converged, units committed, and how long the radio ran — not an editor's or a model's judgment of importance.
+      </div>
+    </div>
+
+    <!-- RIGHT RAIL -->
+    <div class="rail">
+
+      <div class="panel">
+        <div class="panel-h">The day in numbers</div>
+        <div class="panel-b">
+          <div class="stat"><span class="k">Transmissions heard</span><span class="v">12,847</span></div>
+          <div class="stat"><span class="k">Across feeds</span><span class="v">10 of 12</span></div>
+          <div class="stat"><span class="k">Incidents formed</span><span class="v">203</span></div>
+          <div class="stat"><span class="k">Cleared the bar</span><span class="v">9</span></div>
+          <div class="divider"></div>
+          <div class="stat"><span class="k">Arrests aired</span><span class="v">3</span></div>
+          <div class="stat"><span class="k">Plate reads</span><span class="v">2</span></div>
+          <div class="stat"><span class="k">Working fires</span><span class="v">2</span></div>
+          <div class="stat"><span class="k">Pursuits</span><span class="v">1</span></div>
+          <div class="stat"><span class="k">Feats of livestock</span><span class="v">1</span></div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">Where it happened</div>
+        <div class="panel-b" style="padding:10px">
+          <div class="map-strip">
+            <span class="map-pin" style="left:62%;top:52%;color:var(--crash)"></span><span class="map-tag" style="left:62%;top:52%">Geneva Ave · stabbing</span>
+            <span class="map-pin" style="left:45%;top:68%;color:var(--fire)"></span><span class="map-tag" style="left:45%;top:68%">Brookford St · 2-alarm</span>
+            <span class="map-pin" style="left:38%;top:44%;color:var(--transit)"></span><span class="map-tag" style="left:38%;top:44%">93N · pursuit</span>
+            <span class="map-pin" style="left:70%;top:30%;color:var(--scanner)"></span><span class="map-tag" style="left:70%;top:30%">Meridian St · kid in car</span>
+          </div>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">What we could not hear</div>
+        <div class="panel-b">
+          <div class="feedline"><span class="dot off"></span><span class="nm">Boston Fire</span><span class="ct">never connected</span></div>
+          <div class="feedline"><span class="dot off"></span><span class="nm">Lowell Police</span><span class="ct">down 17h</span></div>
+          <div class="divider"></div>
+          <div class="stat"><span class="k">Coverage note</span></div>
+          <p style="font-size:11.5px;color:var(--text-dim);line-height:1.55;margin-top:4px">
+            Two of twelve feeds were silent for this window. Anything that happened only on those channels is <b style="color:var(--text)">missing from this page</b>, not absent from the city. Boston Fire dispatch runs on the separate Boston Fire Department feed, which was up — but company-to-company traffic on the down feed was not heard.
+          </p>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">Hand it over</div>
+        <div class="panel-b">
+          <div class="stat"><span class="k">Night brief auto-builds</span><span class="v good">6:00 PM</span></div>
+          <div class="stat"><span class="k">This window's archive</span><span class="v">12,847 clips</span></div>
+          <div class="divider"></div>
+          <button class="btn" onclick="copied(this)">Copy for the budget email</button>
+          <button class="btn" onclick="copied(this)" style="margin-left:8px">Print</button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  function switchShift(btn){
+    document.querySelectorAll('.shift-switch button').forEach(b=>b.classList.remove('on'));
+    btn.classList.add('on');
+    const night = btn.textContent.trim().toLowerCase()==='night';
+    document.querySelector('.shift-badge').innerHTML = night
+      ? 'NIGHT SHIFT · <b>6:00 PM – 6:00 AM ET</b> · THU AUG 14 → FRI AUG 15'
+      : 'DAY SHIFT · <b>6:00 AM – 6:00 PM ET</b> · THU AUG 14';
+    document.querySelector('.picker .win').textContent = night
+      ? 'everything that cleared the bar · 6:00 PM to 6:00 AM Eastern'
+      : 'everything that cleared the bar · 6:00 AM to 6:00 PM Eastern';
+  }
+  function playClip(el){
+    const on = el.classList.toggle('playing');
+    el.style.background = on ? 'rgba(52,211,153,.18)' : '';
+    el.style.boxShadow = on ? '0 0 0 1px var(--scanner) inset' : '';
+    el.innerHTML = on ? el.innerHTML.replace('▶','■') : el.innerHTML.replace('■','▶');
+  }
+  function copied(btn){
+    const t = btn.textContent; btn.textContent = 'Copied ✓'; btn.style.color='var(--scanner)';
+    setTimeout(()=>{ btn.textContent = t; btn.style.color=''; }, 1600);
+  }
+</script>
+</body>
+</html>

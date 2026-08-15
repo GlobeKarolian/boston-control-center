@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Shift Change — Boston Newsroom</title>
+<style>
+  :root{
+    --bg:#05070b; --panel:#0c1017;
+    --border:#232c3b; --border-soft:#1a2230;
+    --text:#e9edf4; --text-dim:#9aa4b6; --text-faint:#5f6a7e;
+    --crash:#ff4d4d; --road:#ffb020; --transit:#4da3ff; --scanner:#34d399;
+    --alert:#c07cff; --fire:#ff8c42; --stale:#e8a33d;
+    --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+    --serif:Georgia,"Times New Roman",serif;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{background:var(--bg);color:var(--text);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased}
+  body{max-width:860px;margin:0 auto;padding:22px 22px 70px}
+
+  /* ── masthead: the shift and nothing else ─────────────────────────── */
+  .top{display:flex;align-items:baseline;gap:14px;padding-bottom:18px;border-bottom:1px solid var(--border);flex-wrap:wrap}
+  .name{font-family:var(--serif);font-size:21px;font-weight:700;letter-spacing:-.01em}
+  .when{font-family:var(--mono);font-size:13px;color:var(--text-dim)}
+  .switch{margin-left:auto;display:flex;border:1px solid var(--border);border-radius:7px;overflow:hidden}
+  .switch button{font-family:var(--mono);font-size:12px;letter-spacing:1.5px;background:none;border:0;color:var(--text-dim);padding:8px 24px;cursor:pointer;text-transform:uppercase}
+  .switch button.on{background:var(--scanner);color:#05070b;font-weight:700}
+  .switch button:hover:not(.on){color:var(--text);background:rgba(255,255,255,.04)}
+
+  /* ── the lead: the one thing you are walking into ─────────────────── */
+  .lead{padding:34px 0 30px;border-bottom:1px solid var(--border)}
+  .lead .k{font-family:var(--mono);font-size:11px;letter-spacing:2.5px;text-transform:uppercase;color:var(--crash);margin-bottom:12px}
+  .lead .k .tm{color:var(--text-faint);letter-spacing:1px;margin-left:10px;text-transform:none}
+  .lead h1{font-family:var(--serif);font-size:31px;font-weight:700;line-height:1.22;letter-spacing:-.01em;max-width:760px}
+  .lead .what{margin-top:12px;font-size:15px;color:var(--text-dim);line-height:1.65;max-width:700px}
+  .lead .row{display:flex;align-items:center;gap:14px;margin-top:16px;flex-wrap:wrap}
+  .lead .unsure{margin-top:16px;font-size:13px;color:var(--stale);border-left:2px solid var(--stale);padding:2px 0 2px 12px;max-width:660px}
+
+  /* ── the list: ranked by what the incoming desk walks into ────────── */
+  .rank-label{font-family:var(--mono);font-size:10.5px;letter-spacing:2.5px;text-transform:uppercase;color:var(--text-faint);margin:30px 0 4px}
+  .rank-label.live{color:var(--road)}
+  .rank-label.done{color:var(--text-faint)}
+
+  .item{padding:15px 4px 15px 14px;border-bottom:1px solid var(--border-soft);border-left:3px solid transparent;cursor:pointer;display:flex;gap:14px;align-items:baseline}
+  .item:hover{background:rgba(255,255,255,.025)}
+  .item.hot{border-left-color:var(--road);background:linear-gradient(90deg,rgba(255,176,32,.05),transparent 60%)}
+  .item.hot-fire{border-left-color:var(--fire);background:linear-gradient(90deg,rgba(255,140,66,.05),transparent 60%)}
+
+  .item .body{flex:1;min-width:0}
+  .item .cat{font-family:var(--mono);font-size:9.5px;letter-spacing:2px;text-transform:uppercase;color:var(--text-faint);margin-bottom:4px}
+  .item .cat.crime{color:var(--crash)} .item .cat.fire{color:var(--fire)} .item .cat.chase{color:var(--transit)} .item .cat.odd{color:var(--alert)}
+  .item .hl{font-family:var(--serif);font-size:17px;font-weight:700;line-height:1.3}
+  .item .stat{font-family:var(--mono);font-size:11px;margin-top:5px;letter-spacing:.5px}
+  .item .stat.run{color:var(--road)} .item .stat.out{color:var(--crash)} .item .stat.closed{color:var(--text-faint)} .item .stat.ok{color:var(--scanner)}
+  .item .tm{font-family:var(--mono);font-size:12.5px;color:var(--text-dim);white-space:nowrap}
+  .item .chev{font-family:var(--mono);color:var(--text-faint);font-size:12px;transition:transform .15s}
+  .item.open .chev{transform:rotate(90deg)}
+
+  /* ── the expanded drawer ──────────────────────────────────────────── */
+  .drawer{display:none;padding:6px 4px 20px 17px;border-bottom:1px solid var(--border-soft)}
+  .item.open + .drawer{display:block}
+  .drawer .what{font-size:13.5px;color:var(--text-dim);line-height:1.65;max-width:680px}
+  .drawer .unsure{margin-top:12px;font-size:12.5px;color:var(--stale);border-left:2px solid var(--stale);padding:2px 0 2px 12px;max-width:660px}
+  .drawer .tape{margin-top:14px;border-top:1px dashed var(--border-soft);padding-top:10px;max-width:700px}
+  .drawer .x{display:flex;gap:10px;font-family:var(--mono);font-size:11.5px;padding:3px 0;color:var(--text-dim)}
+  .drawer .x .xt{color:var(--text-faint);flex:0 0 52px}
+  .drawer .x .xf{color:var(--scanner);flex:0 0 140px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+  /* ── audio: the one interaction ───────────────────────────────────── */
+  .play{font-family:var(--mono);font-size:11px;letter-spacing:.5px;color:var(--scanner);border:1px solid rgba(52,211,153,.45);background:rgba(52,211,153,.08);padding:6px 14px;border-radius:6px;cursor:pointer}
+  .play:hover{background:rgba(52,211,153,.16)}
+  .play.on{background:var(--scanner);color:#05070b;font-weight:700}
+  .play.big{font-size:12.5px;padding:9px 20px}
+  .clips{font-family:var(--mono);font-size:10.5px;color:var(--text-faint)}
+
+  /* ── the foot: one line of honesty ────────────────────────────────── */
+  .cov{margin-top:40px;padding-top:14px;border-top:1px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text-faint);line-height:1.8}
+  .cov b{color:var(--road);font-weight:600}
+  .cov .actions{margin-top:10px;display:flex;gap:10px}
+  .cov .btn{font-family:var(--mono);font-size:10px;letter-spacing:1px;background:none;border:1px solid var(--border);color:var(--text-dim);padding:5px 14px;border-radius:5px;cursor:pointer;text-transform:uppercase}
+  .cov .btn:hover{color:var(--text);border-color:var(--text-dim)}
+
+  @media (max-width:700px){
+    .lead h1{font-size:24px}
+    .item .tm{display:none}
+  }
+  @media print{
+    .switch,.play,.cov .actions{display:none}
+    body{background:#fff;color:#111;max-width:none}
+    .lead h1,.item .hl{color:#000}
+    .lead .what,.drawer .what{color:#333}
+    .drawer{display:block !important}
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <span class="name">Shift Change</span>
+  <span class="when" id="win">Thu Aug 14 · 6a – 6p</span>
+  <div class="switch">
+    <button class="on" onclick="flip(this,0)">Day</button>
+    <button onclick="flip(this,1)">Night</button>
+  </div>
+</header>
+
+<!-- THE LEAD — the thing walking in the door with you -->
+<section class="lead">
+  <div class="k">Developing · lead story<span class="tm">first call 4:41 PM</span></div>
+  <h1>Two shot on King Street in Worcester, one critical; second scene taped on Harrison Street</h1>
+  <p class="what">Worcester PD holding two connected scenes. State Police on the perimeter — the crowd kept pushing through the tape line. On Harrison Street they're "looking for the gun, interviewing people."</p>
+  <div class="row">
+    <button class="play big" onclick="p(this)">▶ Hear how it came in</button>
+    <span class="clips">6 clips · 4:41p – 5:58p</span>
+  </div>
+  <p class="unsure">Victim count, and whether Harrison Street is the shooter or a second victim.</p>
+</section>
+
+<!-- STILL RUNNING -->
+<div class="rank-label live">Still running</div>
+
+<div class="item hot-fire" onclick="t(this)">
+  <div class="body">
+    <div class="cat fire">Fire · boston-fire</div>
+    <div class="hl">Two-alarm in a three-decker on Brookford Street, Dorchester</div>
+    <div class="stat run">companies still operating · one firefighter transported, hand burns</div>
+  </div>
+  <span class="tm">2:17p</span><span class="chev">▸</span>
+</div>
+<div class="drawer">
+  <p class="what">Second alarm nine minutes after the box — fire on two floors, ladders to the roof, two lines stretched, primary search complete at 2:41. "Member being transported" at 2:58.</p>
+  <p class="unsure">Extent of the firefighter's injuries — EMS called it "minor," but a burn transport is a burn transport.</p>
+  <div class="row" style="margin-top:12px"><button class="play" onclick="event.stopPropagation();p(this)">▶ 14 clips</button></div>
+  <div class="tape">
+    <div class="x"><span class="xt">2:17p</span><span class="xf">boston-fire</span><span>"…box 44, strike the box, Brookford Street…"</span></div>
+    <div class="x"><span class="xt">2:26p</span><span class="xf">boston-fire</span><span>"…strike the second alarm, fire two floors…"</span></div>
+    <div class="x"><span class="xt">2:58p</span><span class="xf">boston-ems</span><span>"…member being transported, burns to the hand…"</span></div>
+  </div>
+</div>
+
+<div class="rank-label live">Outstanding</div>
+
+<div class="item hot" onclick="t(this)">
+  <div class="body">
+    <div class="cat crime">Crime · boston-police</div>
+    <div class="hl">Armed carjacking at the South Bay Target lot; Audi taken at gunpoint toward Dorchester</div>
+    <div class="stat out">suspects outstanding · lookout still aired · plate read twice</div>
+  </div>
+  <span class="tm">11:52a</span><span class="chev">▸</span>
+</div>
+<div class="drawer">
+  <p class="what">Lookout for a grey Audi Q5 taken at gunpoint in the South Bay lot, two male suspects, last seen toward Dorchester. Units held the lot for the K-9 track.</p>
+  <p class="unsure">Confirm before publishing any suspect description.</p>
+  <div class="row" style="margin-top:12px"><button class="play" onclick="event.stopPropagation();p(this)">▶ 5 clips</button></div>
+</div>
+
+<!-- CLOSED -->
+<div class="rank-label done">Closed out</div>
+
+<div class="item" onclick="t(this)">
+  <div class="body">
+    <div class="cat crime">Crime · boston-police</div>
+    <div class="hl">Stabbing on Geneva Avenue; one in custody after a foot chase through the Bowdoin back lots</div>
+    <div class="stat closed">custody aired 2:09p · 65-minute arc</div>
+  </div>
+  <span class="tm">1:04p</span><span class="chev">▸</span>
+</div>
+<div class="drawer">
+  <p class="what">Called in as an assault; units found a victim with stab wounds to the arm at 50 Geneva. Suspect fled on foot — "got one in custody, 50 Geneva" aired at 2:09. Tracker logged the arrest.</p>
+  <div class="row" style="margin-top:12px"><button class="play" onclick="event.stopPropagation();p(this)">▶ 9 clips</button></div>
+</div>
+
+<div class="item" onclick="t(this)">
+  <div class="body">
+    <div class="cat chase">Chase · mass-state-police</div>
+    <div class="hl">Pursuit up 93 North at 90+, terminated at the Medford line — car recovered in Somerville</div>
+    <div class="stat closed">policy termination · ignition punched · 10:38a</div>
+  </div>
+  <span class="tm">10:38a</span><span class="chev">▸</span>
+</div>
+<div class="drawer">
+  <p class="what">Stolen Camry north through the Zakim. Terminated at the Medford line per policy; Somerville found it abandoned on Thurston Street forty minutes later.</p>
+  <div class="row" style="margin-top:12px"><button class="play" onclick="event.stopPropagation();p(this)">▶ 7 clips</button></div>
+</div>
+
+<div class="item" onclick="t(this)">
+  <div class="body">
+    <div class="cat odd">Resolved · boston-fire</div>
+    <div class="hl">Toddler locked in a car on Meridian Street — out through the window before the ladder arrived</div>
+    <div class="stat ok">child fine · the 12:51 clip is the one for the meeting</div>
+  </div>
+  <span class="tm">12:44p</span><span class="chev">▸</span>
+</div>
+<div class="drawer">
+  <p class="what">East Boston units to a child locked in a running car at Meridian and Lexington. Engine 9 was mid-air when the caller's brother got in through a cracked window. At 12:51 a firefighter sang to the kid through the window while they worked.</p>
+  <div class="row" style="margin-top:12px"><button class="play" onclick="event.stopPropagation();p(this)">▶ 6 clips · hear 12:51p</button></div>
+</div>
+
+<div class="item" onclick="t(this)">
+  <div class="body">
+    <div class="cat fire">Fire · boston-fire</div>
+    <div class="hl">Car fire on the I-93 northbound ramp at Columbia Road</div>
+    <div class="stat closed">knocked down in 12 min · no injuries · snarled the commute build</div>
+  </div>
+  <span class="tm">4:02p</span><span class="chev">▸</span>
+</div>
+<div class="drawer">
+  <p class="what">Fully-involved sedan, one lane blocked. Worth a line only because a photog could have had it from the overpass.</p>
+  <div class="row" style="margin-top:12px"><button class="play" onclick="event.stopPropagation();p(this)">▶ 3 clips</button></div>
+</div>
+
+<div class="item" onclick="t(this)">
+  <div class="body">
+    <div class="cat crime">Crime · boston-police</div>
+    <div class="hl">Breaking-and-entering on Blue Hill Avenue turned out to be the homeowner's locksmith</div>
+    <div class="stat closed">4 units · 30 min of perimeter · good-intent close</div>
+  </div>
+  <span class="tm">9:21a</span><span class="chev">▸</span>
+</div>
+<div class="drawer">
+  <p class="what">Caller reported two men forcing a door. "All set, it's the locksmith, homeowner is on scene" at 9:52. Kept because a desk watching would have called the precinct.</p>
+  <div class="row" style="margin-top:12px"><button class="play" onclick="event.stopPropagation();p(this)">▶ 4 clips</button></div>
+</div>
+
+<div class="item" onclick="t(this)">
+  <div class="body">
+    <div class="cat odd">Oddball · boston-police</div>
+    <div class="hl">Goat in the road on the Jamaicaway; three units, one very unimpressed goat</div>
+    <div class="stat closed">into a van at 8:40 · nobody claimed it all day</div>
+  </div>
+  <span class="tm">7:58a</span><span class="chev">▸</span>
+</div>
+<div class="drawer">
+  <p class="what">Morning commute, goat standing in the middle of the Jamaicaway near the pond refusing every approach. "Be advised, the goat is… large" aired at 8:11.</p>
+  <div class="row" style="margin-top:12px"><button class="play" onclick="event.stopPropagation();p(this)">▶ 4 clips</button></div>
+</div>
+
+<!-- THE FOOT — one line of honesty, then the actions -->
+<div class="cov">
+  <b>Boston Fire and Lowell Police were down this shift</b> — anything on those channels is missing from this page, not absent from the city. Everything else was heard, machine-transcribed, and machine-located; nothing here is confirmed or for publication until the desk checks it against the department. Order is mechanical — signals heard, agencies, units, running time — not a model's judgment.
+  <div class="actions">
+    <button class="btn" onclick="copied(this)">Copy for budget</button>
+    <button class="btn" onclick="window.print()">Print</button>
+  </div>
+</div>
+
+<script>
+  function t(item){
+    item.classList.toggle('open');
+    const d = item.nextElementSibling;
+    if(d && d.classList.contains('drawer')) d.style.display = item.classList.contains('open') ? 'block' : 'none';
+  }
+  function p(btn){
+    const on = btn.classList.toggle('on');
+    btn.innerHTML = on ? btn.innerHTML.replace('▶','■') : btn.innerHTML.replace('■','▶');
+  }
+  function flip(btn, night){
+    document.querySelectorAll('.switch button').forEach(b=>b.classList.remove('on'));
+    btn.classList.add('on');
+    document.getElementById('win').textContent = night ? 'Thu Aug 14 · 6p – Fri 6a' : 'Thu Aug 14 · 6a – 6p';
+  }
+  function copied(btn){ const t0=btn.textContent; btn.textContent='Copied ✓'; setTimeout(()=>btn.textContent=t0,1400); }
+</script>
+</body>
+</html>

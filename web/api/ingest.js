@@ -328,6 +328,10 @@ module.exports = async (req, res) => {
            board looks fine. It lands in the model log where the Under the
            Hood panel can see it, not just in a response only the relay reads. */
         llmlog.record('vault', { model: 'blob', ms: 0, ok: false, why: v.why });
+      } else if (v && v.ok) {
+        /* And a success is logged too, because a vault that never logs
+           anything is indistinguishable from a vault that never runs. */
+        llmlog.record('vault', { model: 'blob', ms: 0, ok: true, inTok: forVault.length });
       }
     } catch (e) {
       warnings.push('vault: ' + String(e.message || e).slice(0, 120));
