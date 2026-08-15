@@ -2401,6 +2401,15 @@ async function pollConsole(){
   let list=[];
   try{const r=await fetch('./transcripts.json',{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j))list=j;}}catch(e){}
   const sub=document.getElementById('consoleSub'), el=document.getElementById('clog');
+  /* Skip the redraw when the data has not changed. The console ring is capped
+     at 80, so a stable list means the DOM is already correct. */
+  const listKey=list.length?list[0].id+':'+list.length:'empty';
+  if(listKey===pollConsole._lastKey){
+    if(sub){const s0=(list[0]&&list[0].time&&(Date.now()-new Date(list[0].time).getTime()<25000))?'ingesting live':'idle';
+      sub.textContent=RADIO_ON?(s0+' · radio on'+(CLIP_Q.length?' · '+CLIP_Q.length+' queued':'')):s0;}
+    return;
+  }
+  pollConsole._lastKey=listKey;
   /* Ahead of the early return, because the state police radio keeps a buffer of
      what it has already been sent and an empty poll must not be treated as a
      reason to skip the redraw. Also because this is the one place the raw log
