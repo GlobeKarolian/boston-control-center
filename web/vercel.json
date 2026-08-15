@@ -85,6 +85,14 @@
     {
       "source": "/briefing.html",
       "destination": "/api/briefing?format=html"
+    },
+    {
+      "source": "/shift-change",
+      "destination": "/api/shift-change"
+    },
+    {
+      "source": "/shift-change.json",
+      "destination": "/api/shift-change"
     }
   ],
   "functions": {
@@ -148,6 +156,9 @@
     },
     "api/desk-ask.js": {
       "maxDuration": 120
+    },
+    "api/shift-change.js": {
+      "maxDuration": 60
     },
     "api/briefing.js": {
       "maxDuration": 300

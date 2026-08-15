@@ -688,6 +688,47 @@
   .be-ev-st .sv .newinc{color:var(--wire);font-weight:700}
   .be-idle{color:var(--text-faint);font-style:italic;padding:22px 4px}
 
+  /* --- shift change (the handoff briefing) --- */
+  #shiftview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
+  #shiftview.show{display:flex}
+  .sc-wrap{flex:1;overflow-y:auto;padding:20px 26px 34px;max-width:860px;margin:0 auto;width:100%}
+  .sc-wrap::-webkit-scrollbar{width:9px}.sc-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .sc-top{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:6px}
+  .sc-top h1{font-family:var(--serif);font-size:24px;font-weight:700;letter-spacing:-.01em}
+  .sc-win{font-family:var(--mono);font-size:12px;color:var(--text-dim)}
+  .sc-switch{margin-left:auto;display:flex;background:var(--panel-solid);border:1px solid var(--border);border-radius:8px;overflow:hidden}
+  .sc-switch button{font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--text-dim);background:none;border:0;padding:7px 16px;cursor:pointer;text-transform:uppercase}
+  .sc-switch button.on{background:var(--scanner);color:#05070b;font-weight:600}
+  .sc-switch button:hover:not(.on){background:rgba(255,255,255,.04);color:var(--text)}
+  .sc-lead{font-family:var(--serif);font-size:15px;line-height:1.6;border-left:3px solid var(--wire);padding:2px 0 2px 14px;margin:8px 0 20px;color:var(--text)}
+  .sc-sect{margin-bottom:18px}
+  .sc-sect-head{display:flex;align-items:baseline;gap:10px;padding-bottom:7px;border-bottom:1px solid var(--border);margin-bottom:2px}
+  .sc-sect-head h2{font-family:var(--mono);font-size:11.5px;font-weight:600;letter-spacing:2px;text-transform:uppercase}
+  .sc-sect-head .n{font-family:var(--mono);font-size:10.5px;color:var(--text-faint)}
+  .sc-sect-head.crit h2{color:var(--crash)} .sc-sect-head.crit{border-bottom-color:rgba(255,77,77,.3)}
+  .sc-sect-head.fire h2{color:var(--fire)} .sc-sect-head.fire{border-bottom-color:rgba(255,140,66,.3)}
+  .sc-sect-head.chase h2{color:var(--transit)} .sc-sect-head.chase{border-bottom-color:rgba(77,163,255,.3)}
+  .sc-sect-head.odd h2{color:var(--alert)} .sc-sect-head.odd{border-bottom-color:rgba(192,124,255,.3)}
+  .sc-item{padding:12px 0 14px;border-bottom:1px solid var(--border-soft)}
+  .sc-item:last-child{border-bottom:0}
+  .sc-item-top{display:flex;align-items:baseline;gap:9px}
+  .sc-rank{font-family:var(--mono);font-size:11px;color:var(--text-faint);width:18px;flex:0 0 auto}
+  .sc-headline{font-family:var(--serif);font-size:14.5px;font-weight:700;flex:1;line-height:1.35}
+  .sc-time{font-family:var(--mono);font-size:11px;color:var(--text-faint);white-space:nowrap}
+  .sc-what{font-size:13.5px;line-height:1.55;color:var(--text-dim);margin:5px 0 0 27px}
+  .sc-unsure{font-size:12.5px;color:var(--road);margin:5px 0 0 27px;font-style:italic}
+  .sc-why{font-family:var(--mono);font-size:11px;color:var(--text-faint);margin:5px 0 0 27px}
+  .sc-meta{display:flex;gap:7px;flex-wrap:wrap;margin:7px 0 0 27px}
+  .sc-chip{font-family:var(--mono);font-size:10px;letter-spacing:.5px;padding:2px 8px;border-radius:4px}
+  .sc-chip.sev4{background:var(--wire);color:#fff;font-weight:700}
+  .sc-chip.sev3{background:rgba(255,176,32,.18);color:var(--road);border:1px solid rgba(255,176,32,.3)}
+  .sc-chip.sev2{background:rgba(77,163,255,.12);color:var(--transit);border:1px solid rgba(77,163,255,.2)}
+  .sc-chip.play{background:rgba(52,211,153,.12);color:var(--scanner);border:1px solid rgba(52,211,153,.25);cursor:pointer}
+  .sc-chip.play:hover{background:rgba(52,211,153,.25)}
+  .sc-chip.src{background:rgba(255,255,255,.04);color:var(--text-dim);border:1px solid var(--border)}
+  .sc-foot{margin-top:24px;padding-top:14px;border-top:2px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text-faint);line-height:1.7}
+  .sc-empty{padding:40px 0;text-align:center;color:var(--text-faint);font-style:italic}
+
   /* --- desk-editor SITUATIONS (the smart layer) --- */
   .rail{top:58px}
   .sit-head{background:linear-gradient(90deg,rgba(192,124,255,.14),transparent)}
@@ -1306,6 +1347,7 @@
       <button class="tab" data-view="desk">Desk</button>
       <button class="tab" data-view="story">Story</button>
       <button class="tab" data-view="archive">Archive</button>
+      <button class="tab" data-view="shift">Shift</button>
       <button class="tab" data-view="backend"><span class="tdot"></span>Under the Hood</button>
     </div>
     <span class="caveat" title="Live scanner and geodata on Boston. Calls are machine-transcribed and machine-located, so they are unverified and not for publication until the desk confirms. Click any incident for its live timeline.">Unverified &middot; not for publication</span>
@@ -1453,6 +1495,24 @@
       </div>
       <div id="arRead" class="ar-read"></div>
       <div id="arOut"></div>
+    </div>
+  </div>
+
+  <!-- Shift Change: the handoff briefing. What happened on the shift that is
+       ending, ranked by news value, with audio. -->
+  <div id="shiftview">
+    <div class="sc-wrap">
+      <div class="sc-top">
+        <h1>Shift change</h1>
+        <span class="sc-win" id="scWin"></span>
+        <div class="sc-switch" id="scSwitch">
+          <button class="on" data-shift="day">Day</button>
+          <button data-shift="night">Night</button>
+        </div>
+      </div>
+      <p class="sc-lead" id="scLead"></p>
+      <div id="scOut"></div>
+      <div class="sc-foot" id="scFoot"></div>
     </div>
   </div>
 
@@ -2737,7 +2797,9 @@ const VIEWS={ stops:{el:'stopsview',poll:()=>pollStops()},
   /* The archive opens on whatever was last asked and otherwise on nothing. It
      runs no timer: this is the one surface here that answers a question rather
      than watching the radio, so it should be silent until somebody speaks. */
-  archive:{el:'archiveview',poll:()=>{}} };
+  archive:{el:'archiveview',poll:()=>{}},
+  /* Shift Change loads once on open and again when the shift toggle flips. */
+  shift:{el:'shiftview',poll:()=>shiftLoad()} };
 /* The Desk and the Story open no connection of their own. Everything they draw
    is already in this scope because the pollers that own the map put it there,
    so the whole integration is this function: hand the module the arrays, let it
@@ -3043,6 +3105,76 @@ async function pollPipeline(){
       '</div></div>';
   }).join('');
 }
+
+/* Shift Change. Loads the handoff briefing for the selected shift and renders
+   the sections a desk editor would ask about. */
+let SC_SHIFT='day';
+async function shiftLoad(){
+  const out=document.getElementById('scOut'), lead=document.getElementById('scLead'),
+        win=document.getElementById('scWin'), foot=document.getElementById('scFoot');
+  if(!out)return;
+  if(lead)lead.textContent='Reading the archive…';
+  let d=null;
+  try{
+    const r=await fetch('./shift-change.json?shift='+SC_SHIFT,{cache:'no-store'});
+    if(r.ok)d=await r.json();
+  }catch(e){}
+  if(!d||!d.ok){
+    if(lead)lead.textContent=d&&d.why?d.why:'Could not load the shift briefing.';
+    if(out)out.innerHTML='<div class="sc-empty">The archive did not answer.</div>';
+    return;
+  }
+  if(win)win.textContent=d.window.label;
+  if(lead)lead.textContent=d.lead||'Nothing cleared the bar this shift.';
+  const sections=d.sections||[];
+  if(!sections.length){
+    if(out)out.innerHTML='<div class="sc-empty">Nothing on this shift cleared the bar for a briefing item.</div>';
+    if(foot)foot.textContent=d.coverage.transmissions+' transmissions across '+d.coverage.feeds+' feeds.';
+    return;
+  }
+  let rank=0;
+  if(out)out.innerHTML=sections.map(sec=>{
+    const items=sec.items.map(it=>{
+      rank++;
+      const sevClass=it.severity>=4?'sev4':it.severity>=3?'sev3':'sev2';
+      const sevLabel=it.severity>=4?'BIG STORY':it.severity>=3?'STORY':'NOTE';
+      const clips=it.clips&&it.clips.length?'▶ '+it.clips.length+' clip'+(it.clips.length===1?'':'s'):'no audio';
+      const feeds=it.feeds.join(' · ');
+      const txRows=(it.tx||[]).map(t=>'<tr><td class="t">'+esc(t.at?new Date(t.at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}):'')+'</td><td class="f">'+esc(t.src||'')+'</td><td>'+esc(t.text||'')+'</td></tr>').join('');
+      return '<div class="sc-item">'+
+        '<div class="sc-item-top"><span class="sc-rank">'+rank+'</span>'+
+        '<span class="sc-headline">'+esc(it.headline)+'</span>'+
+        '<span class="sc-time">'+esc(it.from?new Date(it.from).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/New_York'}):'')+'</span></div>'+
+        (it.what?'<p class="sc-what">'+esc(it.what)+'</p>':'')+
+        (it.unsure?'<p class="sc-unsure">Confirm before writing: '+esc(it.unsure)+'</p>':'')+
+        '<div class="sc-meta">'+
+        '<span class="sc-chip '+sevClass+'">'+sevLabel+'</span>'+
+        (it.clips&&it.clips.length?'<span class="sc-chip play" onclick="scPlay(this)" data-clips="'+esc(JSON.stringify(it.clips))+'">'+clips+'</span>':'<span class="sc-chip play" style="opacity:.4">'+clips+'</span>')+
+        '<span class="sc-chip src">'+esc(feeds)+'</span>'+
+        '</div>'+
+        '<p class="sc-why">why it\'s here: '+esc((it.why||[]).join(' · '))+'</p>'+
+        (txRows?'<details style="margin:6px 0 0 27px"><summary style="font-family:var(--mono);font-size:11px;color:var(--text-faint);cursor:pointer">'+it.n+' transmission'+(it.n===1?'':'s')+'</summary><table style="width:100%;margin-top:6px;font-size:12px;border-collapse:collapse">'+txRows+'</table></details>':'')+
+        '</div>';
+    }).join('');
+    return '<div class="sc-sect"><div class="sc-sect-head '+sec.id+'"><h2>'+esc(sec.label)+'</h2><span class="n">'+sec.count+'</span></div>'+items+'</div>';
+  }).join('');
+  if(foot)foot.textContent=d.coverage.transmissions+' transmissions across '+d.coverage.feeds+' feeds · generated '+new Date(d.generatedAt).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
+}
+/* Play the clips for a shift item through the shared radio player. */
+function scPlay(el){
+  const clips=JSON.parse(el.dataset.clips||'[]');
+  if(!clips.length||!window.BCCClips)return;
+  clipPlay(clips[0]);
+}
+/* Shift toggle. */
+document.querySelectorAll('#scSwitch button').forEach(b=>{
+  b.addEventListener('click',()=>{
+    document.querySelectorAll('#scSwitch button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');
+    SC_SHIFT=b.dataset.shift;
+    shiftLoad();
+  });
+});
 
 /* Model activity for Under The Hood. Polls only while that tab is showing,
    because a debugging surface should not cost anything when nobody is
