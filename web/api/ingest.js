@@ -33,6 +33,7 @@ const store_io = require('../lib/store-io');
 const threat = require('../lib/threat');
 const baseline = require('../lib/baseline');
 const vault = require('../lib/vault');
+const llmlog = require('../lib/llmlog');
 
 const MAX_ITEMS = 200;
 const MAX_TEXT = 4000;
@@ -321,9 +322,16 @@ module.exports = async (req, res) => {
        nothing more. */
     try {
       const v = await vault.putBatch(forVault, { by, machine: auth.machine });
-      if (v && v.ok === false && v.why) warnings.push('vault: ' + v.why);
+      if (v && v.ok === false && v.why) {
+        warnings.push('vault: ' + v.why);
+        /* A vault write that fails is the archive dying quietly while the
+           board looks fine. It lands in the model log where the Under the
+           Hood panel can see it, not just in a response only the relay reads. */
+        llmlog.record('vault', { model: 'blob', ms: 0, ok: false, why: v.why });
+      }
     } catch (e) {
       warnings.push('vault: ' + String(e.message || e).slice(0, 120));
+      llmlog.record('vault', { model: 'blob', ms: 0, ok: false, why: String(e.message || e).slice(0, 200) });
     }
 
     // A real ingest always renders, and resets the heartbeat clock along with

@@ -10,6 +10,7 @@ const kv = require('../lib/kv');
 const llmlog = require('../lib/llmlog');
 const users = require('../lib/users');
 const store_io = require('../lib/store-io');
+const blob = require('../lib/blob');
 
 const set = name => !!(process.env[name] && String(process.env[name]).trim());
 
@@ -34,7 +35,13 @@ module.exports = async (req, res) => {
       INGEST_SECRET: set('INGEST_SECRET'),
       CRON_SECRET: set('CRON_SECRET'),
       BROADCASTIFY_LOGIN: set('BROADCASTIFY_USER') && set('BROADCASTIFY_PASS'),
+      BLOB_READ_WRITE_TOKEN: set('BLOB_READ_WRITE_TOKEN'),
     },
+    /* The vault lives on Blob. With no token the archive is not being written,
+       and desk-read, the archive tab, and the briefing all answer from an
+       empty room while the live console looks fine. This is the failure that
+       sat silently for six hours on 15 August 2026. */
+    blob: { on: blob.enabled(), why: blob.enabled() ? '' : blob.reason() },
     warnings: [],
   };
   /* Counts, never names. Everybody holding a viewer login can open this page,
@@ -127,6 +134,11 @@ module.exports = async (req, res) => {
 
   if (!out.config.CRON_SECRET) out.warnings.push('No CRON_SECRET, so anyone who guesses a cron URL can trigger a paid sweep.');
   if (!kv.live) out.warnings.push('No Redis configured. Run: vercel install upstash');
+  /* The vault failing silently is how "Nothing at all has come across" sat on
+     the desk panel for six hours while the live console looked fine. A warning
+     here is the difference between noticing in the panel and noticing in the
+     newsroom. */
+  if (!out.blob.on) out.warnings.push('Blob storage is not configured (' + out.blob.why + '), so the vault is not being written: desk-read, the archive tab and the briefing are all answering from an empty room. Set BLOB_READ_WRITE_TOKEN.');
 
   try {
     const r = await kv.raw([['PING']], 5000);

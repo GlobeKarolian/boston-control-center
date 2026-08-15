@@ -30,6 +30,7 @@ const llm = require('../lib/llm');
 const trace = require('../lib/trace');
 const et = require('../lib/etime');
 const severity = require('../lib/severity');
+const blob = require('../lib/blob');
 
 const MAX_MINUTES = 60;
 const MAX_LINES = 260;
@@ -104,11 +105,19 @@ module.exports = async (req, res) => {
   const tx = rows.slice(-MAX_LINES).map(stream.forListening);
 
   if (!rows.length) {
+    /* An empty vault with Blob configured is genuinely a quiet window or a
+       relay problem. An empty vault with Blob OFF is the archive being dead,
+       and blaming the relay for it is the lie that sat on this panel for six
+       hours on 15 August 2026. Name the actual cause. */
+    const vaultOff = !blob.enabled();
     return json(res, {
       ok: true,
-      read: 'Nothing at all has come across in the last ' + minutes + ' minutes. That usually means the relay is not sending rather than that the city is silent.',
+      read: vaultOff
+        ? 'The archive is not being written: blob storage is not configured (' + blob.reason() + '). The live radio below is real, but nothing is being kept, so this panel has nothing to read. Set BLOB_READ_WRITE_TOKEN.'
+        : 'Nothing at all has come across in the last ' + minutes + ' minutes. That usually means the relay is not sending rather than that the city is silent.',
       watching: [], quiet: true, unsure: [],
       heard: {}, window: { from: from.toISOString(), to: to.toISOString(), minutes },
+      vault: vaultOff ? { ok: false, why: blob.reason() } : { ok: true },
       complete: got.complete, tx: [], ms: Date.now() - t0,
     }, { priv: 0 });
   }
