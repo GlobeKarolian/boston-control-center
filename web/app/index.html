@@ -83,7 +83,7 @@
     .hud-meta{gap:10px}
     #updated{display:none}}
   .mast{font-family:var(--serif);font-weight:700;font-size:20px;white-space:nowrap;text-shadow:0 1px 6px #000}
-  .sub{font-family:var(--mono);font-size:9.5px;letter-spacing:2.5px;text-transform:uppercase;color:var(--text-faint)}
+  .sub{font-family:var(--mono);font-size:9.5px;letter-spacing:2.5px;text-transform:uppercase;color:var(--text-faint);white-space:nowrap}
   .live-badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;letter-spacing:1.5px;color:var(--wire);text-transform:uppercase;font-weight:700}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--wire);animation:pulse 1.8s infinite}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,59,48,.55)}70%{box-shadow:0 0 0 9px rgba(255,59,48,0)}100%{box-shadow:0 0 0 0 rgba(255,59,48,0)}}
@@ -1733,9 +1733,18 @@ let feedItems=[]; const seen=new Set(); let firstLoad=true;
    lands before the first poll gets an empty list instead of a throw. */
 let lastTx=[];
 function renderFeed(){
+  /* The Live Feed left rail was removed, its #feed and #feedCount elements with
+     it, but this render kept running on every poll and every scanner refresh.
+     getElementById('feedCount') came back null and .textContent threw on it
+     several times a second: 432 identical "Cannot set properties of null"
+     rejections in a 19-minute QA session, a console full of red, and the single
+     loudest instability signal in the tool. If the rail is not on the page there
+     is nothing to draw. feedItems is still maintained for whoever else reads it;
+     only the dead render is skipped. */
+  const cnt=document.getElementById('feedCount'), el=document.getElementById('feed');
+  if(!el||!cnt) return;
   feedItems.sort((a,b)=>{const sa=a.status==='cleared'?1:0,sb=b.status==='cleared'?1:0;if(sa!==sb)return sa-sb;return (b.time?b.time.getTime():0)-(a.time?a.time.getTime():0);});
-  document.getElementById('feedCount').textContent=feedItems.filter(f=>f.status!=='cleared').length;
-  const el=document.getElementById('feed');
+  cnt.textContent=feedItems.filter(f=>f.status!=='cleared').length;
   /* roveKeep before the swap and its return value after: this render throws every row
      away on a timer, so a keyboard on row twelve has to come back to row twelve and
      not to the top of the document. The empty branch returns early through it too,
