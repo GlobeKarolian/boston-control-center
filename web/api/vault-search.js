@@ -227,14 +227,11 @@ function sceneExpand(hits, pool, f) {
       if (added >= SCENE_CAP) break;
       if (have.has(tx)) continue;
       const t = +new Date(tx.at);
-      const sameInc = inc && tx.incidentId === inc;
-      if (!sameInc) {
-        if (Math.abs(t - at) > SCENE_MS) continue;
-        const c2 = String(tx.city || tx.town || '').toLowerCase();
-        if (city && c2 && c2 !== city) continue;
-        const hay = ((tx.text || '') + ' ' + (tx.address || '') + ' ' + (tx.matched || '')).toLowerCase();
-        if (!linked(tx, hay, a.tx, anchorStreet, anchorUnits)) continue;
-      }
+      if (Math.abs(t - at) > SCENE_MS) continue;
+      const c2 = String(tx.city || tx.town || '').toLowerCase();
+      if (city && c2 && c2 !== city) continue;
+      const hay = ((tx.text || '') + ' ' + (tx.address || '') + ' ' + (tx.matched || '')).toLowerCase();
+      if (!linked(tx, hay, a.tx, anchorStreet, anchorUnits)) continue;
       have.add(tx);
       out.push({ tx: { ...tx, ctx: true }, s: 0.01, key: a.key });
       added++;
