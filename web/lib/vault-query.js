@@ -121,6 +121,42 @@ function whenOf(q, now) {
     const from = easternAt(+iso[1], +iso[2], +iso[3], 0, 0, t);
     return { from, to: new Date(+from + dayMs), label: iso[0] };
   }
+
+  /* A date the way a person names one: a weekday, a day number, or both.
+     "Wednesday the 12th", "on the 12th", "wednesday". Until 15 August 2026
+     none of these parsed, so "stabbing at South Station Wednesday the 12th"
+     got the default two-day window and 'wednesday, 12th' as search words,
+     which is how the big one gets missed. */
+  const DAYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+  const MON = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+  const wdM = q.match(/\b(sunday|monday|tuesday|wednesday|thursday|friday|saturday)\b/i);
+  const dnM = q.match(/\b(?:the\s+)?(\d{1,2})(?:st|nd|rd|th)\b/i);
+  if (wdM || dnM) {
+    const p0 = partsIn(t);
+    /* The Eastern weekday right now, so "wednesday" means the most recent
+       Wednesday including today, never next week's. */
+    const todayW = new Date(+easternAt(p0.y, p0.m, p0.d, 12, 0, t)).getUTCDay();
+    let y = p0.y, m = p0.m, d = p0.d;
+    if (dnM) {
+      d = +dnM[1];
+      /* A day number still in the future this month is last month's. */
+      if (d > p0.d) { m -= 1; if (m < 1) { m = 12; y -= 1; } }
+    } else {
+      const want = DAYS.indexOf(wdM[1].toLowerCase());
+      let back = (todayW - want + 7) % 7;
+      const b = new Date(+t - back * dayMs);
+      const bp = partsIn(b);
+      y = bp.y; m = bp.m; d = bp.d;
+    }
+    /* A weekday that disagrees with the number loses: the number is the one
+       a reporter checked before typing. Nothing to do here — d wins by
+       construction. */
+    const from = easternAt(y, m, d, 0, 0, t);
+    const label = DAYS[new Date(+easternAt(y, m, d, 12, 0, t)).getUTCDay()].slice(0, 3)
+      + ' ' + MON[m - 1] + ' ' + d;
+    return { from, to: new Date(+from + dayMs), label };
+  }
+
   // Nothing said: the last two days, which is what "find me the thing" means
   // in a room that works in shifts.
   return { from: new Date(+t - 2 * dayMs), to: new Date(+t), label: 'the last two days' };
@@ -325,6 +361,13 @@ function parse(q, now) {
     for (const w of landmark.split(' ')) consumed.add(w);
     if (landmarkHit) for (const w of landmarkHit.split(' ')) consumed.add(w);
   }
+  /* Date words the when parser already used. "stabbing at South Station
+     Wednesday the 12th" must not search for 'wednesday' or '12th' on top of
+     the window it just built. */
+  for (const w of ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday',
+                   'st', 'nd', 'rd', 'th', 'the']) consumed.add(w);
+  const dnCons = raw.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/i);
+  if (dnCons) { consumed.add(dnCons[1]); consumed.add(dnCons[0].toLowerCase()); }
 
   /* "Lancaster Street" is one thing, not two. Split into tokens, "street"
      matches every transmission in Massachusetts that mentions any street,

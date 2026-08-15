@@ -56,6 +56,66 @@ console.log('\nparse');
   eq('type', f.type, 'shooting');
 }
 
+/* A reporter names a date the way a person names one: a weekday, a day
+   number, sometimes both. Until 15 August 2026 "stabbing at South Station
+   Wednesday the 12th" came back with 'the last two days' for a window and
+   'wednesday, 12th' as search words, which is how the big one gets missed:
+   the window is wrong and the words match nothing. */
+{
+  /* Asked on Saturday 15 August 2026 (ET). Wednesday the 12th is three days
+     back, 00:00 to 23:59 Eastern on the 12th. */
+  const NOW3 = '2026-08-15T04:00:00Z';
+  const f = vq.parse('stabbing at South Station Wednesday the 12th', NOW3);
+  eq('a bare day number is a date, not a search word', f.when, 'wed aug 12');
+  eq('the window opens at midnight Eastern on the 12th',
+     f.from.toISOString(), '2026-08-12T04:00:00.000Z');
+  eq('and closes at midnight Eastern on the 13th',
+     f.to.toISOString(), '2026-08-13T04:00:00.000Z');
+  ok('wednesday is not a search word', !f.words.includes('wednesday'), JSON.stringify(f.words));
+  ok('and 12th is not a search word', !f.words.includes('12th'), JSON.stringify(f.words));
+  eq('the landmark still parses', f.landmark, 'south station');
+  eq('the type still parses', f.type, 'stabbing');
+}
+{
+  /* The same question without the weekday: "the 12th" alone is enough. */
+  const NOW3 = '2026-08-15T04:00:00Z';
+  const f = vq.parse('stabbing at south station on the 12th', NOW3);
+  eq('a bare "the 12th" is the same window', f.when, 'wed aug 12');
+  eq('from', f.from.toISOString(), '2026-08-12T04:00:00.000Z');
+  eq('to', f.to.toISOString(), '2026-08-13T04:00:00.000Z');
+}
+{
+  /* A weekday on its own: the most recent Wednesday, not next week's. */
+  const NOW3 = '2026-08-15T04:00:00Z';
+  const f = vq.parse('stabbing at south station wednesday', NOW3);
+  eq('a bare weekday is the most recent one', f.when, 'wed aug 12');
+  eq('from', f.from.toISOString(), '2026-08-12T04:00:00.000Z');
+}
+{
+  /* Today IS the named day: "wednesday" asked on a Wednesday means today,
+     not a week ago. */
+  const NOW4 = '2026-08-12T16:00:00Z';   // Wednesday Aug 12, noon ET
+  const f = vq.parse('stabbing at south station wednesday', NOW4);
+  eq('wednesday asked on wednesday is today', f.when, 'wed aug 12');
+  eq('from', f.from.toISOString(), '2026-08-12T04:00:00.000Z');
+}
+{
+  /* A day number that is still in the future this month means last month.
+     Asked on the 10th, "the 22nd" is July 22nd. */
+  const NOW5 = '2026-08-10T16:00:00Z';
+  const f = vq.parse('fire on the 22nd', NOW5);
+  eq('a future day number rolls back a month', f.when, 'wed jul 22');
+  eq('from', f.from.toISOString(), '2026-07-22T04:00:00.000Z');
+}
+{
+  /* Date words must not leak into free text even when the date parse wins. */
+  const NOW3 = '2026-08-15T04:00:00Z';
+  const f = vq.parse('shooting wednesday the 12th in dorchester', NOW3);
+  ok('dorchester parses as the place', f.place === 'dorchester', JSON.stringify(f.place));
+  ok('no date words in the free-text list',
+     !f.words.some(w => /wednesday|12th|aug/.test(w)), JSON.stringify(f.words));
+}
+
 /* ------------------------------------------------------------- the corpus --- */
 
 /* Lines that contain the letters b-o-d-y and are not about a body. Seventeen
