@@ -1354,7 +1354,7 @@
     <div class="spacer"></div>
     <div class="hud-meta">
       <span id="alertMount"></span>
-      <span class="status-pill" id="status" role="button" tabindex="0" title="Feed health — click for details" onclick="document.querySelector('.tab[data-view=backend]').click()" onkeydown="if(event.key==='Enter'||event.key===' '){event.preventDefault();this.click();}"><span class="sdot"></span><span class="stxt">live</span></span>
+      <span class="status-pill" id="status" role="button" tabindex="0" title="Feed health — click for details" onclick="document.querySelector('.tab[data-view=backend]').click()"><span class="sdot"></span><span class="stxt">live</span></span>
       <span id="updated">&nbsp;</span>
       <span class="clock" id="clock">--:--:--</span>
     </div>
@@ -1382,7 +1382,7 @@
         title="Only major events that cleared the evidence floor and passed a second model">Situations</button>
       <span class="mode-note" id="modeNote"></span>
     </div>
-    <div class="sit-body" id="situations" role="listbox" tabindex="0" aria-label="Situations list"><div class="empty">Desk editor is reading the scanner&hellip;</div></div>
+    <div class="sit-body" id="situations" role="listbox" aria-label="Situations list"><div class="empty">Desk editor is reading the scanner&hellip;</div></div>
     <!-- The State Police rail is gone, both halves of it: the scenes list that
          said "no state police scenes on the board" almost every hour of every
          day, and the raw radio panel under it that filled the space with
@@ -1440,7 +1440,7 @@
 
   <div class="console">
     <div class="chead"><span class="rec"></span><h3>Live Audio</h3><button id="radioBtn" class="radiobtn" onclick="radioToggle()" title="Play each new transmission out loud as it lands, about half a minute behind the air. Off plays nothing until you press a row's arrow.">&#9654; radio</button><span class="sub2" id="consoleSub">connecting&hellip;</span></div>
-    <div class="clog" id="clog" role="listbox" tabindex="0" aria-label="Live audio console"><div class="cline">Waiting for transmissions&hellip;</div></div>
+    <div class="clog" id="clog" role="listbox" aria-label="Live audio console"><div class="cline">Waiting for transmissions&hellip;</div></div>
   </div>
   <!-- The two live regions, and the one panel that deliberately is not one.
        Toasts get polite: a toast is a duplicate of a feed row that is already on
@@ -1536,9 +1536,9 @@
       </div>
       <div class="st-grid" id="stStats"></div>
       <div class="st-h">Out now<span class="n" id="stOpenN">0</span></div>
-      <div class="st-open" id="stOpen" role="listbox" tabindex="0" aria-label="Open traffic stops"><div class="st-empty">Nobody is out with anyone right now.</div></div>
+      <div class="st-open" id="stOpen" role="listbox" aria-label="Open traffic stops"><div class="st-empty">Nobody is out with anyone right now.</div></div>
       <div class="st-h">Tonight<span class="n" id="stLogN">0</span></div>
-      <div id="stLog" role="listbox" tabindex="0" aria-label="Tonight's traffic stops"><div class="st-empty">Waiting for the first stop&hellip;</div></div>
+      <div id="stLog" role="listbox" aria-label="Tonight's traffic stops"><div class="st-empty">Waiting for the first stop&hellip;</div></div>
     </div>
   </div>
 
@@ -2482,8 +2482,20 @@ function radioToggle(){
 }
 
 async function pollConsole(){
-  let list=[];
+  /* A failed fetch is not an empty radio.
+
+     This used to start with `let list=[]` and fall through on any error, so one
+     dropped request on a train wifi emptied the console, emptied lastTx, and
+     blanked the Desk and the Story transcript lists until the next tick. The
+     situations poller was written to avoid exactly this and this one was not.
+     Nothing is drawn from a request that did not arrive. */
+  let list=null;
   try{const r=await fetch('./transcripts.json',{cache:'no-store'});if(r.ok){const j=await r.json();if(Array.isArray(j))list=j;}}catch(e){}
+  if(list===null){
+    const sub0=document.getElementById('consoleSub');
+    if(sub0&&!lastTx.length)sub0.textContent='cannot reach the server';
+    return;
+  }
   const sub=document.getElementById('consoleSub'), el=document.getElementById('clog');
   /* Skip the redraw when the data has not changed. The console ring is capped
      at 80, so a stable list means the DOM is already correct. */
@@ -2852,6 +2864,18 @@ document.querySelectorAll('.tab').forEach(t=>{
     t.classList.add('active');
     t.setAttribute('aria-current','true');
     const v=t.dataset.view;
+    /* Stand the outgoing view down before the incoming one goes up. Only the
+       backend tab has a stop() and it was never called: VIEWS.backend.stop
+       existed, the switcher only ever called the new view's poll(), so opening
+       Under the Hood once left a credentialed fifteen-second /api/llm-activity
+       poll running for the life of the page, writing into a panel nobody could
+       see. The whole design of this switcher is that a view costs nothing when
+       it is not the visible one. */
+    for(const k in VIEWS){
+      if(k!==v && VIEWS[k].stop && document.getElementById(VIEWS[k].el).classList.contains('show')){
+        try{ VIEWS[k].stop(); }catch(e){}
+      }
+    }
     for(const k in VIEWS) document.getElementById(VIEWS[k].el).classList.toggle('show',k===v);
     /* Before the poll, not after. changed() is what stands the old furniture
        down, swaps the basemap and measures the header, and all three have to be
@@ -3159,22 +3183,29 @@ async function shiftLoad(){
     if(out)out.innerHTML='<div class="sc-empty">The archive did not answer.</div>';
     return;
   }
-  if(win)win.textContent=d.window.label;
+  /* The nested fields, guarded. A malformed but well-meaning {ok:true} used to
+     throw here and strand the panel on "Reading the archive…" forever, which
+     is the one state that tells a reporter nothing and looks like a hang. */
+  const cov=d.coverage||{};
+  const covLine=(cov.transmissions!=null&&cov.feeds!=null)
+    ? cov.transmissions+' transmissions across '+cov.feeds+' feeds'
+    : 'coverage unavailable';
+  if(win)win.textContent=(d.window&&d.window.label)||'';
   if(lead)lead.textContent=d.lead||'Nothing cleared the bar this shift.';
-  const sections=d.sections||[];
+  const sections=Array.isArray(d.sections)?d.sections:[];
   if(!sections.length){
     if(out)out.innerHTML='<div class="sc-empty">Nothing on this shift cleared the bar for a briefing item.</div>';
-    if(foot)foot.textContent=d.coverage.transmissions+' transmissions across '+d.coverage.feeds+' feeds.';
+    if(foot)foot.textContent=covLine+'.';
     return;
   }
   let rank=0;
   if(out)out.innerHTML=sections.map(sec=>{
-    const items=sec.items.map(it=>{
+    const items=(sec&&Array.isArray(sec.items)?sec.items:[]).map(it=>{
       rank++;
       const sevClass=it.severity>=4?'sev4':it.severity>=3?'sev3':'sev2';
       const sevLabel=it.severity>=4?'BIG STORY':it.severity>=3?'STORY':'NOTE';
       const clips=it.clips&&it.clips.length?'▶ '+it.clips.length+' clip'+(it.clips.length===1?'':'s'):'no audio';
-      const feeds=it.feeds.join(' · ');
+      const feeds=(it.feeds||[]).join(' · ');
       const txRows=(it.tx||[]).map(t=>'<tr><td class="t">'+esc(t.at?new Date(t.at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}):'')+'</td><td class="f">'+esc(t.src||'')+'</td><td>'+esc(t.text||'')+'</td></tr>').join('');
       return '<div class="sc-item">'+
         '<div class="sc-item-top"><span class="sc-rank">'+rank+'</span>'+
@@ -3191,9 +3222,9 @@ async function shiftLoad(){
         (txRows?'<details style="margin:6px 0 0 27px"><summary style="font-family:var(--mono);font-size:11px;color:var(--text-faint);cursor:pointer">'+it.n+' transmission'+(it.n===1?'':'s')+'</summary><table style="width:100%;margin-top:6px;font-size:12px;border-collapse:collapse">'+txRows+'</table></details>':'')+
         '</div>';
     }).join('');
-    return '<div class="sc-sect"><div class="sc-sect-head '+sec.id+'"><h2>'+esc(sec.label)+'</h2><span class="n">'+sec.count+'</span></div>'+items+'</div>';
+    return '<div class="sc-sect"><div class="sc-sect-head '+esc(sec.id||'')+'"><h2>'+esc(sec.label||'')+'</h2><span class="n">'+esc(String(sec.count!=null?sec.count:''))+'</span></div>'+items+'</div>';
   }).join('');
-  if(foot)foot.textContent=d.coverage.transmissions+' transmissions across '+d.coverage.feeds+' feeds · generated '+new Date(d.generatedAt).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'});
+  if(foot)foot.textContent=covLine+(d.generatedAt?' · generated '+etHM(d.generatedAt):'');
 }
 /* Play the clips for a shift item through the shared radio player. */
 function scPlay(el){

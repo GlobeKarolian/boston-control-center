@@ -17,6 +17,7 @@ const kv = require('../lib/kv');
 const { K } = require('../lib/store-io');
 const { reconcile } = require('../lib/threads');
 const core = require('../lib/analyst-core');
+const { judge } = require('../lib/judge');
 
 const LOCK = 'bcc:lock:analyst';
 const SIG = 'bcc:analyst:sig';
@@ -73,7 +74,19 @@ module.exports = async (req, res) => {
 
     // The full dispose pipeline, shared verbatim with the cloud path.
     const batch = tr.slice(0, 70);
-    const fresh = await core.disposeReported(sits, { batch, prev });
+    let fresh = await core.disposeReported(sits, { batch, prev });
+
+    /* THE FLOOR AND THE VERIFIER, which this file's own header has always
+       claimed were here and which were not.
+
+       They lived only in api/cron/analyst.js. So when a Mac posted a report,
+       the raw model's word was the only judgment the board ever got, and
+       because a local report makes the cron stand down for ten minutes,
+       nothing was coming along behind it to check. That is the Walden Street
+       failure the floor and the verifier exist to prevent, running unopposed
+       on the second code path. lib/judge.js is now the single implementation
+       and both endpoints call it. */
+    fresh = await judge(fresh, { batch });
 
     const result = reconcile(prev, fresh, overrides);
     await kv.set(K.outSituations, core.fitToBudget(result.situations), 6 * 3600);

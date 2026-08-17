@@ -114,7 +114,14 @@ function floor(ev) {
   for (const t of tx) {
     for (const g of (t.signals || [])) {
       ids.add(g.id);
-      topTier = Math.max(topTier, Number(g.tier) || 0);
+      /* `effective`, not `tier`, when threat.js has set one. A soft signal
+         ("weapon present", "staging", "more units") is worth its full tier
+         only once something else in the transmission agrees with it, and
+         threat.js records that downgrade on the signal. Reading the raw tier
+         here undid it, so a lone uncorroborated "he might have a gun" counted
+         the same as a corroborated one. */
+      const tv = Number(g.effective !== undefined && g.effective !== null ? g.effective : g.tier) || 0;
+      topTier = Math.max(topTier, tv);
     }
     topTier = Math.max(topTier, Number(t.tier) || 0);
   }

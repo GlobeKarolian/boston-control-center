@@ -34,9 +34,7 @@ const { reconcile } = require('../../lib/threads');
    Macs and this cloud path can never drift apart on what a situation is. */
 const core = require('../../lib/analyst-core');
 const stream = require('../../lib/stream');
-const severity = require('../../lib/severity');
-const verify = require('../../lib/verify');
-const baseline = require('../../lib/baseline');
+const { judge } = require('../../lib/judge');
 const llm = require('../../lib/llm');
 
 /* The last thing this cron did, where a person can see it. Never throws: a
@@ -305,64 +303,18 @@ module.exports = async (req, res) => {
 
     /* THE FLOOR, AND THE SECOND OPINION.
 
-       Two layers between a model's enthusiasm and a reporter's phone, run in
-       this order because the cheap one should reject before the expensive one
-       is asked.
+       lib/judge.js, shared with api/analyst-report.js. It used to live only
+       here, which meant the local path had no floor and no verifier at all
+       while the cron stood down for ten minutes on its behalf. One block, two
+       callers: see the header of that file.
 
-       lib/severity.js scores each situation on things that were observed:
-       signals in the transcripts, agencies converged, units, duration, and
-       how far above normal the radio is running. The model's own read is
-       capped at one notch above that, so "Active Shooter" built from one unit
-       clearing an address settles at a 1 rather than a 5.
-
-       lib/verify.js then shows the claim and the raw transcripts to a model
-       from a different lab, with the writer's confidence stripped out, and
-       asks whether the transcripts support it. Anything it cannot stand up is
-       held: it keeps its transmissions and its audio and says what failed. */
-    const anomalyByFeed = {};
-    try {
-      for (const f of [...new Set((streamed && streamed.rows ? streamed.rows : []).map(r => r.feed))]) {
-        if (!f) continue;
-        const d = stream.densityByFeed(streamed.rows)[f] || 0;
-        anomalyByFeed[f] = await baseline.score(f, new Date(), { n: d, mix: {} });
-      }
-    } catch (e) { /* no baseline yet is not a failure */ }
-
-    /* The rows the model actually read this run, whichever source won: the
-       vault stream when Blob is up, the buffer when it is not. Reading
-       streamed.rows instead meant that on any Blob outage `mine` was empty for
-       every situation, the floor scored them all 0 -> settled 1 -> none major,
-       and the board went dark while status still reported the analyst ran ok.
-       The pool is `batch` and the feed is read through every name a row might
-       carry it under, so scoring survives the fallback. */
-    const feedOf = (r) => r.feed || r.source || r.src || null;
-    fresh = await Promise.all(fresh.map(async (f) => {
-      const mine = (batch || []).filter(r => (f.feeds || []).includes(feedOf(r)));
-      const feeds = [...new Set(mine.map(feedOf).filter(Boolean))];
-      const units = [...new Set(mine.flatMap(r => r.units || []))];
-      const span = mine.length > 1
-        ? (+new Date(mine[mine.length - 1].at) - +new Date(mine[0].at)) / 60000 : 0;
-      const worst = feeds.map(x => anomalyByFeed[x]).filter(Boolean)
-        .sort((a, b) => (b.z || 0) - (a.z || 0))[0] || { level: 'normal' };
-
-      const fl = severity.floor({ tx: mine, feeds, units, spanMin: span, anomaly: worst });
-      const modelScore = f.priority === 'high' ? 4 : 2;
-      const settled = severity.settle(fl, { score: modelScore });
-      f.severity = settled.score;
-      f.severityLabel = severity.label(settled.score);
-      f.severityWhy = fl.reasons;
-      if (settled.capped) f.severityCapped = settled.why;
-      if (settled.score < 3) f.priority = 'normal';
-
-      /* Only claims that still look like news are worth a verifier call. */
-      if (!f.held && settled.score >= 3) {
-        const v = await verify.check(f.headline + '. ' + f.summary, mine.length ? mine : batch);
-        f = verify.apply(f, v);
-      }
-      /* What Situation Mode is allowed to show. */
-      f.major = !f.held && f.verified === true && settled.score >= 3;
-      return f;
-    }));
+       `batch` and not `streamed.rows`: on a Blob outage the stream is empty,
+       and scoring every situation over zero transmissions floors them all at
+       1, puts nothing on the board, and reports that the analyst ran ok. */
+    fresh = await judge(fresh, {
+      batch,
+      rows: (streamed && streamed.rows) ? streamed.rows : batch,
+    });
 
     /* The desk can drag a card while the model is thinking, and this handler has
        been holding a copy of the board from before that call. Writing it back
