@@ -170,7 +170,7 @@ async function since(fromISO, toISO, opts) {
        capped and sampled, so this restores coverage without fetching more.
        The real fix is to write fewer, larger objects: see the note in
        api/ingest.js. Until then, list it all. */
-    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 50000 });
+    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 12000, keepNewest: true });
     for (const b of (r.blobs || [])) {
       const at = stampOf(b.pathname || b.url);
       if (at !== null && (at < lo || at > hi)) continue;

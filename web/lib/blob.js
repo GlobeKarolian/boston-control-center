@@ -280,20 +280,43 @@ async function putJSON(path, obj, opts) {
 
 /* Everything under a prefix, paged. The vault reads a day by listing its
    folder, so this is the read half of search. */
+/* Listing a day, when a day is tens of thousands of objects.
+ *
+ * The vault writes 1-2 records per object, so a busy day holds ~30k of them.
+ * Blob returns a listing oldest-first, 1000 per page, so "the first 4000"
+ * meant midnight to about 6pm and the evening was invisible. Raising the cap
+ * fixed coverage and introduced the opposite problem: 30 sequential round
+ * trips before any work starts, which is enough to blow a function's budget.
+ *
+ * `keepNewest` resolves both. It pages to the end so the newest objects are
+ * actually seen, but retains only the last N, so memory is bounded and the
+ * caller gets the end of the day rather than the start of it. `maxPages` is
+ * the safety rail: past it we stop and say so, rather than paging forever on
+ * a folder that has grown pathological.
+ *
+ * The real cure is fewer, larger objects on the write side. See the note in
+ * api/ingest.js. This makes reading survivable in the meantime. */
 async function listPrefix(prefix, opts) {
   if (!enabled()) return { ok: false, why: reason(), blobs: [] };
-  const out = [];
+  let out = [];
   let cursor;
   const cap = (opts && opts.max) || 5000;
+  const keepNewest = !!(opts && opts.keepNewest);
+  const maxPages = (opts && opts.maxPages) || 80;
+  let pages = 0, truncated = false;
   try {
     do {
       const page = await withTimeout(sdk.list({ token: TOKEN, prefix, limit: 1000, cursor }), 20000);
       for (const b of (page.blobs || [])) out.push(b);
+      /* Trim as we go so a huge folder never sits in memory all at once. */
+      if (keepNewest && out.length > cap * 2) out = out.slice(-cap);
       cursor = page.hasMore ? page.cursor : null;
-    } while (cursor && out.length < cap);
-    return { ok: true, blobs: out };
+      if (++pages >= maxPages) { truncated = !!cursor; break; }
+    } while (cursor && (keepNewest || out.length < cap));
+    if (keepNewest && out.length > cap) out = out.slice(-cap);
+    return { ok: true, blobs: out, pages, truncated };
   } catch (e) {
-    return { ok: false, why: String(e.message || e).slice(0, 160), blobs: out };
+    return { ok: false, why: String(e.message || e).slice(0, 160), blobs: out, pages, truncated: true };
   }
 }
 

@@ -285,7 +285,7 @@ module.exports = async (req, res) => {
   let truncated = false;
   let listed = 0;
   for (const d of days) {
-    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 200000 });
+    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 12000, keepNewest: true });
     for (const b of (r.blobs || [])) {
       listed++;
       const at = stampOf(b.pathname || b.url);
