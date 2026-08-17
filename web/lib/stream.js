@@ -160,7 +160,17 @@ async function since(fromISO, toISO, opts) {
   const seen = new Set();
   let urls = [];
   for (const d of days) {
-    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 4000 });
+    /* List the WHOLE day, not the first 4000 objects of it.
+       The vault writes 1-2 records per object, so a busy day is tens of
+       thousands of tiny objects, and Vercel Blob returns them oldest-first
+       (they are named by epoch stamp, which sorts chronologically). A cap of
+       4000 therefore returned midnight through roughly 6pm and stopped, so the
+       archive looked like it ended in the afternoon while writes kept flowing
+       all evening. Listing is cheap metadata; the fetch below is what stays
+       capped and sampled, so this restores coverage without fetching more.
+       The real fix is to write fewer, larger objects: see the note in
+       api/ingest.js. Until then, list it all. */
+    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 50000 });
     for (const b of (r.blobs || [])) {
       const at = stampOf(b.pathname || b.url);
       if (at !== null && (at < lo || at > hi)) continue;

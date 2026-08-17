@@ -321,6 +321,15 @@ module.exports = async (req, res) => {
        a copy of it would be the wrong trade. Failures are warnings here,
        nothing more. */
     try {
+      /* ONE OBJECT PER BATCH IS TOO MANY OBJECTS.
+         forVault is usually 1-2 records, so a busy day writes tens of
+         thousands of tiny Blob objects. That broke the reader (the day list
+         cap truncated to the earliest 4000 objects, so the archive looked
+         like it ended in the afternoon) and it is slow and costs list
+         operations to read back. The right fix is to accumulate records and
+         flush larger objects, say 50-100 at a time, so a day is hundreds of
+         objects, not tens of thousands. Read side is un-truncated for now;
+         this is the structural follow-up. */
       const v = await vault.putBatch(forVault, { by, machine: auth.machine });
       if (v && v.ok === false && v.why) {
         warnings.push('vault: ' + v.why);
