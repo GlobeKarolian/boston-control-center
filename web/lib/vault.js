@@ -31,6 +31,12 @@
 // makes the most common question in the building the awkward one.
 
 const blob = require('./blob');
+/* The reader owns the path layout. vault.js used to build the tx path itself
+   from its own Eastern-day helper, which meant the writer and the reader each
+   had an opinion about where an object lives; the day they disagreed, an
+   object would be written somewhere nothing lists. One builder now, imported
+   by the writer, so the two cannot drift. */
+const vaultRead = require('./vault-read');
 
 const TZ = 'America/New_York';
 
@@ -114,7 +120,15 @@ async function putBatch(rows, meta) {
   if (!rows || !rows.length) return { ok: true, skipped: 'nothing to archive' };
   const day = dayOf(rows[0].at) || dayOf(new Date().toISOString());
   const stamp = String(+new Date(rows[0].at) || Date.now());
-  const path = 'vault/' + day + '/tx/' + stamp + '-' + rows.length + '.json';
+  /* Filed under the hour, not loose in the day.
+     A day holds ~30k of these because a batch is one or two transmissions,
+     and a flat folder that size costs thirty sequential list round trips to
+     read ANY window of it, even twenty minutes. That single fact produced an
+     archive that stopped at 6pm, a Shift Change page that timed out, and an
+     eighteen-second briefing, all on the same night. Bucketing by hour means
+     a twenty-minute read lists one small folder. The filename still leads
+     with the epoch stamp, so everything that parses it is unaffected. */
+  const path = vaultRead.prefixFor(+new Date(rows[0].at) || Date.now()) + stamp + '-' + rows.length + '.json';
   return blob.putJSON(path, {
     v: 1,
     day,

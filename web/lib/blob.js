@@ -303,10 +303,18 @@ async function listPrefix(prefix, opts) {
   const cap = (opts && opts.max) || 5000;
   const keepNewest = !!(opts && opts.keepNewest);
   const maxPages = (opts && opts.maxPages) || 80;
+  /* Folded mode returns only the objects sitting DIRECTLY under the prefix and
+     collapses anything in a subfolder into a folder name. The vault reader
+     uses it to check the pre-hour-bucket flat layout: without it, listing
+     vault/DAY/tx/ also walks every hour folder underneath, which is the whole
+     cost the hour bucket was introduced to avoid. */
+  const mode = (opts && opts.folded) ? 'folded' : undefined;
   let pages = 0, truncated = false;
   try {
     do {
-      const page = await withTimeout(sdk.list({ token: TOKEN, prefix, limit: 1000, cursor }), 20000);
+      const args = { token: TOKEN, prefix, limit: 1000, cursor };
+      if (mode) args.mode = mode;          // absent, not undefined, for the default path
+      const page = await withTimeout(sdk.list(args), 20000);
       for (const b of (page.blobs || [])) out.push(b);
       /* Trim as we go so a huge folder never sits in memory all at once. */
       if (keepNewest && out.length > cap * 2) out = out.slice(-cap);

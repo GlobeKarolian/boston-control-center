@@ -27,6 +27,7 @@
 
 const blob = require('./blob');
 const vq = require('./vault-query');
+const vaultRead = require('./vault-read');
 
 const CONCURRENCY = 48;
 
@@ -51,14 +52,6 @@ const MAX_ROWS = 1200;
    round trip, so this is the real cost of a long window: a 48-hour question
    is roughly twelve hundred of them. */
 const MAX_OBJECTS = 2400;
-
-function stampOf(path) {
-  const base = String(path || '').split('/').pop() || '';
-  const m = base.match(/^(\d{10,16})-/);
-  if (!m) return null;
-  const n = +m[1];
-  return Number.isFinite(n) ? n : null;
-}
 
 async function fetchAll(urls) {
   const out = [];
@@ -145,44 +138,19 @@ async function since(fromISO, toISO, opts) {
   if (isNaN(+from) || isNaN(+to)) return { rows: [], from: null, to: null, cursor: fromISO, complete: true, skipped: 0, objects: 0, why: 'bad window' };
   if (!blob.enabled()) return { rows: [], from, to, cursor: fromISO, complete: false, skipped: 0, objects: 0, why: blob.reason() };
 
-  const days = [];
-  for (let t = +from - 86400000; t <= +to + 86400000; t += 86400000) {
-    const d = vq.dayString(new Date(t));
-    if (d && !days.includes(d)) days.push(d);
-  }
+  /* One implementation of "which objects cover this window", shared with the
+     Archive search. Both files used to carry their own copy and both carried
+     the identical bug: a cap applied to a listing Blob returns oldest-first,
+     so both answered from midnight to about 6pm and called the evening empty.
+     Fixing one did not fix the other. lib/vault-read owns it now, and it
+     returns newest-first so a cap keeps the traffic that matters. */
+  const got = await vaultRead.listWindow(+from, +to, { slackMs: BATCH_SLACK_MS, max: Math.max(maxObjects * 3, maxObjects) });
+  let urls = got.urls.slice().reverse();   // chronological for the sampler below
 
-  const lo = +from - BATCH_SLACK_MS;
-  const hi = +to + BATCH_SLACK_MS;
-  /* A Set, because the day folders on either edge are read to catch the hours
-     that spill over midnight, and a listener that counts the same batch twice
-     reports a busy hour that never happened. The severity floor reads these
-     counts, so a duplicate is not a cosmetic error. */
-  const seen = new Set();
-  let urls = [];
-  for (const d of days) {
-    /* List the WHOLE day, not the first 4000 objects of it.
-       The vault writes 1-2 records per object, so a busy day is tens of
-       thousands of tiny objects, and Vercel Blob returns them oldest-first
-       (they are named by epoch stamp, which sorts chronologically). A cap of
-       4000 therefore returned midnight through roughly 6pm and stopped, so the
-       archive looked like it ended in the afternoon while writes kept flowing
-       all evening. Listing is cheap metadata; the fetch below is what stays
-       capped and sampled, so this restores coverage without fetching more.
-       The real fix is to write fewer, larger objects: see the note in
-       api/ingest.js. Until then, list it all. */
-    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 12000, keepNewest: true });
-    for (const b of (r.blobs || [])) {
-      const at = stampOf(b.pathname || b.url);
-      if (at !== null && (at < lo || at > hi)) continue;
-      const key = String(b.pathname || b.url).split('/').pop();
-      if (seen.has(key)) continue;
-      seen.add(key);
-      urls.push(b.url);
-    }
-  }
-
-  /* Newest-first when taking a tail, so the cap keeps the freshest. */
-  urls.sort();
+  /* Already chronological: listWindow returns newest-first and the reverse
+     above puts it in time order. The old lexical urls.sort() only happened to
+     work when every object sat in one flat folder whose names began with the
+     epoch stamp; with hour buckets in the path it would sort by folder. */
   let sampled = false;
   let dropped = 0;
   if (urls.length > maxObjects) {

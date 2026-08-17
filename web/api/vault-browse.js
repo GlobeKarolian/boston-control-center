@@ -20,20 +20,17 @@
 
 const { requireRead, json, harden } = require('../lib/http');
 const blob = require('../lib/blob');
-const vq = require('../lib/vault-query');
+const vaultRead = require('../lib/vault-read');
 
 const MAX_WINDOW_MS = 6 * 3600000;
-const MAX_OBJECTS = 3000;
+/* Six hours of a busy night. Raised from 3,000 when this file stopped
+   building its own object list: the old loop capped the LISTING at 3,000,
+   and because Vercel Blob returns a folder oldest-first that cap was spent
+   somewhere around 2am, so browsing any evening window on a busy day came
+   back empty. */
+const MAX_OBJECTS = 9000;
 const CONCURRENCY = 64;
 const BATCH_SLACK_MS = 30 * 60 * 1000;
-
-function stampOf(path) {
-  const base = String(path || '').split('/').pop() || '';
-  const m = base.match(/^(\d{10,16})-/);
-  if (!m) return null;
-  const n = +m[1];
-  return Number.isFinite(n) ? n : null;
-}
 
 async function fetchAll(urls) {
   const out = [];
@@ -75,27 +72,22 @@ module.exports = async (req, res) => {
   }
   if (!blob.enabled()) return json(res, { ok: false, why: blob.reason() }, { status: 503 });
 
-  /* The Eastern day folders the window touches, edges included. */
-  const days = [];
-  for (let t = +from - 86400000; t <= +to + 86400000; t += 86400000) {
-    const d = vq.dayString(new Date(t));
-    if (d && !days.includes(d)) days.push(d);
-  }
+  /* WHICH OBJECTS COVER THE WINDOW.
 
-  const lo = +from - BATCH_SLACK_MS;
-  const hi = +to + BATCH_SLACK_MS;
-  const urls = [];
-  let truncated = false;
-  for (const d of days) {
-    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: MAX_OBJECTS });
-    for (const b of (r.blobs || [])) {
-      const at = stampOf(b.pathname || b.url);
-      if (at !== null && (at < lo || at > hi)) continue;
-      if (urls.length >= MAX_OBJECTS) { truncated = true; break; }
-      urls.push(b.url);
-    }
-    if (truncated) break;
-  }
+     This file used to carry its own copy of "list the day folder and filter by
+     the stamp in the filename", which made three copies of that idea in the
+     repo, all with the same defect: a cap applied to a listing Vercel Blob
+     returns OLDEST FIRST. Here the cap was 3,000 objects against a day that
+     holds tens of thousands, so the listing was spent around 2am and browsing
+     any evening window came back empty while reporting success.
+
+     lib/vault-read.js is the one implementation. It lists the hour folders the
+     window touches rather than the whole day, runs them concurrently, and
+     returns newest first so the cap drops the oldest edge instead of the
+     newest. */
+  const got = await vaultRead.listWindow(+from, +to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS });
+  const urls = got.urls;
+  const truncated = !!got.truncated;
 
   const all = await fetchAll(urls);
   const rows = all
@@ -117,6 +109,14 @@ module.exports = async (req, res) => {
     heard[t.feed || 'unknown'] = (heard[t.feed || 'unknown'] || 0) + 1;
   }
 
+  /* What was actually read, which is not always what was asked for. A window
+     too busy to fetch whole keeps its newest end, so saying the span that came
+     back turns a short playback into something a reporter can reason about
+     instead of a silent hole. */
+  const covered = rows.length
+    ? { from: String(rows[0].at), to: String(rows[rows.length - 1].at) }
+    : null;
+
   return json(res, {
     ok: true,
     feed: feed || null,
@@ -125,6 +125,7 @@ module.exports = async (req, res) => {
     count: rows.length,
     heard,
     truncated,
+    covered,
     tx: rows.slice(0, 500),
     clipped: rows.length > 500,
     ms: Date.now() - t0,

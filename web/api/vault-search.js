@@ -17,6 +17,7 @@
 const { requireRead, json, harden } = require('../lib/http');
 const blob = require('../lib/blob');
 const vq = require('../lib/vault-query');
+const vaultRead = require('../lib/vault-read');
 
 /* Enough to answer a night without reading a month. A day of traffic is about
    1,500 objects, so this covers roughly two full days and says so when it
@@ -29,28 +30,6 @@ const CONCURRENCY = 64;
    and every transmission is still checked exactly by score(), so this only
    ever skips objects that could not have contained an answer. */
 const BATCH_SLACK_MS = 30 * 60 * 1000;
-
-function daysBetween(from, to) {
-  const out = [];
-  const step = 86400000;
-  for (let t = +from - step; t <= +to + step; t += step) {
-    const d = vq.dayString(new Date(t));
-    if (d && !out.includes(d)) out.push(d);
-  }
-  return out;
-}
-
-/* The epoch the archive wrote into a batch's filename: vault/DAY/tx/<ms>-<n>.json,
-   possibly with a random suffix before the extension. Anything unparseable is
-   kept rather than dropped, because a filename this code does not recognise is
-   not evidence that the night is not in there. */
-function stampOf(path) {
-  const base = String(path || '').split('/').pop() || '';
-  const m = base.match(/^(\d{10,16})-/);
-  if (!m) return null;
-  const n = +m[1];
-  return Number.isFinite(n) ? n : null;
-}
 
 /* Object storage has no query language, so the fetch is the search. Run wide
    rather than deep: these are a few hundred bytes each and the round trip,
@@ -257,45 +236,23 @@ module.exports = async (req, res) => {
 
   const f = vq.parse(q);
 
-  /* Only the days the question touches. This is the whole reason the vault is
-     filed by Eastern day: "last night" reads two folders, never the archive.
+  /* WHICH OBJECTS COULD HOLD THE ANSWER.
 
-     Newest day first, so that a question wide enough to hit the object cap
-     loses its oldest edge rather than the night the reporter is asking about. */
-  const days = daysBetween(f.from, f.to).sort().reverse();
-  const lo = +f.from - BATCH_SLACK_MS;
-  const hi = +f.to + BATCH_SLACK_MS;
-  /* THE WHOLE WINDOW, THEN THE NEWEST SLICE OF IT.
+     Shared with the desk's reader. This file used to carry its own copy of
+     "list the day folders and filter by the stamp in the filename", and it
+     carried the same bug: a cap applied to a listing Vercel Blob returns
+     OLDEST FIRST. So the archive answered from midnight to about 6:27pm and
+     called the evening empty, and a reporter searching for the bar fight at
+     11pm got nothing. Fixing lib/stream.js did not fix this file, and a
+     person had to notice the archive was still truncated.
 
-     The vault writes one or two records per object, so a busy day is tens of
-     thousands of tiny objects, and Vercel Blob returns them oldest-first
-     because they are named by epoch stamp. The old loop listed each day capped
-     at MAX_OBJECTS and filled `urls` in that oldest-first order, so on a busy
-     day it took midnight through roughly 6pm and stopped, and a reporter
-     searching for the bar fight at 11pm got nothing because the object holding
-     it was never listed. `days` was reversed to protect the newest DAY, but
-     nothing protected the newest HOURS inside a day.
-
-     So: list each day in full (metadata is cheap), keep everything in the
-     window, then if the set is larger than we can fetch, keep the NEWEST
-     MAX_OBJECTS. A busy window past the cap now loses its oldest edge, which
-     is the right edge to lose. The real cure is fewer, larger objects on the
-     write side (see api/ingest.js); this makes the read correct meanwhile. */
-  const found = [];
-  let truncated = false;
-  let listed = 0;
-  for (const d of days) {
-    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 12000, keepNewest: true });
-    for (const b of (r.blobs || [])) {
-      listed++;
-      const at = stampOf(b.pathname || b.url);
-      if (at !== null && (at < lo || at > hi)) continue;
-      found.push({ url: b.url, at: at == null ? 0 : at });
-    }
-  }
-  found.sort((a, b) => b.at - a.at);   // newest first
-  if (found.length > MAX_OBJECTS) truncated = true;
-  const urls = found.slice(0, MAX_OBJECTS).map((x) => x.url);
+     lib/vault-read.js is now the one implementation. It lists the hour
+     folders the window touches, returns them NEWEST FIRST, and only then
+     applies the cap, so a window too wide to fetch whole loses its oldest
+     edge rather than the night being asked about. */
+  const listed = await vaultRead.listWindow(+f.from, +f.to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS });
+  const urls = listed.urls;                       // newest first
+  const truncated = !!listed.truncated;
 
   const tx = await fetchAll(urls);
   let hits = [];
