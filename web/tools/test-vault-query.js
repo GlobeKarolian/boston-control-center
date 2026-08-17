@@ -400,5 +400,57 @@ console.log('\ntokens');
 }
 
 
+/* ------------------------------------------------------------------
+   PLURALS, WHICH ARE HOW PEOPLE ASK.
+
+   17 August, 02:20: "any fights?" at the desk, answered "There are no fights
+   dispatched in this window", over a night that had a brawl outside Russell
+   House Tavern.
+
+   Every type pattern was anchored with \b at both ends, so /\bfight\b/ did
+   not match "fights". The question parsed to no type at all and fell through
+   to a literal substring search for "fights", which does not appear in a
+   transmission reading "for a Fight". Zero matched. The word was in the
+   archive, the question was in English, and the regex was in the way.
+   ------------------------------------------------------------------ */
+{
+  const P = (q) => vq.parse(q, new Date(NOW)).type;
+  const PAIRS = [
+    ['any fights?', 'disturbance'], ['a brawl outside a bar', 'disturbance'],
+    ['altercations tonight', 'disturbance'],
+    ['any fires', 'fire'], ['shootings last night', 'shooting'],
+    ['stabbings', 'stabbing'], ['robberies', 'robbery'], ['burglaries', 'robbery'],
+    ['pursuits', 'pursuit'], ['searches', 'search'], ['crashes', 'crash'],
+    ['gas leaks', 'hazmat'], ['fatalities', 'death'], ['jumpers', 'death'],
+  ];
+  for (const [q, want] of PAIRS) ok('"' + q + '" is a ' + want, P(q) === want, String(P(q)));
+
+  /* And the singular still parses, which is the thing not to break. */
+  for (const [q, want] of [['any fight', 'disturbance'], ['a fire', 'fire'], ['robbery', 'robbery']]) {
+    ok('"' + q + '" is still a ' + want, P(q) === want, String(P(q)));
+  }
+
+  /* The fight itself, scored. */
+  const f = vq.parse('any fights?', new Date(NOW));
+  const fight = {
+    at: T(4, 42), feed: 'cambridge-ma-police', callType: 'disturbance',
+    text: 'Large fight outside Russell House Tavern, 14 JFK Street, eight involved.',
+  };
+  ok('the Russell House fight answers "any fights?"', vq.score(fight, f) > 0);
+  ok('and an ambulance run for a fall does not',
+     vq.score({ at: T(4, 43), feed: 'boston-ems', callType: 'medical',
+                text: 'Ambulance 7 responding for a fall.' }, f) === 0);
+}
+
+/* A word match has to stem, and must not bleed into longer words. The desk
+   used to test hay.includes(word), which got both wrong at once. */
+ok('a plural question matches a singular transmission',
+   vq.wordIn('the 40 Trinity Place for a Fight', 'fights'));
+ok('and a singular question matches a plural transmission',
+   vq.wordIn('two separate fires overnight', 'fire'));
+ok('but a word is not found inside a longer one',
+   !vq.wordIn('the firefighter arrived', 'fire'));
+
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
 process.exit(fail ? 1 : 0);

@@ -169,20 +169,35 @@ function whenOf(q, now) {
    Order matters: the first pattern that matches the question wins, so the
    specific sits above the general. "body" has to beat "medical" or a death
    search returns every ambulance run of the night. */
+/* PLURALS, WHICH ARE HOW PEOPLE ASK.
+ *
+ * A reporter types "any fights?", not "any fight?". Every pattern here is
+ * anchored with \b at both ends, so /\bfight\b/ does not match "fights", and
+ * "any fights?" parsed to no type at all: it fell through to a bare word
+ * search for the literal string "fights", which does not appear in a
+ * transmission that says "for a Fight". Zero matched, and the desk answered
+ * "there are no fights" over a night that had one outside Russell House
+ * Tavern. The word was in the archive. The question was in English. The
+ * regex was in the way.
+ *
+ * Every type below now takes the plural, and lib/vault-query exports the same
+ * stemming to anything that matches free words. */
 const TYPES = {
-  death: /\b(body|bodies|deceased|dead|doa|fatal|fatality|fatalities|coroner|medical examiner|untimely|jumper|drowning|drowned)\b/i,
+  death: /\b(body|bodies|deceased|dead|doa|fatal|fatalit(y|ies)|coroner|medical examiner|untimely|jumpers?|drownings?|drowned)\b/i,
   shooting: /\b(shootings?|shots fired|gunshots?|gunfire|shot)\b/i,
   /* "slashed" is not here on purpose: on a police channel it is nearly always
      tires, and a person who was slashed arrives with knife or stab words in
      the same breath. */
-  stabbing: /\b(stabbings?|stabbed|stab|knife|knives|slashing)\b/i,
-  fire: /\b(fires?|working fire|structure fire|smoke|alarm of fire|box alarm|arson)\b/i,
-  crash: /\b(crash(es)?|accidents?|mva|collisions?|rollover|car into|struck by|pedestrian struck)\b/i,
-  hazmat: /\b(hazmat|chemical|gas leak|spill|carbon monoxide)\b/i,
-  pursuit: /\b(pursuit|chase|fleeing|failed to stop)\b/i,
-  robbery: /\b(robbery|holdup|larceny|breaking and entering|burglary)\b/i,
-  search: /\b(search|missing|water rescue|dive team|well being)\b/i,
-  disturbance: /\b(disturbance|fight|assault|disorderly|brawl)\b/i,
+  stabbing: /\b(stabbings?|stabbed|stab|knife|knives|slashings?)\b/i,
+  fire: /\b(fires?|working fire|structure fire|smoke|alarm of fire|box alarms?|arson)\b/i,
+  crash: /\b(crash(es)?|accidents?|mva|collisions?|rollovers?|car into|struck by|pedestrian struck)\b/i,
+  hazmat: /\b(hazmat|chemical|gas leaks?|spills?|carbon monoxide)\b/i,
+  pursuit: /\b(pursuits?|chases?|fleeing|failed to stop)\b/i,
+  robbery: /\b(robber(y|ies)|holdups?|larcen(y|ies)|breaking and entering|burglar(y|ies))\b/i,
+  search: /\b(search(es)?|missing|water rescue|dive team|well being)\b/i,
+  /* "fight" is the word a newsroom uses and it lives here rather than in a
+     type of its own, because on the radio it arrives as a disturbance call. */
+  disturbance: /\b(disturbances?|fight(s|ing)?|assaults?|disorderly|brawls?|altercations?|melee|jumped)\b/i,
   medical: /\b(medical|ems|ambulance|cardiac|overdose|seizure|unresponsive|injur)\w*\b/i,
 };
 
@@ -449,8 +464,18 @@ function tokenize(s) {
 
 function hasWord(set, w) {
   if (set.has(w)) return true;
+  if (w.length > 3 && w.endsWith('es') && set.has(w.slice(0, -2))) return true;
   if (w.length > 3 && w.endsWith('s') && set.has(w.slice(0, -1))) return true;
-  return set.has(w + 's');
+  if (set.has(w + 's')) return true;
+  return w.length > 2 && set.has(w + 'es');
+}
+
+/* The same question asked of a haystack rather than a token set. Exported
+   because api/desk-ask.js was testing hay.includes(word), which is a
+   different and worse idea twice over: it misses the plural, and it matches
+   inside longer words. */
+function wordIn(hay, w) {
+  return hasWord(tokenize(String(hay || '')), String(w || '').toLowerCase());
 }
 
 function parse(q, now) {
@@ -660,6 +685,6 @@ function score(tx, f) {
 }
 
 module.exports = { nearLandmark, metresApart, LANDMARK_POINTS,
-  parse, score, whenOf, dayString, tokenize, hasWord, nearPlace,
+  parse, score, whenOf, dayString, tokenize, hasWord, wordIn, nearPlace,
   TYPES, PLACES, LANDMARKS, KIN, TZ,
 };

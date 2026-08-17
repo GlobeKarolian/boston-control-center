@@ -164,7 +164,11 @@ function shortlist(rows, f) {
       if (!aliases.some(a => hay.includes(a))) continue;
     }
     if (f.words && f.words.length && !f.type && !f.place && !f.landmark) {
-      if (!f.words.some(w => hay.includes(w))) continue;
+      /* vq.wordIn, not hay.includes. A substring test misses the plural a
+         reporter actually types and matches inside longer words at the same
+         time: "fights" found nothing in a transmission that said "for a
+         Fight", and "fire" would have matched "firefighter". */
+      if (!f.words.some(w => vq.wordIn(hay, w))) continue;
     }
     matches.push(t);
   }
