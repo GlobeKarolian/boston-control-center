@@ -203,5 +203,54 @@ const SOUTH_STATION = {
   ok('so a fire cannot be talked down either', sev.settle(sev.floor(fire), { score: 2 }).score >= 3);
 }
 
+/* --- volume alone cannot make a big story ------------------------------
+ *
+ * 17 August, live QA of the overnight briefing. It led with:
+ *
+ *   "Downtown traffic management, Back Bay"   severity 5
+ *
+ * Five is the level reserved for mass casualty and officer down. Four of the
+ * eight items scored 5. Nothing in any of those transcripts said what was
+ * happening; the scenes were simply large, and the floor rewards size.
+ */
+{
+  const T = (t) => ({ text: t, feed: 'f', units: [], signals: [] });
+  const traffic = {
+    tx: [T('units on the detail at Boylston'), T('take the corner post'), T('all set here')],
+    feeds: ['boston-police', 'boston-fire', 'boston-ems', 'mass-state-police'],
+    units: ['A1','A2','A3','A4','A5','A6','A7','A8','A9','A10'],
+    spanMin: 70, anomaly: { level: 'high' },
+  };
+  const f = sev.floor(traffic);
+  ok('a big quiet scene is a story, not everything-stops', f.score <= 3, 'score=' + f.score);
+  ok('and it says why it was held', f.reasons.some(r => /nothing was said/.test(r)), JSON.stringify(f.reasons));
+  ok('nothing was heard on it', f.heard === 0);
+
+  /* The South Station rationale must survive: a surge with unreadable
+     transcripts still has to reach the board. */
+  ok('a fleet-wide surge still surfaces', f.score >= 2.5, 'score=' + f.score);
+
+  /* And one spoken word still outranks all that volume. */
+  const stab = {
+    tx: [{ text: 'stabbing at 510 South Hampton', feed: 'boston-ems', units: [], signals: [{ id: 'stabbing', tier: 3 }], tier: 3 }],
+    feeds: ['boston-ems', 'boston-police'], units: ['A21'], spanMin: 4, anomaly: { level: 'normal' },
+  };
+  const g = sev.floor(stab);
+  ok('a stabbing somebody said outranks a large quiet scene', g.score > f.score,
+     'stabbing=' + g.score + ' traffic=' + f.score);
+
+  /* A fireground counts as heard, so a real fire is not capped. */
+  const fire = {
+    tx: [
+      { text: 'command to fire line, have it in command', feed: 'boston-fire', units: [], signals: [] },
+      { text: 'clearing ladders, first stream is 207', feed: 'boston-fire', units: [], signals: [] },
+    ],
+    feeds: ['boston-fire', 'boston-ems', 'boston-police', 'mass-state-police'],
+    units: ['E1','E2','E3','E4','L1','L2','D1','C3'], spanMin: 60, anomaly: { level: 'normal' },
+  };
+  ok('a working fire is not capped, because crews were heard working it',
+     sev.floor(fire).score > 3, 'score=' + sev.floor(fire).score);
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

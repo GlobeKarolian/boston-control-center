@@ -182,7 +182,32 @@ function floor(ev) {
     reasons.push('nothing legible, but the radio is not quiet');
   }
 
-  return { score: clamp(Math.round(s * 2) / 2), heard: clamp(heard), reasons, signals: [...ids], agencies: feeds.length };
+  /* VOLUME ALONE CANNOT MAKE A BIG STORY.
+   *
+   * Everything above section 1 is inference: agencies converged, units
+   * committed, minutes elapsed, radio busier than usual. Those are good
+   * evidence that SOMETHING is happening and poor evidence about WHAT. When
+   * nothing in the transcripts was actually said (heard === 0), the score is
+   * held at 3, "a story": enough to appear on a board and be looked at, not
+   * enough to claim the top of a briefing.
+   *
+   * Found in live QA on 17 August: an overnight briefing led with "Downtown
+   * traffic management, Back Bay" at severity 5, the level reserved for mass
+   * casualty and officer down, purely because the scene carried ten units
+   * across several feeds. Four of its eight items scored 5. A ranking where
+   * everything is maximum is not a ranking, and an editor who reads one
+   * briefing like that stops reading briefings.
+   *
+   * The South Station case is preserved deliberately: a fleet-wide surge with
+   * unreadable transcripts still reaches 3 and still shows up, which is the
+   * whole point of counting volume. It just cannot outrank a stabbing that
+   * somebody said out loud. */
+  let out = clamp(Math.round(s * 2) / 2);
+  if (heard === 0 && out > 3) {
+    out = 3;
+    reasons.push('held at a story: busy, but nothing was said that names it');
+  }
+  return { score: out, heard: clamp(heard), reasons, signals: [...ids], agencies: feeds.length };
 }
 
 /* The model's read, reconciled with the floor.
