@@ -259,22 +259,37 @@ module.exports = async (req, res) => {
   const days = daysBetween(f.from, f.to).sort().reverse();
   const lo = +f.from - BATCH_SLACK_MS;
   const hi = +f.to + BATCH_SLACK_MS;
-  const urls = [];
+  /* THE WHOLE WINDOW, THEN THE NEWEST SLICE OF IT.
+
+     The vault writes one or two records per object, so a busy day is tens of
+     thousands of tiny objects, and Vercel Blob returns them oldest-first
+     because they are named by epoch stamp. The old loop listed each day capped
+     at MAX_OBJECTS and filled `urls` in that oldest-first order, so on a busy
+     day it took midnight through roughly 6pm and stopped, and a reporter
+     searching for the bar fight at 11pm got nothing because the object holding
+     it was never listed. `days` was reversed to protect the newest DAY, but
+     nothing protected the newest HOURS inside a day.
+
+     So: list each day in full (metadata is cheap), keep everything in the
+     window, then if the set is larger than we can fetch, keep the NEWEST
+     MAX_OBJECTS. A busy window past the cap now loses its oldest edge, which
+     is the right edge to lose. The real cure is fewer, larger objects on the
+     write side (see api/ingest.js); this makes the read correct meanwhile. */
+  const found = [];
   let truncated = false;
   let listed = 0;
   for (const d of days) {
-    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: MAX_OBJECTS });
+    const r = await blob.listPrefix('vault/' + d + '/tx/', { max: 200000 });
     for (const b of (r.blobs || [])) {
       listed++;
-      /* The day folders on either edge are read for the hours that spill over
-         a midnight, not for their whole contents. */
       const at = stampOf(b.pathname || b.url);
       if (at !== null && (at < lo || at > hi)) continue;
-      if (urls.length >= MAX_OBJECTS) { truncated = true; break; }
-      urls.push(b.url);
+      found.push({ url: b.url, at: at == null ? 0 : at });
     }
-    if (truncated) break;
   }
+  found.sort((a, b) => b.at - a.at);   // newest first
+  if (found.length > MAX_OBJECTS) truncated = true;
+  const urls = found.slice(0, MAX_OBJECTS).map((x) => x.url);
 
   const tx = await fetchAll(urls);
   let hits = [];
