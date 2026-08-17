@@ -2915,8 +2915,19 @@ function renderStops(){
   if(!stFind){ keep(); return; }
   const q=(stFind.value||'').trim().toLowerCase();
   const open=(STOPS.open||[]).filter(r=>stMatch(r,q));
-  const log=(STOPS.closed||[]).filter(r=>stMatch(r,q));
   const s=STOPS.summary||{};
+  /* The list and the Tonight tile have to count the same stops.
+     The tile is the server's summary, which counts a rolling window
+     (s.window, 12h by default). The list rendered every closed stop the API
+     still held, with no window at all, so the tile read "Tonight 14" while
+     the header eight inches below it read "Tonight 28". An editor quoting
+     either number in a morning meeting had even odds of being wrong. The
+     window is the server's, so one definition of tonight governs both. */
+  const stWin=(typeof s.window==='number'&&s.window>0)?s.window:12*3600000;
+  const stSince=Date.now()-stWin;
+  const log=(STOPS.closed||[])
+    .filter(function(r){ const e=r&&(r.end||r.endedAt||r.at); const t=e?+new Date(e):NaN; return isNaN(t)?true:t>stSince; })
+    .filter(r=>stMatch(r,q));
 
   const card=(k,v,sm)=>'<div class="st-card"><div class="k">'+k+'</div><div class="v'+(sm?' sm':'')+'">'+v+'</div></div>';
   const lg=s.longest;
