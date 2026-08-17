@@ -882,6 +882,7 @@
   /* The scroller. min-height:0 is the whole fix: a flex child will not shrink
      below its content without it, so the box grew past the panel and the
      panel's overflow:hidden cut it off rather than letting it scroll. */
+  .a-sample{margin-top:6px;padding:6px 8px;border-left:2px solid var(--road);background:rgba(255,176,0,.07);color:var(--text-dim);font-size:12px;line-height:1.45}
   .dp-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
   .dp-scroll::-webkit-scrollbar{width:8px}
   .dp-scroll::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
@@ -1586,7 +1587,11 @@
     <div class="dp-head">
       <span class="dp-dot"></span>
       <h2>At the desk</h2>
-      <select id="dpWindow" title="How far back to listen">
+      <!-- This governs the transcript list below, not the ask box. A question
+           reads its own window: whatever time it names, or the last two days.
+           The two were indistinguishable on screen until an answer scoped to
+           two days appeared under a header reading "last 20 min". -->
+      <select id="dpWindow" title="How much radio to list below" aria-label="How much radio to list below">
         <option value="10">last 10 min</option>
         <option value="20" selected>last 20 min</option>
         <option value="45">last 45 min</option>
@@ -3453,11 +3458,26 @@ async function deskAsk(q){
           +'<button class="a-only" id="dpOnly">show just these</button></div>'
         : (d.answer?'<div class="a-none">No transmission in the window could be tied to this answer, so there is nothing to play.</div>':''))
       +'</div>'
-      +'<div class="src">read '+d.shown+' of '+d.considered+' transmissions'
-      +(d.matched!=null?' \u00b7 '+d.matched+' matched the question':'')
-      +' \u00b7 '+esc((d.window&&d.window.label)||'')
-      +(d.sampled?' \u00b7 sampled, the window was too big to read whole':'')
-      +' \u00b7 '+Math.round((d.ms||0)/100)/10+'s</div>';
+      /* WHAT WAS READ, LEADING WITH THE WINDOW.
+         This line used to end with the window, after two counters, and a
+         reporter reading "There are no fights in this window" above it had no
+         reason to think "this window" meant two days rather than the twenty
+         minutes named in the dropdown at the top of the panel. The dropdown
+         governs the transcript list below; the answer covers its own window
+         and now says so first. */
+      +'<div class="src">answered from '+esc((d.window&&d.window.label)||'the window')
+      +' \u00b7 read '+d.shown+' of '+d.considered+' transmissions'
+      +(d.matched!=null?', '+d.matched+' matching':'')
+      +' \u00b7 '+Math.round((d.ms||0)/100)/10+'s</div>'
+      /* An answer built on a sample cannot rule anything out, and the reader
+         has to be told that where the answer is, not in a footnote. On 17
+         August this panel said "there are no fights" over a window containing
+         a brawl outside Russell House Tavern, having read 150 of 3,121
+         transmissions. */
+      +(d.sampled
+        ? '<div class="a-sample">This is a sample of a busy window, not all of it. '
+          +'Nothing here rules anything out \u2014 narrow the time or ask again with a place or a name.</div>'
+        : '');
     if(meta)meta.textContent='showing the '+d.shown+' transmissions behind that answer';
     if(txEl&&d.tx){
       txEl.innerHTML=d.tx.slice().reverse().map(function(t){
