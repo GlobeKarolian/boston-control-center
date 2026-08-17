@@ -154,11 +154,11 @@ function shortlist(rows, f) {
     if (!asked) { matches.push(t); continue; }
     const hay = ((t.text || '') + ' ' + (t.matched || '') + ' ' + (t.address || '') + ' ' + (t.town || '')).toLowerCase();
     if (f.type) {
-      const own = t.callType === f.type;
+      const own = vq.ownType(t, f.type);   // "fight" IS a disturbance; see lib/vault-query
       const said = vq.TYPES[f.type] && vq.TYPES[f.type].test(hay);
       if (!own && !said) continue;
     }
-    if (f.place && !hay.includes(f.place)) continue;
+    if (f.place && !hay.includes(f.place) && !vq.nearPlace(t, f.place)) continue;
     if (f.landmark) {
       const aliases = vq.LANDMARKS[f.landmark] || [f.landmark];
       if (!aliases.some(a => hay.includes(a))) continue;

@@ -18,6 +18,7 @@ const { requireRead, json, harden } = require('../lib/http');
 const blob = require('../lib/blob');
 const vq = require('../lib/vault-query');
 const vaultRead = require('../lib/vault-read');
+const places = require('../lib/places');
 
 /* Enough to answer a night without reading a month. A day of traffic is about
    1,500 objects, so this covers roughly two full days and says so when it
@@ -132,7 +133,12 @@ function group(hits) {
     units: [...g.units].slice(0, 12),
     tx: g.tx.sort((a, b) => String(a.at).localeCompare(String(b.at))),
     clips: g.tx.filter(t => t.clip).map(t => ({ u: t.clip, at: t.at })).slice(0, 40),
-  })).sort((a, b) => b.score - a.score);
+  /* Ties go to the newest. This sort was stable and the groups were built in
+     time order, so equal scores came back OLDEST first: on 17 August ten
+     Cambridge disturbances tied and the one from 5:34 pm led the one the
+     reporter was asking about. Somebody asking at 2am means the one on the
+     air now, and the desk already says so; the archive has to agree. */
+  })).sort((a, b) => b.score - a.score || String(b.to || '').localeCompare(String(a.to || '')));
 }
 
 /* The scene around a strong hit.
@@ -156,7 +162,56 @@ function group(hits) {
    that gate the expansion would rebuild the flood this search just stopped
    returning. */
 const SCENE_MS = 45 * 60 * 1000;
-const SCENE_CAP = 40;
+const SCENE_CAP = 30;
+
+/* Words that name WHERE an anchor was, for linking context to it.
+
+   Read from the address, the street and the landmark, never from `matched`
+   whole: `matched` is the geocoder's formatted answer and it ends in the
+   town, the state and a zip code, so on 17 August every Cambridge
+   transmission's "street words" contained "cambridge", every other Cambridge
+   transmission's haystack contained "cambridge", and a knife call at 1426
+   Mass Ave collected thirty-three lines of unrelated chatter, "Thank you very
+   much" and "Wilco 6 is going off" among them, as its scene. The town is not a
+   thread. Neither is a number: 1426 is a house, a unit, or a time. */
+const NOT_A_THREAD = new Set(['street', 'st', 'road', 'rd', 'avenue', 'ave', 'drive', 'dr', 'place', 'pl',
+  'court', 'ct', 'lane', 'ln', 'way', 'terrace', 'ter', 'boulevard', 'blvd', 'parkway', 'pkwy',
+  'highway', 'hwy', 'route', 'rte', 'square', 'sq', 'circle', 'park', 'north', 'south', 'east', 'west',
+  'the', 'and', 'house', 'building', 'apartment', 'apt', 'floor', 'unit', 'suite', 'rear', 'front',
+  'usa']);
+function streetWords(tx) {
+  const src = [tx.address, tx.street, tx.landmark,
+    /* the street part of a geocoded answer only, before the first comma */
+    String(tx.matched || '').split(',')[0]].filter(Boolean).join(' ').toLowerCase();
+  const out = new Set();
+  for (const w of src.split(/[^a-z0-9]+/)) {
+    if (w.length < 3) continue;
+    if (/^\d+$/.test(w)) continue;
+    if (NOT_A_THREAD.has(w)) continue;
+    if (places.isKnownTown(w)) continue;
+    out.add(w);
+  }
+  return [...out];
+}
+
+/* How far a line can be from the anchor and still join by SAYING the type.
+
+   It depends on how common the type is. Two stabbings in the same city
+   inside forty-five minutes are almost always the same stabbing, and the
+   Lancaster Street scene was knitted exactly that way: the EMS dispatch said
+   the address, the officers eighteen and thirty minutes later said stab and
+   knife and never the street. That reach is kept for the rare types.
+
+   Two disturbances inside forty-five minutes on a citywide police channel are
+   almost always two different calls. On 17 August Cambridge worked "P&P for a
+   disturbance", "Newtown Court for disturbance" and "no disturbance right
+   yet" inside twenty minutes, three calls, and a reach that long makes them
+   one card. So the common types, the ones a channel says several times an
+   hour, only reach a few minutes: far enough for the follow-up on the same
+   call, not far enough for the next call. */
+const RARE_TYPE = new Set(['death', 'shooting', 'stabbing', 'hazmat', 'pursuit', 'robbery', 'search']);
+const TYPE_LINK_MS = 12 * 60 * 1000;
+const typeReach = (type) => (RARE_TYPE.has(type) ? SCENE_MS : TYPE_LINK_MS);
 
 function sceneExpand(hits, pool, f) {
   if (!hits.length) return hits;
@@ -170,28 +225,23 @@ function sceneExpand(hits, pool, f) {
      three that morning, a Canal Street follow-up, the fire department's chest
      pains, all riding into a stabbing's card. So a transmission joins the
      scene only by a real thread: the pipeline already tied it to the same
-     incident, it shares a unit with the anchor, it names the anchor's street,
-     or it plainly says the thing the question asked about.
+     incident, it names the anchor's street or landmark, or it plainly says
+     the thing the question asked about within a few minutes of the anchor.
 
      That last one is what carries cross-agency knitting, and it is why this
      still works: the officers at Lancaster never said the address, but they
      said stab, knife, and stabbing, and the EMS dispatch said the address, so
      the two halves of the scene arrive by different threads and land in the
-     same card. */
-  const streetWords = (tx) => {
-    const a = String(tx.address || tx.street || tx.matched || '').toLowerCase();
-    return a.split(/[^a-z0-9]+/).filter(w => w.length > 3 && !/^(street|road|avenue|boston|drive|place|court|lane)$/.test(w));
-  };
-  const linked = (tx, hay, anchor, anchorStreet, anchorUnits) => {
-    /* A unit number is not a thread. A8 works all night across a dozen calls,
-       and "shares a unit with the anchor" pulled a Charlestown cardiac and a
-       bomb squad dismissal into a Back Bay shooting card on 15 August 2026.
-       The threads that survive are the ones a reporter would recognise: the
-       pipeline tied it to the same incident, it names the anchor's street,
-       or it plainly says the thing the question asked about. */
+     same card.
+
+     A unit number is not a thread. A8 works all night across a dozen calls,
+     and "shares a unit with the anchor" pulled a Charlestown cardiac and a
+     bomb squad dismissal into a Back Bay shooting card on 15 August 2026. */
+  const linked = (tx, hay, dtMs, inc, anchorStreet) => {
+    if (inc && tx.incidentId && tx.incidentId === inc) return true;
     if (anchorStreet.length && anchorStreet.some(w => hay.includes(w))) return true;
-    if (f.type) {
-      if (tx.callType === f.type) return true;
+    if (f.type && dtMs <= typeReach(f.type)) {
+      if (vq.ownType(tx, f.type)) return true;
       if (vq.TYPES[f.type] && vq.TYPES[f.type].test(hay)) return true;
     }
     return false;
@@ -206,17 +256,23 @@ function sceneExpand(hits, pool, f) {
        the test below this feature was built against. */
     a.key = a.key || inc || ('scene:' + (a.tx.feed || '') + ':' + a.tx.at);
     const anchorStreet = streetWords(a.tx);
-    const anchorUnits = new Set((a.tx.units || []).map(u => String(u).toUpperCase()));
-    let added = 0;
+    /* Nearest first, so the cap keeps the lines closest to the anchor rather
+       than whichever happened to be fetched first. */
+    const near = [];
     for (const tx of pool) {
-      if (added >= SCENE_CAP) break;
       if (have.has(tx)) continue;
-      const t = +new Date(tx.at);
-      if (Math.abs(t - at) > SCENE_MS) continue;
+      const dt = Math.abs(+new Date(tx.at) - at);
+      if (dt > SCENE_MS) continue;
       const c2 = String(tx.city || tx.town || '').toLowerCase();
       if (city && c2 && c2 !== city) continue;
-      const hay = ((tx.text || '') + ' ' + (tx.address || '') + ' ' + (tx.matched || '')).toLowerCase();
-      if (!linked(tx, hay, a.tx, anchorStreet, anchorUnits)) continue;
+      near.push({ tx, dt });
+    }
+    near.sort((x, y) => x.dt - y.dt);
+    let added = 0;
+    for (const { tx, dt } of near) {
+      if (added >= SCENE_CAP) break;
+      const hay = ((tx.text || '') + ' ' + (tx.address || '') + ' ' + (tx.landmark || '') + ' ' + (tx.matched || '')).toLowerCase();
+      if (!linked(tx, hay, dt, inc, anchorStreet)) continue;
       have.add(tx);
       out.push({ tx: { ...tx, ctx: true }, s: 0.01, key: a.key });
       added++;

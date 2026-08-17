@@ -544,6 +544,7 @@
   .ar-sum-conf{font-size:11px;padding:1px 6px;border-radius:9px;margin-left:5px;vertical-align:1px}
   .ar-conf-clear{background:#1e5b3c;color:#9fe3bd}
   .ar-conf-likely{background:#4a4420;color:#e0d08a}
+  .ar-partial{color:var(--road);font-size:12px}
   .ar-conf-murky{background:#512a2a;color:#e8a9a9}
   .ar-dl{margin-left:5px;color:#7c8598;text-decoration:none;font-size:12px}
   .ar-dl:hover{color:#9fe3bd}
@@ -2604,16 +2605,31 @@ function arClock(iso){
 /* What the search understood, said back in words. A box that silently guesses
    is a box a newsroom stops trusting the first time it is wrong, and this is
    also how somebody learns that "last night" means 6pm to 6am here. */
-function arRead(u,n,ms){
+function arRead(u,n,ms,d){
   const bits=[];
   if(u.type) bits.push('type <b>'+esc(u.type)+'</b>');
   if(u.landmark) bits.push('at <b>'+esc(u.landmark)+'</b>');
   if(u.place) bits.push('in <b>'+esc(u.place)+'</b>');
   if(u.big) bits.push('<b>serious</b> calls first');
   if(u.words&&u.words.length) bits.push('mentioning <b>'+u.words.map(esc).join(', ')+'</b>');
+  /* WHAT WAS ACTUALLY READ, when it is less than what was asked.
+
+     On 17 August this line said "the last two days" and "21 calls" over a
+     search that had read from 5:34 the previous evening onward, because a
+     two-day window on a busy archive is more objects than one request can
+     fetch and the reader keeps the newest end. The response said so; the
+     page did not. A reporter told two days were searched, who then learns
+     the thing they wanted was on the first of them, stops trusting the
+     archive, and that is the whole product gone. So it is said here, in
+     amber, in the sentence they are already reading. */
+  const cov=(d&&d.coverage)||{};
+  let partial='';
+  if(d&&d.truncated&&cov.from){
+    partial='<br><span class="ar-partial">Read back to <b>'+esc(arWhen(cov.from))+'</b> only: the window held more than one search can fetch, and the newest end was kept. Narrow the time to reach further back.</span>';
+  }
   return 'Read as: '+(bits.length?bits.join(' &middot; '):'everything')
     +' &middot; <b>'+esc(u.when)+'</b> ('+arWhen(u.from)+' to '+arWhen(u.to)+')<br>'
-    +n+' call'+(n===1?'':'s')+' &middot; '+ms+'ms';
+    +n+' call'+(n===1?'':'s')+' &middot; '+ms+'ms'+partial;
 }
 
 /* The other door into the archive: a feed and a window, no words involved.
@@ -2688,7 +2704,7 @@ async function arSearch(q){
     const r=await fetch('./api/vault-search?q='+encodeURIComponent(q),{credentials:'include'});
     const d=await r.json();
     if(!d.ok){ read.textContent=''; out.innerHTML='<p class="ar-none">'+esc(d.why||'that search did not work')+'</p>'; return; }
-    read.innerHTML=arRead(d.understood,d.calls,d.ms);
+    read.innerHTML=arRead(d.understood,d.calls,d.ms,d);
     if(!d.results.length){
       const cov=d.coverage||{};
       out.innerHTML='<p class="ar-none">Nothing in the archive matches that yet.'

@@ -222,6 +222,74 @@ const KIN = {
   disturbance: ['robbery'],
 };
 
+/* IS THIS TRANSMISSION THE TYPE THAT WAS ASKED FOR?
+ *
+ * The extractor labels a call in its own words: "fight", "assault", "mva",
+ * "brawl". The question parser speaks in canonical types: "disturbance",
+ * "crash". score() compared the two with ===, so a transmission the pipeline
+ * itself labelled "fight" earned HALF the type credit of one labelled
+ * "disturbance" when somebody asked about a fight. That is the whole of why
+ * "Bar Fight in cambridge" ranked the Russell House Tavern brawl nineteenth
+ * of twenty on 17 August, under a weapon call whose transcript said "no active
+ * disturbance": the brawl was labelled fight, the weapon call was labelled
+ * disturbance, and === preferred the label that happened to match the key.
+ *
+ * A label that belongs to the type's own vocabulary IS the type. */
+function ownType(tx, type) {
+  if (!type || !tx) return false;
+  const label = String(tx.callType || '').toLowerCase();
+  if (!label) return false;
+  if (label === type) return true;
+  const re = TYPES[type];
+  return !!(re && re.test(label));
+}
+
+/* WORDS A NEWSROOM USES FOR THE SAME THING.
+ *
+ * "Bar fight" is how the question is asked. "Russell House Tavern" is what the
+ * dispatcher said. The word "bar" appears nowhere in that transmission and it
+ * scored as though the place had never been mentioned. Kept deliberately small
+ * and literal: each entry is a set of words a reporter would accept as the
+ * same kind of place or thing, not a thesaurus. */
+const WORD_KIN = {
+  bar: ['tavern', 'pub', 'lounge', 'nightclub', 'club', 'saloon', 'taproom', 'brewery'],
+  tavern: ['bar', 'pub'],
+  pub: ['bar', 'tavern'],
+  club: ['nightclub', 'bar', 'lounge'],
+  store: ['shop', 'market', 'mart', 'bodega', 'supermarket', 'convenience'],
+  shop: ['store', 'market'],
+  restaurant: ['diner', 'cafe', 'pizzeria', 'eatery', 'grill', 'bistro'],
+  hotel: ['motel', 'inn', 'hostel'],
+  school: ['academy', 'elementary', 'middle school', 'high school', 'campus'],
+  church: ['temple', 'mosque', 'synagogue', 'parish', 'cathedral', 'chapel'],
+  hospital: ['medical center', 'emergency room', 'er', 'mgh', 'bmc', 'brigham', 'beth israel', 'tufts medical'],
+  car: ['vehicle', 'auto', 'sedan', 'suv', 'motor vehicle', 'mv'],
+  truck: ['tractor trailer', 'box truck', 'pickup', 'dump truck', 'eighteen wheeler', '18 wheeler'],
+  bus: ['coach', 'mbta bus'],
+  train: ['trolley', 'subway', 'commuter rail', 'red line', 'green line', 'orange line', 'blue line', 'silver line'],
+  bike: ['bicycle', 'cyclist', 'bicyclist', 'e-bike', 'ebike'],
+  motorcycle: ['motorbike', 'dirt bike', 'moped', 'scooter'],
+  highway: ['expressway', 'interstate', 'turnpike', 'pike', 'route'],
+  gun: ['firearm', 'pistol', 'handgun', 'rifle', 'weapon'],
+  knife: ['blade', 'machete'],
+  kid: ['child', 'juvenile', 'minor', 'boy', 'girl', 'teen', 'teenager'],
+  child: ['kid', 'juvenile', 'minor', 'boy', 'girl'],
+  dog: ['k9', 'canine', 'pit bull'],
+  water: ['harbor', 'river', 'charles', 'pond', 'lake', 'ocean'],
+};
+
+/* Does the record say this word, or one a newsroom would accept for it? */
+function saysWord(bag, hay, w) {
+  if (hasWord(bag, w)) return true;
+  const kin = WORD_KIN[w];
+  if (!kin) return false;
+  for (const k of kin) {
+    if (k.indexOf(' ') !== -1 || k.indexOf('-') !== -1) { if (hay.indexOf(k) !== -1) return true; }
+    else if (hasWord(bag, k)) return true;
+  }
+  return false;
+}
+
 /* WHERE, part one. Boston's neighborhoods are what a reporter says; the
    archive stores a town and a matched address. Both get searched, so "Back
    Bay" finds a call whose town is Boston and whose address landed on
@@ -622,7 +690,7 @@ function score(tx, f) {
      outweigh a couple of incidental word hits, or "confirming a body" loses to
      a line that merely says "parking garage" twice. */
   if (f.type) {
-    if (tx.callType === f.type) { s += 10; hit++; }
+    if (ownType(tx, f.type)) { s += 10; hit++; }
     else if (TYPES[f.type].test(hay)) { s += 5; hit++; }
     else if ((KIN[f.type] || []).includes(tx.callType)) { kin = true; }
     else return 0;                       // asked for a fire, this is not one
@@ -650,7 +718,7 @@ function score(tx, f) {
     if (set.some(v => hay.includes(v))) { s += 8; hit++; named++; }
   }
 
-  for (const w of f.words) if (hasWord(bag, w)) { s += 3; hit++; named++; }
+  for (const w of f.words) if (saysWord(bag, hay, w)) { s += 3; hit++; named++; }
 
   /* A kin label alone opens no doors, and it never counts toward how much of
      the question was answered. A medical that matched the place must not
@@ -685,6 +753,6 @@ function score(tx, f) {
 }
 
 module.exports = { nearLandmark, metresApart, LANDMARK_POINTS,
-  parse, score, whenOf, dayString, tokenize, hasWord, wordIn, nearPlace,
+  parse, score, whenOf, dayString, tokenize, hasWord, wordIn, nearPlace, ownType, saysWord, WORD_KIN,
   TYPES, PLACES, LANDMARKS, KIN, TZ,
 };
