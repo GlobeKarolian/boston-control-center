@@ -688,7 +688,14 @@ async function geocodeEx(rawEx, city, opts = {}) {
 
   // 5. anything in the gazetteer named anywhere in the raw transcript. This is
   //    the step that catches the transmissions the model gave up on.
-  const scanned = places.scanText(text, towns);
+  //
+  //    Scoped to the town when the town is known, not to the feed's whole
+  //    coverage. A regional feed declares forty municipalities, so an
+  //    unscoped scan of "155 Harvard Street, Needham" was free to answer with
+  //    the Red Line platform in Cambridge. Once a town has been established,
+  //    by the extractor or by somebody saying it out loud, a place in a
+  //    different one is not the answer to this transmission.
+  const scanned = places.scanText(text, town ? [town] : towns);
   if (scanned) return scanned;
 
   // 6. nothing specific, but the town itself is known and worth showing.
