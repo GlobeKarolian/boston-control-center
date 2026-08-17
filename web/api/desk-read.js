@@ -99,6 +99,32 @@ module.exports = async (req, res) => {
   }
 
   const rows = got.rows || [];
+  /* The vault is eventually consistent: a write lands, the list lags a few
+     seconds behind it, and for those seconds the archive reads empty while
+     the radio is plainly talking. Redis holds the same window in
+     bcc:out:transcripts, so when the vault comes back empty on a fresh
+     deployment, read the buffer the live board is already reading. */
+  if (!rows.length) {
+    try {
+      const store_io = require('../lib/store-io');
+      const raw = await store_io.readOut(store_io.K.outTranscripts, '[]');
+      const list = JSON.parse(raw);
+      if (Array.isArray(list) && list.length) {
+        const cutoff = from.toISOString();
+        const fresh = list.filter(t => t && t.at && t.at > cutoff);
+        if (fresh.length) {
+          rows.push(...fresh.map(t => ({
+            at: t.at, feed: t.source || t.src, src: t.source || t.src,
+            text: t.text, clip: t.clip, units: t.units || [],
+            callType: t.callType || null, town: t.city || t.town || null,
+            address: t.address || null, matched: t.matched || null,
+          })));
+          got.complete = false;
+          got.sampled = true;
+        }
+      }
+    } catch (e) { /* Redis fallback is a convenience, never a failure */ }
+  }
   /* The transmissions go back with the read, always, so the answer is
      checkable without a second request. This is the whole difference between
      a summary and a claim. */

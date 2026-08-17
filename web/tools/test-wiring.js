@@ -24,6 +24,7 @@
 const stream = require('../lib/stream');
 const core = require('../lib/analyst-core');
 const severity = require('../lib/severity');
+const { reconcile } = require('../lib/threads');
 
 let pass = 0, fail = 0;
 function ok(name, cond, extra) {
@@ -104,6 +105,40 @@ ok('so the stabbing settles at or above the bar Situations requires',
 const starved = severity.floor({ tx: [], feeds: [], units: [], spanMin: 0, anomaly: { level: 'normal' } });
 ok('a situation with no transmissions scores nothing, as it did all night',
    starved.score < 3, 'floor=' + starved.score);
+
+/* --- the seam that kept Situations empty even after the floor was right ----
+ *
+ * The analyst computes major/severity/verified on each reported situation and
+ * hands the list to reconcile(). reconcile built the board object from a fixed
+ * field list that dropped all of them, so the board never carried `major`, and
+ * Situations Mode plus the banner both filter on major===true. Every upstream
+ * fix was invisible because the verdict died one function later. This asserts
+ * it survives, in both the new-situation and the update path. */
+{
+  const fresh = {
+    headline: 'Person stabbed at 510 South Hampton St',
+    summary: 'EMS and BPD responding to a stabbing.',
+    type: 'stabbing', priority: 'high', status: 'active',
+    location: '510 South Hampton St', lat: 42.33, lon: -71.07,
+    feeds: ['boston-ems', 'boston-police'],
+    severity: 4, severityLabel: 'big', major: true, verified: true,
+  };
+  const r1 = reconcile([], [fresh]);
+  const s1 = (r1.situations || [])[0];
+  ok('a fresh major situation reaches the board still marked major',
+     !!s1 && s1.major === true, JSON.stringify(s1 && { major: s1.major, sev: s1.severity }));
+  ok('and carries its severity and label, so the rail can show it',
+     !!s1 && s1.severity === 4 && s1.severityLabel === 'big', 'sev=' + (s1 && s1.severity) + ' label=' + (s1 && s1.severityLabel));
+
+  /* Now the same story comes back a poll later, re-judged. The refreshed
+     verdict has to land on the existing card, not be dropped as an update. */
+  const prev = r1.situations;
+  const again = Object.assign({}, fresh, { summary: 'Second unit on scene.', severity: 5, severityLabel: 'everything stops' });
+  const r2 = reconcile(prev, [again]);
+  const s2 = (r2.situations || []).find(x => x.major === true);
+  ok('an updated story keeps major and refreshes severity on the board',
+     !!s2 && s2.major === true && s2.severity === 5, JSON.stringify(s2 && { major: s2.major, sev: s2.severity }));
+}
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
 process.exit(fail ? 1 : 0);

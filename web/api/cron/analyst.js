@@ -328,10 +328,17 @@ module.exports = async (req, res) => {
       }
     } catch (e) { /* no baseline yet is not a failure */ }
 
+    /* The rows the model actually read this run, whichever source won: the
+       vault stream when Blob is up, the buffer when it is not. Reading
+       streamed.rows instead meant that on any Blob outage `mine` was empty for
+       every situation, the floor scored them all 0 -> settled 1 -> none major,
+       and the board went dark while status still reported the analyst ran ok.
+       The pool is `batch` and the feed is read through every name a row might
+       carry it under, so scoring survives the fallback. */
+    const feedOf = (r) => r.feed || r.source || r.src || null;
     fresh = await Promise.all(fresh.map(async (f) => {
-      const mine = (streamed && streamed.rows ? streamed.rows : []).filter(r =>
-        (f.feeds || []).includes(r.feed));
-      const feeds = [...new Set(mine.map(r => r.feed))];
+      const mine = (batch || []).filter(r => (f.feeds || []).includes(feedOf(r)));
+      const feeds = [...new Set(mine.map(feedOf).filter(Boolean))];
       const units = [...new Set(mine.flatMap(r => r.units || []))];
       const span = mine.length > 1
         ? (+new Date(mine[mine.length - 1].at) - +new Date(mine[0].at)) / 60000 : 0;

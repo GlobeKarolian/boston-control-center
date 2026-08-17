@@ -77,12 +77,21 @@ const OR_FALLBACK = process.env.EXTRACT_MODEL_OR2 || 'deepseek/deepseek-v4-flash
    POST, not per item. Fail-open on a meter error, because Redis being down
    already means the board is down, and a broken meter should not be the thing
    that silences a working radio. */
-const EXTRACT_DAILY_CAP = Math.max(0, parseInt(process.env.EXTRACT_DAILY_CAP || '500', 10) || 500);
+/* Raised from 500. Extraction is the one model call on the cheap flash tier and
+   it runs per transmission at ~200/hr, so a 500/day cap was exhausted by early
+   evening and dropped the whole pipeline to regex, which produced no location
+   for 114 of 150 measured transmissions: the empty-map symptom. This is a
+   backstop against a runaway, not a daily ration. Re-measure against real
+   volume before lowering it. */
+const EXTRACT_DAILY_CAP = Math.max(0, parseInt(process.env.EXTRACT_DAILY_CAP || '4000', 10) || 4000);
 async function extractAllowance(want) {
   if (!want) return 0;
   try {
     const kv = require('./kv');
-    const day = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+    /* Eastern day, not UTC. A UTC-day key reset the budget at 8pm Eastern, in
+       the middle of the evening cycle, which is the worst time to zero it. */
+    const day = new Intl.DateTimeFormat('en-CA', { timeZone: 'America/New_York', year: 'numeric', month: '2-digit', day: '2-digit' })
+      .format(new Date()).replace(/-/g, '');
     const key = 'bcc:spend:extract:' + day;
     const [n] = await kv.raw([['INCRBY', key, want], ['EXPIRE', key, 172800]], 5000);
     const used = Number(n) || 0;
@@ -581,7 +590,7 @@ async function extractBatch(items, { concurrency = 6, timeoutMs = 20000, priorBy
   const wantApi = rows.filter((r, i) => !out[i]).length;
   let allow = await extractAllowance(wantApi);
   const errors = [];
-  if (allow < wantApi) errors.push('daily extraction budget spent: ' + EXTRACT_DAILY_CAP + ' model calls, regex until midnight UTC');
+  if (allow < wantApi) errors.push('daily extraction budget spent: ' + EXTRACT_DAILY_CAP + ' model calls, regex until midnight Eastern');
 
   let down = false;
   let cursor = 0;

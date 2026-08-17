@@ -206,6 +206,21 @@ function geometricMatch(prev, child) {
 
    Returns the new board. Every situation on it either existed before and kept
    its id, or is genuinely new. */
+/* THE VERDICT MUST SURVIVE RECONCILE.
+   api/cron/analyst.js runs the whole judgment on each reported situation, the
+   severity floor, the model settle, the different-lab verifier, and sets these
+   fields on it. reconcile then built the board object from a fixed field list
+   that omitted every one of them, so major/severity/verified/held were computed
+   each run and dropped one function later. Situations Mode and the red banner
+   both gate on `major`, so both were empty for every event, including a verified
+   priority-high stabbing. Carried through in both the new and the updated case. */
+const VERDICT_FIELDS = ['severity', 'severityLabel', 'severityWhy', 'severityCapped',
+  'major', 'verified', 'verifiedBy', 'verifiedQuote', 'held', 'heldWhy', 'heldWorst'];
+function carryVerdict(dst, f) {
+  for (const k of VERDICT_FIELDS) if (f && f[k] !== undefined) dst[k] = f[k];
+  return dst;
+}
+
 function reconcile(prev, fresh, overrides = {}) {
   const now = Date.now();
   const nowIso = new Date().toISOString();
@@ -307,6 +322,11 @@ function reconcile(prev, fresh, overrides = {}) {
            than the last. */
         if (f.priority === 'high') parent.priority = 'high';
         if (f.confidence) parent.confidence = f.confidence;
+        /* The model re-judged the whole story this run, so the mechanical
+           verdict is refreshed with it. Unlike priority this is allowed to
+           move both ways, because it comes from the floor and the verifier,
+           not the model's mood. */
+        carryVerdict(parent, f);
       }
       /* Outside the beat/update branch, because it is true either way. A bag
          reported on the State Police radio is a beat of the search rather than
@@ -329,6 +349,7 @@ function reconcile(prev, fresh, overrides = {}) {
       firstSeen, updated: nowIso,
       events: [ev('opened', f.headline, f.type, firstSeen, f.clips)],
     };
+    carryVerdict(s, f);
     s.alertKey = alertKey(s);
     byId.set(id, s);
     touched.add(id);

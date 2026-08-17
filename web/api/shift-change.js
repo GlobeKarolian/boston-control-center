@@ -56,8 +56,13 @@ function shiftWindow(shift, now) {
     const q = {};
     new Intl.DateTimeFormat('en-CA', { timeZone: TZ, hour: '2-digit', hour12: false })
       .formatToParts(probe).forEach(x => { q[x.type] = x.value; });
+    /* q.hour is what Eastern calls the UTC instant `guess`. If that reads
+       higher than the hour we asked for, guess is too late by that many hours,
+       so we subtract. The old code added, landing the window 8 hours off (10
+       in winter) and handing an editor the wrong shift's traffic, confidently
+       mislabeled because the result was never empty. */
     const off = ((+q.hour) % 24) - hh;
-    return new Date(guess + off * 3600000);
+    return new Date(guess - off * 3600000);
   }
 
   let from, to, label;
@@ -148,6 +153,31 @@ module.exports = async (req, res) => {
     return json(res, { ok: false, why: 'could not read the archive: ' + String(e.message || e).slice(0, 160) }, { status: 503 });
   }
   const rows = got.rows || [];
+  /* The vault is eventually consistent: a write lands, the list lags a few
+     seconds behind it, and for those seconds the archive reads empty while
+     the radio is plainly talking. Redis holds the same window in
+     bcc:out:transcripts, so when the vault comes back empty on a fresh
+     deployment, read the buffer the live board is already reading. */
+  if (!rows.length) {
+    try {
+      const raw = await store_io.readOut(store_io.K.outTranscripts, '[]');
+      const list = JSON.parse(raw);
+      if (Array.isArray(list) && list.length) {
+        const cutoff = win.from.toISOString();
+        const fresh = list.filter(t => t && t.at && t.at > cutoff);
+        if (fresh.length) {
+          rows.push(...fresh.map(t => ({
+            at: t.at, feed: t.source || t.src, src: t.source || t.src,
+            text: t.text, clip: t.clip, units: t.units || [],
+            callType: t.callType || null, town: t.city || t.town || null,
+            address: t.address || null, matched: t.matched || null,
+          })));
+          got.complete = false;
+          got.sampled = true;
+        }
+      }
+    } catch (e) { /* Redis fallback is a convenience, never a failure */ }
+  }
 
   let offline = [];
   try {
