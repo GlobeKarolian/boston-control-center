@@ -2304,14 +2304,38 @@ function clipPlay(url){
     }
   });
   p.play().catch(err=>{
-    /* A play that fails must not look like a play that succeeded. The button
-       goes back to the triangle, the row dims, and the dial says why. */
-    clipStop();
-    clipNext();
+    /* A play that fails must not look like a play that succeeded. But WHY it
+       failed decides what to do next, and treating both causes the same way
+       cost the queue.
+
+       A browser that has not been clicked yet refuses to play audio at all:
+       play() rejects with NotAllowedError. The old handler responded by
+       calling clipNext(), which tried the next clip, which was refused for
+       exactly the same reason, which called clipNext() again. Measured on a
+       six-clip chain: six play attempts and an empty queue in a few
+       milliseconds. A reporter pressing "hear it unfold (14)" lost all
+       fourteen instantly and was left looking at RADIO OFF, because the
+       cascade's last repaint overwrote the failure message too.
+
+       So: a blocked gesture keeps the queue and asks for a press. Anything
+       else (a dead URL, a decode failure) is that one clip's problem and
+       skipping to the next is right. */
+    const blocked = err && (err.name === 'NotAllowedError' || err.name === 'SecurityError');
     const btn=document.getElementById('dialBtn');
-    if(btn){btn.style.borderColor='var(--crash)';setTimeout(()=>{btn.style.borderColor='';},2000);}
+    if(btn){btn.style.borderColor='var(--crash)';setTimeout(()=>{btn.style.borderColor='';},2600);}
     const st=document.getElementById('dialState');
-    if(st){st.textContent='PLAY FAILED';st.style.color='var(--crash)';setTimeout(()=>{dialPaint();},2000);}
+    if(blocked){
+      /* Keep CLIP_NOW and the queue exactly as they are: one real press on
+         the dial resumes the chain the reporter asked for. */
+      try{ p.pause(); }catch(e){}
+      if(st){st.textContent='PRESS PLAY';st.style.color='var(--crash)';}
+      const ln=document.getElementById('dialLine');
+      if(ln)ln.textContent='Your browser blocked audio until you click. Press play to hear it.';
+      return;
+    }
+    clipStop();
+    if(st){st.textContent='CLIP FAILED';st.style.color='var(--crash)';setTimeout(()=>{dialPaint();},2600);}
+    clipNext();
   });
   dialPaint();
   return true;
