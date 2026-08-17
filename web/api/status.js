@@ -112,6 +112,20 @@ module.exports = async (req, res) => {
     }
   } catch (e) { out.analyst = { error: String(e.message || e).slice(0, 160) }; }
 
+  /* The archive's hourly rollups. When this stops, the archive keeps working
+     but every read of an un-rolled hour goes back to hundreds of fetches, and
+     the first symptom anyone sees is a slow search. Better said here. */
+  try {
+    const raw = await kv.get('bcc:compact:last');
+    const c = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+    out.compact = c;
+    if (c) {
+      const stale = Date.now() - Date.parse(c.at || 0) > 40 * 60000;
+      if (stale) out.warnings.push('The archive compactor has not run in over 40 minutes; searches of recent hours will be slow until it does.');
+      else if (c.remaining > 48) out.warnings.push('The archive compactor is still catching up: ' + c.remaining + ' hours left to roll.');
+    }
+  } catch (e) { out.compact = { error: String(e.message || e).slice(0, 160) }; }
+
   try {
     const log = await llmlog.recent(40);
     const calls = (log && log.calls) || [];

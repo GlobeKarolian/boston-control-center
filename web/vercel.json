@@ -162,6 +162,9 @@
     },
     "api/briefing.js": {
       "maxDuration": 300
+    },
+    "api/cron/compact.js": {
+      "maxDuration": 120
     }
   },
   "crons": [
@@ -188,6 +191,10 @@
     {
       "path": "/api/cron/outages",
       "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/compact",
+      "schedule": "*/5 * * * *"
     }
   ],
   "headers": [

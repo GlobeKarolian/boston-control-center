@@ -44,12 +44,16 @@ const TZ = 'America/New_York';
 
 /* Eastern wall-clock parts for an instant, so "last night" means the night the
    newsroom lived through rather than a UTC day boundary that splits it. */
+/* Built once. Constructing an Intl.DateTimeFormat costs about a third of a
+   millisecond and this is called for every object listed and every row read;
+   the compactor's first test run spent forty seconds in constructors. */
+const PARTS_FMT = new Intl.DateTimeFormat('en-CA', {
+  timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
+  hour: '2-digit', minute: '2-digit', hour12: false,
+});
 function partsIn(d) {
   const p = {};
-  new Intl.DateTimeFormat('en-CA', {
-    timeZone: TZ, year: 'numeric', month: '2-digit', day: '2-digit',
-    hour: '2-digit', minute: '2-digit', hour12: false,
-  }).formatToParts(d).forEach(x => { p[x.type] = x.value; });
+  PARTS_FMT.formatToParts(d).forEach(x => { p[x.type] = x.value; });
   return { y: +p.year, m: +p.month, d: +p.day, hh: (+p.hour) % 24, mm: +p.minute };
 }
 

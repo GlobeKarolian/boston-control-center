@@ -278,6 +278,22 @@ async function putJSON(path, obj, opts) {
   }
 }
 
+/* Delete a handful of objects by URL. Only the compactor uses this, to
+   retire a rollup it has just superseded; the sweep has its own bulk path
+   with its own guards. Bounded so a bug cannot turn into a purge. */
+async function del(urls) {
+  if (!enabled()) return { ok: false, why: reason(), deleted: 0 };
+  const list = (Array.isArray(urls) ? urls : [urls]).filter(u => typeof u === 'string' && u).slice(0, 50);
+  if (!list.length) return { ok: true, deleted: 0 };
+  try {
+    await withTimeout(sdk.del(list, { token: TOKEN }), 20000);
+    METER.deletes += list.length;
+    return { ok: true, deleted: list.length };
+  } catch (e) {
+    return { ok: false, why: String(e.message || e).slice(0, 160), deleted: 0 };
+  }
+}
+
 /* Everything under a prefix, paged. The vault reads a day by listing its
    folder, so this is the read half of search. */
 /* Listing a day, when a day is tens of thousands of objects.
@@ -347,6 +363,7 @@ module.exports = {
   putClip,
   putJSON,
   listPrefix,
+  del,
   sweep,
   meter,
   MAX_BYTES,

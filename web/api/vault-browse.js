@@ -32,25 +32,6 @@ const MAX_OBJECTS = 9000;
 const CONCURRENCY = 64;
 const BATCH_SLACK_MS = 30 * 60 * 1000;
 
-async function fetchAll(urls) {
-  const out = [];
-  let i = 0;
-  async function worker() {
-    for (;;) {
-      const n = i++;
-      if (n >= urls.length) return;
-      try {
-        const r = await fetch(urls[n]);
-        if (!r.ok) continue;
-        const j = await r.json();
-        if (j && Array.isArray(j.tx)) out.push(...j.tx);
-      } catch (e) { /* one unreadable object is not a failed browse */ }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker));
-  return out;
-}
-
 module.exports = async (req, res) => {
   harden(res);
   if (!(await requireRead(req, res))) return;
@@ -85,19 +66,12 @@ module.exports = async (req, res) => {
      window touches rather than the whole day, runs them concurrently, and
      returns newest first so the cap drops the oldest edge instead of the
      newest. */
-  const got = await vaultRead.listWindow(+from, +to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS });
-  const urls = got.urls;
+  const read = await vaultRead.readWindow(+from, +to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS, concurrency: CONCURRENCY });
+  const got = read.listing || {};
   const truncated = !!got.truncated;
 
-  const all = await fetchAll(urls);
-  const rows = all
-    .filter(t => {
-      const at = +new Date(t.at);
-      if (!(at >= +from && at <= +to)) return false;
-      if (feed && String(t.feed || '').toLowerCase() !== feed) return false;
-      return true;
-    })
-    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  const all = read.rows;                          // in window, deduped, oldest first
+  const rows = feed ? all.filter(t => String(t.feed || '').toLowerCase() === feed) : all;
 
   /* What the archive holds for the window, feed by feed, whether or not it
      was the feed asked for. "Transit had nothing but EMS had nineteen" is the

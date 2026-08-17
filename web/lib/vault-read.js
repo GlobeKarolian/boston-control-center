@@ -38,6 +38,32 @@
 // prefix is still read, so yesterday keeps working. It is a set that stops
 // growing the moment this ships, and the fallback can be deleted once the
 // oldest interesting data is past it.
+//
+// ROLLUPS, WHICH IS THE ACTUAL CURE.
+//
+// Hour bucketing made the LISTING cheap. The FETCHING was still one round
+// trip per object, and a two-day question is fifteen thousand objects: on 17
+// August "Bar Fight in cambridge" took 14.6 seconds and, because no request
+// can fetch that many, quietly read only the newest sixteen hours of the two
+// days it was asked about.
+//
+// So a cron (api/cron/compact.js) rolls every settled Eastern hour into ONE
+// object:
+//
+//     vault/2026-08-17/hour/03-1755410000000.json     { tx: [ ...the hour... ] }
+//
+// and this reader fetches that instead of the hour's several hundred pieces.
+// A two-day question is then about fifty fetches. The trailing stamp is when
+// the rollup was written; if an hour has to be rolled again because late
+// objects arrived, a newer stamp wins and nothing is ever overwritten in
+// place, which matters because objects are served from a cache that would
+// otherwise hand back the stale one for a year.
+//
+// The pieces are still there. An hour with no rollup yet, the current one and
+// the one before it, is read piece by piece exactly as before. Rows can
+// therefore arrive twice at a boundary, once in a rollup and once in a piece,
+// and readWindow() dedupes them; nothing above this file has to know which
+// shape an hour came in.
 
 'use strict';
 
@@ -49,10 +75,10 @@ const TZ = 'America/New_York';
 /* The Eastern hour an instant falls in, as "00".."23". The vault is filed by
    Eastern day, so its hours have to be Eastern too or the buckets straddle
    the wrong midnight. */
+const HOUR_FMT = new Intl.DateTimeFormat('en-CA', { timeZone: TZ, hour: '2-digit', hour12: false });
 function hourOf(ms) {
   const p = {};
-  new Intl.DateTimeFormat('en-CA', { timeZone: TZ, hour: '2-digit', hour12: false })
-    .formatToParts(new Date(ms)).forEach(x => { p[x.type] = x.value; });
+  HOUR_FMT.formatToParts(new Date(ms)).forEach(x => { p[x.type] = x.value; });
   const h = (+p.hour) % 24;
   return String(h).padStart(2, '0');
 }
@@ -136,6 +162,114 @@ function stampOf(path) {
   return Number.isFinite(n) ? n : null;
 }
 
+/* ROLLUPS.
+
+   One object per settled Eastern hour, under vault/DAY/hour/. The basename is
+   HH-<written>.json where <written> is the epoch millisecond the rollup was
+   written, so a re-roll of the same hour is a new object with a later stamp
+   and the reader takes the newest per hour. */
+function rollupPrefix(day) { return 'vault/' + day + '/hour/'; }
+function rollupPath(day, hh, writtenMs) {
+  return rollupPrefix(day) + hh + '-' + String(writtenMs || Date.now()) + '.json';
+}
+/* { day, hour, written } out of a rollup pathname, or null. */
+function rollupOf(path) {
+  const parts = String(path || '').split('/');
+  const base = parts.pop() || '';
+  const m = /^(\d\d)-(\d{10,16})\.json$/.exec(base);
+  if (!m || parts.pop() !== 'hour') return null;
+  const day = parts.pop();
+  if (!/^\d{4}-\d\d-\d\d$/.test(day || '')) return null;
+  return { day, hour: m[1], written: +m[2] };
+}
+
+/* The newest rollup per hour for these days: Map "DAY/HH" -> { url, written,
+   pathname, uploadedAt }. One small listing per day. */
+async function rollupsFor(days, cache) {
+  const out = new Map();
+  const results = await pool(days, (day) => cachedList(cache, rollupPrefix(day), { max: 500 }), LIST_CONCURRENCY);
+  for (const r of results) {
+    for (const b of ((r && r.blobs) || [])) {
+      const info = rollupOf(b.pathname || b.url);
+      if (!info) continue;
+      const key = info.day + '/' + info.hour;
+      const have = out.get(key);
+      if (!have || info.written > have.written) {
+        out.set(key, { url: b.url, written: info.written, pathname: b.pathname, uploadedAt: b.uploadedAt || null });
+      }
+    }
+  }
+  return out;
+}
+
+/* A listing, once per run when the caller hands over a cache. The compactor
+   rolls many hours of one day in a single run, and a legacy day's flat folder
+   is thirty pages; listing it once per hour would be thirty pages times
+   twenty-four. */
+async function cachedList(cache, prefix, opts) {
+  const o = opts || {};
+  if (!cache) return blob.listPrefix(prefix, o);
+  /* What is cached is the WHOLE listing, unfiltered and uncapped. The first
+     version cached whatever the first caller asked for, and the first caller
+     was rolling hour 08 with ten minutes of slack, so hour 07's folder went
+     into the cache holding only its last ten minutes; rolling hour 07 then
+     read six rows and wrote them down as the hour. A cache entry has to be
+     the folder, not one caller's view of it. */
+  const key = prefix + '|' + (o.folded ? 'f' : 'e');
+  let full = cache.get(key);
+  if (!full) {
+    full = await blob.listPrefix(prefix, { folded: o.folded, max: 400000, keepNewest: false, maxPages: 400 });
+    cache.set(key, full);
+  }
+  let blobs = full.blobs || [];
+  if (typeof o.keep === 'function') blobs = blobs.filter(o.keep);
+  let truncated = !!full.truncated;
+  if (o.max && blobs.length > o.max) {
+    blobs = o.keepNewest ? blobs.slice(-o.max) : blobs.slice(0, o.max);
+    truncated = true;
+  }
+  return { ok: full.ok !== false, why: full.why, blobs, pages: full.pages || 0, seen: (full.blobs || []).length, truncated };
+}
+
+/* The instant range of an Eastern (day, hour) bucket: [start, end).
+
+   Eastern is UTC minus four or minus five, so the bucket starts at one of two
+   instants; each is checked against the same clock the writer uses, so this
+   cannot disagree with where an object was filed. The doubled 1am on the
+   November change comes back as one two-hour range, which is what its single
+   bucket holds; the missing 2am in March comes back null. Memoised, because
+   the reader asks for the same few dozen buckets over and over. */
+const HW_MEMO = new Map();
+function hourWindow(day, hh) {
+  const key = day + '/' + hh;
+  if (HW_MEMO.has(key)) return HW_MEMO.get(key);
+  let out = null;
+  const base = Date.parse(day + 'T00:00:00Z');
+  if (Number.isFinite(base) && /^\d\d$/.test(hh)) {
+    const H = 3600000;
+    let start = null;
+    for (const off of [4, 5]) {
+      const t = base + (+hh) * H + off * H;
+      if (vq.dayString(new Date(t)) === day && hourOf(t) === hh) { start = start === null ? t : Math.min(start, t); }
+    }
+    if (start !== null) {
+      let end = start + H;
+      /* The doubled hour: the instant an hour later still reads as this hour. */
+      if (vq.dayString(new Date(end)) === day && hourOf(end) === hh) end += H;
+      out = { start, end };
+    }
+  }
+  if (HW_MEMO.size > 5000) HW_MEMO.clear();
+  HW_MEMO.set(key, out);
+  return out;
+}
+
+/* One row's identity, for deduping a row that arrived both in a rollup and in
+   a piece at an hour boundary, or twice from a relay retry. */
+function rowKey(t) {
+  return String(t.at || '') + '|' + String(t.feed || t.src || '') + '|' + String(t.text || '').slice(0, 96);
+}
+
 /* How many listings run at once. Enough to collapse a shift's worth of hour
    folders into a few waves, low enough not to look like an attack on the
    store. */
@@ -199,11 +333,13 @@ async function listWindow(fromMs, toMs, opts) {
   const max = o.max || 12000;
   const lo = fromMs - slack;
   const hi = toMs + slack;
+  const cache = o.cache || null;
 
   if (!blob.enabled()) return { ok: false, why: blob.reason(), urls: [], listed: 0, truncated: false };
 
   const seen = new Set();
-  const found = [];
+  const found = [];       // raw pieces
+  const rolled = [];      // rollups, always kept whole
   let listed = 0, scanned = 0, pages = 0, truncated = false, why = null;
 
   const take = (r) => {
@@ -241,6 +377,10 @@ async function listWindow(fromMs, toMs, opts) {
    * the result across the span instead of taking the newest slice of it. */
   const evenly = !!o.evenly;
   const plan = planFor(fromMs, toMs, slack, { legacy: o.legacy !== false });
+
+  /* Which hours already exist as one object. */
+  const rollups = (o.rollups === false) ? new Map() : await rollupsFor(plan.map(g => g.day), cache);
+
   let stoppedEarly = false;
   for (const group of plan) {
     /* The window filter runs inside the listing, per page, rather than after
@@ -253,8 +393,27 @@ async function listWindow(fromMs, toMs, opts) {
       const at = stampOf(b.pathname || b.url);
       return at === null || (at >= lo && at <= hi);
     };
-    const results = await pool(group.entries,
-      (e) => blob.listPrefix(e.prefix, { max: 8000, keepNewest: true, folded: e.folded, keep: inWindow }),
+    /* Hours with a rollup are one fetch and no listing. Hours without are
+       listed piece by piece. The legacy flat folder is only listed when some
+       hour of the day still needs pieces, since a rolled hour has already
+       absorbed its flat objects. */
+    const entries = [];
+    let needsPieces = false;
+    for (const e of group.entries) {
+      if (e.folded) continue;                            // decided below
+      const hh = e.prefix.slice(-3, -1);
+      const ru = rollups.get(group.day + '/' + hh);
+      if (ru) {
+        const w = hourWindow(group.day, hh);
+        rolled.push({ url: ru.url, at: w ? w.start : 0, rollup: true, hour: group.day + '/' + hh });
+      } else {
+        entries.push(e);
+        needsPieces = true;
+      }
+    }
+    if (needsPieces) for (const e of group.entries) if (e.folded) entries.push(e);
+    const results = await pool(entries,
+      (e) => cachedList(cache, e.prefix, { max: 8000, keepNewest: true, folded: e.folded, keep: inWindow }),
       LIST_CONCURRENCY);
     for (const r of results) take(r);
     /* Every prefix left is an older day, and the cap below would drop all of
@@ -265,16 +424,75 @@ async function listWindow(fromMs, toMs, opts) {
   }
 
   found.sort((a, b) => b.at - a.at);           // newest first
-  let urls;
+  let kept;
   let sampled = false;
   if (found.length > max) {
     truncated = true;
-    if (evenly) { urls = thin(found, max).map(x => x.url); sampled = true; }
-    else urls = found.slice(0, max).map(x => x.url);
+    if (evenly) { kept = thin(found, max); sampled = true; }
+    else kept = found.slice(0, max);
   } else {
-    urls = found.map(x => x.url);
+    kept = found;
   }
-  return { ok: true, urls, listed, scanned, pages, truncated, sampled, stoppedEarly, found: found.length, why };
+  /* Rollups are never capped or thinned: each one IS an hour, and dropping
+     one drops the hour. They ride along whole, newest first with the rest. */
+  const all = kept.concat(rolled).sort((a, b) => b.at - a.at);
+  const urls = all.map(x => x.url);
+  return { ok: true, urls, objects: all, listed, scanned, pages, truncated, sampled, stoppedEarly,
+           found: found.length, rollups: rolled.length, why };
 }
 
-module.exports = { listWindow, thin, planFor, prefixFor, prefixesFor, legacyPrefixesFor, stampOf, hourOf, TZ, LIST_CONCURRENCY };
+/* Fetch what a listing found. Every object is { tx: [...] }, rollup or piece,
+   so the shape is one shape. One unreadable object is not a failed read. */
+let FETCH = (u) => fetch(u);
+async function fetchAll(urls, width) {
+  const out = [];
+  let i = 0, failed = 0;
+  const w = Math.min(width || 48, urls.length || 1);
+  const worker = async () => {
+    for (;;) {
+      const n = i++;
+      if (n >= urls.length) return;
+      try {
+        const r = await FETCH(urls[n]);
+        if (!r || !r.ok) { failed++; continue; }
+        const j = await r.json();
+        if (j && Array.isArray(j.tx)) for (const t of j.tx) out.push(t);
+      } catch (e) { failed++; }
+    }
+  };
+  await Promise.all(Array.from({ length: w }, worker));
+  return { rows: out, failed };
+}
+
+/* THE ROWS IN A WINDOW. The one read everything above this file should use.
+ *
+ * Lists (rollups first, pieces for the hours that have none), fetches, dedupes
+ * a row that arrived both ways, keeps only rows inside [fromMs, toMs], and
+ * returns them oldest first. Every option of listWindow applies. */
+async function readWindow(fromMs, toMs, opts) {
+  const o = opts || {};
+  const got = await listWindow(fromMs, toMs, o);
+  if (!got.ok) return { ok: false, why: got.why, rows: [], listing: got, failed: 0 };
+  const fetched = await fetchAll(got.urls, o.concurrency);
+  const seen = new Set();
+  const rows = [];
+  for (const t of fetched.rows) {
+    if (!t) continue;
+    const at = +new Date(t.at);
+    if (!Number.isFinite(at) || at < fromMs || at > toMs) continue;
+    const k = rowKey(t);
+    if (seen.has(k)) continue;
+    seen.add(k);
+    rows.push(t);
+  }
+  rows.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  return { ok: true, rows, listing: got, failed: fetched.failed, deduped: fetched.rows.length - rows.length };
+}
+
+module.exports = {
+  listWindow, readWindow, fetchAll, thin, planFor, prefixFor, prefixesFor, legacyPrefixesFor,
+  stampOf, hourOf, hourWindow, rowKey, rollupPrefix, rollupPath, rollupOf, rollupsFor, cachedList,
+  TZ, LIST_CONCURRENCY,
+  /* Test seam: the fetch used for object bodies. */
+  _setFetch(fn) { FETCH = fn || ((u) => fetch(u)); },
+};

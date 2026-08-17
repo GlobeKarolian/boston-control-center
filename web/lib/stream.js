@@ -53,25 +53,6 @@ const MAX_ROWS = 1200;
    is roughly twelve hundred of them. */
 const MAX_OBJECTS = 2400;
 
-async function fetchAll(urls) {
-  const out = [];
-  let i = 0;
-  async function worker() {
-    for (;;) {
-      const n = i++;
-      if (n >= urls.length) return;
-      try {
-        const r = await fetch(urls[n]);
-        if (!r.ok) continue;
-        const j = await r.json();
-        if (j && Array.isArray(j.tx)) out.push(...j.tx);
-      } catch (e) { /* one unreadable object is not a failed read */ }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker));
-  return out;
-}
-
 /* Everything the radio carried between two instants.
  *
  * Returns { rows, from, to, cursor, complete, skipped, objects }. `cursor` is
@@ -150,40 +131,28 @@ async function since(fromISO, toISO, opts) {
      evenly across the last few minutes of it. That is how the desk answered
      "any fights?" over two days by reading 150 transmissions that were all
      from the same quiet half hour. */
-  const got = await vaultRead.listWindow(+from, +to, {
+  /* One read, shared with the archive: rollups for the hours that have them,
+     pieces for the rest, deduped, oldest first. The object-level sampling
+     that used to live here is gone with the objects: an hour is one fetch
+     now, so the whole window arrives and the sampling below happens on ROWS,
+     which is the only level at which "evenly across the window" was ever
+     true. When the archive is still mid-migration and a window is more
+     pieces than one request can fetch, listWindow keeps the newest for a
+     listener and thins across the span for a question, and says so. */
+  const read = await vaultRead.readWindow(+from, +to, {
     slackMs: BATCH_SLACK_MS,
     max: Math.max(maxObjects * 3, maxObjects),
     evenly,
+    concurrency: CONCURRENCY,
   });
-  let urls = got.urls.slice().reverse();   // chronological for the sampler below
+  const got = read.listing || {};
+  const urls = got.urls || [];
+  let sampled = !!got.sampled;
+  let dropped = got.truncated ? Math.max(0, (got.found || 0) - urls.length) : 0;
 
-  /* Already chronological: listWindow returns newest-first and the reverse
-     above puts it in time order. The old lexical urls.sort() only happened to
-     work when every object sat in one flat folder whose names began with the
-     epoch stamp; with hour buckets in the path it would sort by folder. */
-  let sampled = false;
-  let dropped = 0;
-  if (urls.length > maxObjects) {
-    if (evenly) {
-      const r = spread(urls, maxObjects);
-      dropped = urls.length - r.picked.length;
-      urls = r.picked;
-      sampled = true;
-    } else {
-      dropped = urls.length - maxObjects;
-      urls = urls.slice(-maxObjects);
-    }
-  }
-
-  const all = await fetchAll(urls);
-  let rows = all
-    .filter(t => {
-      const at = +new Date(t.at);
-      /* Strictly after `from`, so the row that set the cursor is not read a
-         second time and counted as new traffic. */
-      return at > +from && at <= +to;
-    })
-    .sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  /* Strictly after `from`, so the row that set the cursor is not read a
+     second time and counted as new traffic. */
+  let rows = read.rows.filter(t => +new Date(t.at) > +from);
 
   let skipped = dropped;
   let complete = !sampled && !dropped;

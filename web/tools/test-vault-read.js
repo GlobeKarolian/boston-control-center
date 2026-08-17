@@ -210,6 +210,10 @@ ok('a name this code cannot read returns null rather than a wrong number',
           /listPrefix\s*\(\s*['"`]vault\/.*\+/.test(src) ||
           /listPrefix\([^)]*vault\//.test(src)) offenders.push(rel + ' lists a vault prefix');
       if (/function\s+stampOf/.test(src)) offenders.push(rel + ' parses vault filenames');
+      /* And nothing else fetches the objects. Three copies of fetchAll went
+         with three copies of the listing; the row dedupe that makes rollups
+         and pieces safe to mix lives in readWindow and nowhere else. */
+      if (/async function fetchAll\s*\(/.test(src)) offenders.push(rel + ' fetches vault objects itself');
     }
   };
   for (const r of roots) walk(r);

@@ -32,28 +32,6 @@ const CONCURRENCY = 64;
    ever skips objects that could not have contained an answer. */
 const BATCH_SLACK_MS = 30 * 60 * 1000;
 
-/* Object storage has no query language, so the fetch is the search. Run wide
-   rather than deep: these are a few hundred bytes each and the round trip,
-   not the payload, is the cost. */
-async function fetchAll(urls) {
-  const out = [];
-  let i = 0;
-  async function worker() {
-    for (;;) {
-      const n = i++;
-      if (n >= urls.length) return;
-      try {
-        const r = await fetch(urls[n]);
-        if (!r.ok) continue;
-        const j = await r.json();
-        if (j && Array.isArray(j.tx)) out.push(...j.tx);
-      } catch (e) { /* one unreadable object is not a failed search */ }
-    }
-  }
-  await Promise.all(Array.from({ length: Math.min(CONCURRENCY, urls.length) }, worker));
-  return out;
-}
-
 /* Loose transmissions back into the calls they belonged to.
 
    Anything the pipeline could not tie to a scene still comes back, gathered
@@ -306,16 +284,18 @@ module.exports = async (req, res) => {
      folders the window touches, returns them NEWEST FIRST, and only then
      applies the cap, so a window too wide to fetch whole loses its oldest
      edge rather than the night being asked about. */
-  const got = await vaultRead.listWindow(+f.from, +f.to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS });
-  const urls = got.urls;                          // newest first
+  /* One read: rollups for the hours that have them, pieces for the hours
+     that do not, fetched, deduped, in time order. See lib/vault-read.js. */
+  const read = await vaultRead.readWindow(+f.from, +f.to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS, concurrency: CONCURRENCY });
+  const got = read.listing || {};
+  const urls = got.urls || [];
   const truncated = !!got.truncated;
   /* A COUNT, not the result object. This was `listed` before the shared reader
      landed and it went on being spread into the response afterwards, which
      shipped every blob URL a second time: two thirds of a megabyte of JSON on
      a wide search, for a field nothing reads. */
   const listed = got.listed || 0;
-
-  const tx = await fetchAll(urls);
+  const tx = read.rows;
   let hits = [];
   for (const t of tx) {
     const s = vq.score(t, f);
