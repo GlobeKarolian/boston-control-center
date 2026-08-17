@@ -321,30 +321,41 @@ function metresApart(aLat, aLon, bLat, bLon) {
  * town or city field, so the spelling path works, and a radius around a town
  * centroid would reach into the three towns next door. */
 const PLACE_POINTS = {
-  'north end':     [42.36510, -71.05450,  700],
-  'chinatown':     [42.35255, -71.06275,  600],
-  'beacon hill':   [42.35871, -71.06783,  700],
-  'downtown':      [42.35584, -71.05562,  800],
-  'kenmore':       [42.34895, -71.09517,  700],
-  'longwood':      [42.34181, -71.10978,  700],
-  'mission hill':  [42.33327, -71.10203,  800],
-  'fenway':        [42.34533, -71.10427,  900],
-  'south end':     [42.34283, -71.07378, 1000],
-  'back bay':      [42.34735, -71.07573, 1100],
-  'seaport':       [42.34576, -71.04374, 1200],
+  /* Tightened after measuring every radius against the gazetteer's own
+     coordinates. The first cut crossed Boston Harbor (East Boston reaching
+     Charlestown and the North End), crossed the Neponset into Milton, crossed
+     into Brookline, and put the Prudential in the South End. A neighbourhood
+     that quietly answers for the one next door is worse than one that answers
+     for nothing, because the reporter cannot see it happening.
+
+     Where a radius has to choose, it under-reaches. A call the search misses
+     is still findable by street, by unit or by time; a call it wrongly
+     includes is a wrong fact with a play button next to it. */
+  'chinatown':     [42.35255, -71.06275,  420],
+  'north end':     [42.36510, -71.05450,  520],
+  'longwood':      [42.34181, -71.10978,  520],
+  'beacon hill':   [42.35871, -71.06783,  620],
+  'kenmore':       [42.34895, -71.09517,  620],
+  'downtown':      [42.35584, -71.05562,  700],
+  'mission hill':  [42.33327, -71.10203,  760],
+  'south end':     [42.34283, -71.07378,  780],
+  'fenway':        [42.34533, -71.10427,  860],
+  'seaport':       [42.34576, -71.04374,  900],
+  'back bay':      [42.34735, -71.07573,  950],
+  'charlestown':   [42.37787, -71.06200, 1050],
+  'mattapan':      [42.26756, -71.09223, 1050],
+  'east boston':   [42.37510, -71.03922, 1150],
   'allston':       [42.35554, -71.13275, 1200],
-  'charlestown':   [42.37787, -71.06200, 1300],
+  'roxbury':       [42.32891, -71.08509, 1250],
+  'brighton':      [42.34916, -71.15339, 1400],
+  'south boston':  [42.33343, -71.04949, 1400],
   'roslindale':    [42.29121, -71.12450, 1500],
-  'mattapan':      [42.26756, -71.09223, 1600],
-  'brighton':      [42.34916, -71.15339, 1800],
-  'south boston':  [42.33343, -71.04949, 1800],
-  'jamaica plain': [42.31160, -71.11438, 1800],
-  'roxbury':       [42.32891, -71.08509, 1800],
-  'east boston':   [42.37510, -71.03922, 2000],
+  'jamaica plain': [42.31160, -71.11438, 1700],
   'west roxbury':  [42.28136, -71.16006, 2000],
   'hyde park':     [42.25503, -71.12553, 2000],
   'dorchester':    [42.29732, -71.07450, 2600],
 };
+
 
 function nearPlace(tx, canon) {
   const p = PLACE_POINTS[canon];

@@ -309,22 +309,35 @@ async function listPrefix(prefix, opts) {
      vault/DAY/tx/ also walks every hour folder underneath, which is the whole
      cost the hour bucket was introduced to avoid. */
   const mode = (opts && opts.folded) ? 'folded' : undefined;
-  let pages = 0, truncated = false;
+  /* Decide what to keep AS THE PAGES ARRIVE, not after.
+   *
+   * Without this, `keepNewest` trimmed a folder down to its newest `cap`
+   * objects and only then did the caller filter by time window. On a flat
+   * pre-hour-bucket day holding thirty thousand objects that discarded
+   * everything before roughly the last two hours, so a morning window came
+   * back EMPTY while the archive was holding six hundred objects for it, and
+   * the UI told the reporter it had never been written down. Filtering first
+   * means the cap counts things the caller can actually use. */
+  const keep = (opts && typeof opts.keep === 'function') ? opts.keep : null;
+  let pages = 0, truncated = false, trimmed = false, seen = 0;
   try {
     do {
       const args = { token: TOKEN, prefix, limit: 1000, cursor };
       if (mode) args.mode = mode;          // absent, not undefined, for the default path
       const page = await withTimeout(sdk.list(args), 20000);
-      for (const b of (page.blobs || [])) out.push(b);
+      for (const b of (page.blobs || [])) { seen++; if (!keep || keep(b)) out.push(b); }
       /* Trim as we go so a huge folder never sits in memory all at once. */
-      if (keepNewest && out.length > cap * 2) out = out.slice(-cap);
+      if (keepNewest && out.length > cap * 2) { out = out.slice(-cap); trimmed = true; }
       cursor = page.hasMore ? page.cursor : null;
       if (++pages >= maxPages) { truncated = !!cursor; break; }
     } while (cursor && (keepNewest || out.length < cap));
-    if (keepNewest && out.length > cap) out = out.slice(-cap);
-    return { ok: true, blobs: out, pages, truncated };
+    if (keepNewest && out.length > cap) { out = out.slice(-cap); trimmed = true; }
+    /* A trim is a truncation and has to be reported as one. It used to be
+       silent, which is how an empty answer could be delivered as a complete
+       one. */
+    return { ok: true, blobs: out, pages, seen, truncated: truncated || trimmed };
   } catch (e) {
-    return { ok: false, why: String(e.message || e).slice(0, 160), blobs: out, pages, truncated: true };
+    return { ok: false, why: String(e.message || e).slice(0, 160), blobs: out, pages, seen, truncated: true };
   }
 }
 

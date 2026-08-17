@@ -155,6 +155,35 @@ async function pool(items, worker, width) {
   return out;
 }
 
+/* How much of an even sample is reserved for the newest end of the window.
+ *
+ * Even coverage of two days quietly throws away right now, because right now
+ * is a handful of objects at the end of a list of thousands and a stride of
+ * one-in-twenty does not care which end it is dropping. On 14 August somebody
+ * typed "stabbing" at 02:32 and got seven knife references from the previous
+ * afternoon and not the stabbing dispatched eight minutes earlier. So the
+ * newest share is taken whole and the stride covers everything older.
+ *
+ * lib/stream.js reserves the same share again on the rows it fetches. The two
+ * compose: this one guarantees the SPAN is represented, that one guarantees
+ * the last few minutes survive the second cut. */
+const TAIL_SHARE = 1 / 3;
+
+/* Thin a newest-first list to `cap`, keeping the span. Returns newest-first. */
+function thin(found, cap) {
+  if (found.length <= cap) return found.slice();
+  const tailN = Math.max(1, Math.min(cap - 1, Math.floor(cap * TAIL_SHARE)));
+  const tail = found.slice(0, tailN);                 // newest, kept whole
+  const rest = found.slice(tailN);                    // older, sampled
+  const headCap = cap - tailN;
+  const out = tail.slice();
+  if (headCap > 0 && rest.length) {
+    const step = rest.length / headCap;
+    for (let i = 0; i < headCap; i++) out.push(rest[Math.floor(i * step)]);
+  }
+  return out;
+}
+
 /* Object URLs covering a window, newest first.
  *
  * Returns { ok, urls, listed, pages, truncated, why }. `urls` is newest-first
@@ -175,10 +204,11 @@ async function listWindow(fromMs, toMs, opts) {
 
   const seen = new Set();
   const found = [];
-  let listed = 0, pages = 0, truncated = false, why = null;
+  let listed = 0, scanned = 0, pages = 0, truncated = false, why = null;
 
   const take = (r) => {
     pages += (r && r.pages) || 0;
+    scanned += (r && r.seen) || 0;
     if (r && r.truncated) truncated = true;
     if (r && r.ok === false && r.why && !why) why = r.why;
     for (const b of ((r && r.blobs) || [])) {
@@ -194,23 +224,57 @@ async function listWindow(fromMs, toMs, opts) {
     }
   };
 
+  /* EVENLY, WHICH IS A DIFFERENT QUESTION.
+   *
+   * A listener wants the end of the window. Somebody who typed a QUESTION into
+   * the desk wants the window, all of it, thinly. Those need different answers
+   * and the difference has to be made HERE, where the whole set is known.
+   *
+   * Getting that wrong is what put "there are no fights" on the screen at 2am
+   * on 17 August, over a window that contained a brawl outside Russell House
+   * Tavern. The desk asked for even coverage of 3,121 transmissions and got a
+   * contiguous newest-first block of 150, so its sampler was spreading evenly
+   * across the last few minutes and calling it two days. The fight was never
+   * fetched, and the answer said the city was quiet.
+   *
+   * So when a caller asks for the whole window: do not stop early, and thin
+   * the result across the span instead of taking the newest slice of it. */
+  const evenly = !!o.evenly;
   const plan = planFor(fromMs, toMs, slack, { legacy: o.legacy !== false });
   let stoppedEarly = false;
   for (const group of plan) {
+    /* The window filter runs inside the listing, per page, rather than after
+       it. A legacy flat day holds tens of thousands of objects and the
+       newest-first trim used to throw away everything but the last few
+       thousand BEFORE anyone checked which of them were in the window, so a
+       morning question came back empty while the archive held six hundred
+       objects for it. */
+    const inWindow = (b) => {
+      const at = stampOf(b.pathname || b.url);
+      return at === null || (at >= lo && at <= hi);
+    };
     const results = await pool(group.entries,
-      (e) => blob.listPrefix(e.prefix, { max: 8000, keepNewest: true, folded: e.folded }),
+      (e) => blob.listPrefix(e.prefix, { max: 8000, keepNewest: true, folded: e.folded, keep: inWindow }),
       LIST_CONCURRENCY);
     for (const r of results) take(r);
     /* Every prefix left is an older day, and the cap below would drop all of
        it. Stopping here is the difference between answering last night and
-       paging last week to discard it. */
-    if (found.length >= max) { stoppedEarly = true; truncated = true; break; }
+       paging last week to discard it. Never when the caller asked for even
+       coverage: for them the older days ARE the answer. */
+    if (!evenly && found.length >= max) { stoppedEarly = true; truncated = true; break; }
   }
 
   found.sort((a, b) => b.at - a.at);           // newest first
-  const urls = found.slice(0, max).map(x => x.url);
-  if (found.length > max) truncated = true;
-  return { ok: true, urls, listed, pages, truncated, stoppedEarly, why };
+  let urls;
+  let sampled = false;
+  if (found.length > max) {
+    truncated = true;
+    if (evenly) { urls = thin(found, max).map(x => x.url); sampled = true; }
+    else urls = found.slice(0, max).map(x => x.url);
+  } else {
+    urls = found.map(x => x.url);
+  }
+  return { ok: true, urls, listed, scanned, pages, truncated, sampled, stoppedEarly, found: found.length, why };
 }
 
-module.exports = { listWindow, planFor, prefixFor, prefixesFor, legacyPrefixesFor, stampOf, hourOf, TZ, LIST_CONCURRENCY };
+module.exports = { listWindow, thin, planFor, prefixFor, prefixesFor, legacyPrefixesFor, stampOf, hourOf, TZ, LIST_CONCURRENCY };

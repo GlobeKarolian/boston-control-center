@@ -80,13 +80,38 @@ const ROAD_CUE = /\b(route|rt|interstate|i|highway|hwy|on|off|northbound|southbo
  * town cannot join the transmissions it belongs with, so a wrong pin does not
  * just misplace a card, it splits one. */
 const STREET_TYPE = new Set(['street', 'st', 'avenue', 'ave', 'av', 'road', 'rd', 'drive', 'dr',
-  'lane', 'ln', 'place', 'pl', 'court', 'ct', 'circle', 'cir', 'terrace', 'ter', 'way',
-  'boulevard', 'blvd', 'parkway', 'pkwy', 'highway', 'hwy', 'row', 'wharf', 'path',
-  'alley', 'crescent', 'extension', 'ext']);
+  'lane', 'ln', 'court', 'ct', 'terrace', 'ter', 'boulevard', 'blvd', 'parkway', 'pkwy',
+  'highway', 'hwy']);
+/* Deliberately NOT here: circle, way, row, path, wharf. Each is the tail of a
+   real named place a dispatcher says out loud, and adding them cost Charles
+   Circle, which is a rotary rather than a street and resolved fine before. */
 
 /* A house number in front says the same thing from the other side: "155
-   Harvard" is an address even when the speaker drops the "Street". */
-const isHouseNumber = w => /^\d{1,5}[a-z]?$/.test(w || '');
+   Harvard" is an address even when the speaker drops the "Street".
+ *
+ * The hard part is that a scanner is made of numbers in front of words.
+ * "Engine 4, Ladder 24, Fenway" is not an address on Fenway, and neither are
+ * "Car 12, Andrew", "District 4, Copley", "Sector 3, Chinatown" or
+ * "Box 2242, Nubian". Two things separate them from "155 Harvard":
+ *
+ *   the comma      a unit designator is punctuated off from what follows, and
+ *                  an address never is. This is checked against the RAW text,
+ *                  because norm() strips punctuation and takes the evidence
+ *                  with it.
+ *   the word before the number, which on the radio names the apparatus.
+ *
+ * Both have to be clean before a number is read as a house number. Getting
+ * this wrong costs a real place on every transmission that names its units,
+ * which is most of them. */
+const UNIT_WORD = /\b(engine|ladder|truck|tower|car|unit|units|district|sector|box|ems|medic|ambulance|rescue|squad|brush|tanker|marine|division|group|tac|cruiser|companies|company|command|air|boat|dive|haz|hazmat|special|support)\s*$/i;
+const RX_ESC = s => String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function addressedBy(alias, raw) {
+  const m = new RegExp('(^|[^\\w])(\\w+\\s+)?(\\d{1,5}[a-z]?)\\s+' + RX_ESC(alias) + '\\b', 'i').exec(String(raw || ''));
+  if (!m) return false;                      // no number directly in front at all
+  if (UNIT_WORD.test(m[2] || '')) return false;   // "Ladder 24 Fenway" is apparatus
+  return true;
+}
 
 /* STOPS NAMED AFTER THE STREET THEY SIT ON.
  *
@@ -103,7 +128,19 @@ const isHouseNumber = w => /^\d{1,5}[a-z]?$/.test(w || '');
  * longer alias, and longest-alias-first means anybody who says the word gets
  * the stop without needing any of this. */
 const ST_TYPE_TAIL = /\b(street|st|avenue|ave|av|road|rd|drive|dr|lane|ln|place|pl|court|ct|circle|cir|terrace|ter|way|boulevard|blvd|parkway|pkwy|highway|hwy|row|path)$/;
-const TRANSIT_CUE = /\b(station|platform|inbound|outbound|trolley|streetcar|train|tracks|green line|red line|orange line|blue line|silver line|mattapan|mbta|transit|the t|t stop|conductor|derail|third rail|fare)\b/;
+const TRANSIT_CUE = /\b(platform|inbound|outbound|trolley|streetcar|train|tracks|green line|red line|orange line|blue line|silver line|commuter rail|mbta|transit|t stop|turnstile|conductor|derail|third rail|fare|busway)\b/;
+/* "station" is not in there on purpose. On a fire or police channel the most
+   common things said about a station are gas station, fire station, police
+   station and back at the station, and letting any of them arm this guard puts
+   a Brighton trolley stop on a Washington Street gas fire. The gazetteer
+   already carries "<name> station" as its own, longer alias, so anyone who
+   actually says it gets the stop without needing a cue at all. */
+
+/* The gazetteer files trolley stops, subway stops and commuter rail as
+   different kinds. All three are equally capable of being named after the
+   street they sit on: Blue Hill Avenue, Morton Street and Talbot Avenue are
+   commuter rail stops AND arterials that run for miles. */
+const RAIL_KIND = new Set(['station', 'commuter rail']);
 
 function usable(alias, place, text, ctx) {
   if (TOO_COMMON.has(alias)) return false;
@@ -117,22 +154,17 @@ function usable(alias, place, text, ctx) {
     const namedForItsStreet = ST_TYPE_TAIL.test(alias);
     /* "155 Harvard" and "22 Washington Street" are both addresses. The first
        needs the single-word test because the speaker dropped the street type;
-       the second is caught because the alias carries it. "1 Fenway Park" is
-       neither and stays a place. */
-    if (isHouseNumber(ctx.prev) && (namedForItsStreet || alias.indexOf(' ') === -1)) return false;
-    if (namedForItsStreet && place.kind === 'station' && !TRANSIT_CUE.test(text)) return false;
+       the second is caught because the alias carries it. "1 Fenway Park" is a
+       place and survives, and so does "Ladder 24, Fenway", because
+       addressedBy() reads the raw text and refuses a number that is punctuated
+       off or that follows an apparatus word. */
+    if ((namedForItsStreet || alias.indexOf(' ') === -1) && addressedBy(alias, ctx.raw)) return false;
+    if (namedForItsStreet && RAIL_KIND.has(place.kind) && !TRANSIT_CUE.test(text)) return false;
     /* Same argument, different collision: several stops are named after towns
        ("Arlington", "Brookline Village", "Newton Centre"). On a scanner the
        town is the far more common meaning, so the stop needs the sentence to
        sound like transit before it can claim the word. */
-    if (place.kind === 'station' && TOWNS.has(alias) && !TRANSIT_CUE.test(text)) return false;
-    /* "Arlington and Boylston" is a corner, and both arms of it happen to be
-       Green Line stops. A name sitting next to "and" is one street of two, not
-       a platform, unless the sentence says otherwise. The corner path in
-       lib/geo.js runs well before this scan and resolves these properly; this
-       only stops the last-resort scan from planting a precise pin on the wrong
-       thing when the corner could not be found. */
-    if (place.kind === 'station' && (ctx.next === 'and' || ctx.prev === 'and') && !TRANSIT_CUE.test(text)) return false;
+    if (RAIL_KIND.has(place.kind) && TOWNS.has(alias) && !TRANSIT_CUE.test(text)) return false;
   }
   return true;
 }
@@ -162,7 +194,7 @@ function scanText(text, towns) {
       const phrase = words.slice(i, i + n).join(' ');
       const hits = INDEX.get(phrase);
       if (!hits) continue;
-      const ctx = { prev: words[i - 1] || '', next: words[i + n] || '' };
+      const ctx = { prev: words[i - 1] || '', next: words[i + n] || '', raw: text };
       for (const p of hits) {
         if (!usable(phrase, p, t, ctx)) continue;
         const scoped = inScope(p, towns);
@@ -194,6 +226,11 @@ function scanText(text, towns) {
     // A road or a town centroid is a neighbourhood-level answer and should not
     // be drawn as though someone stood on that spot.
     approx: best.place.linear || best.place.kind === 'town',
+    /* And a town centroid is weaker than that: it is a point that means "this
+       municipality", not "this spot". Saying so is what stops the archive
+       search from concluding that every call naming only "Boston" happened
+       downtown, because the centroid physically sits there. */
+    weak: best.place.kind === 'town' ? true : undefined,
     confident: best.scoped,
   };
 }
@@ -210,6 +247,7 @@ function byName(name, towns) {
     matched: scoped.name + (scoped.town && scoped.kind !== 'town' ? ', ' + scoped.town : ''),
     src: 'gazetteer', kind: scoped.kind, town: scoped.town,
     approx: scoped.linear || scoped.kind === 'town',
+    weak: scoped.kind === 'town' ? true : undefined,
     confident: inScope(scoped, towns),
   };
 }
@@ -217,7 +255,7 @@ function byName(name, towns) {
 function townCentroid(town) {
   const p = TOWNS.get(townKey(town));
   if (!p) return null;
-  return { lat: p.lat, lon: p.lon, matched: p.name, src: 'gazetteer', kind: 'town', town: p.name, approx: true, confident: true };
+  return { lat: p.lat, lon: p.lon, matched: p.name, src: 'gazetteer', kind: 'town', town: p.name, approx: true, weak: true, confident: true };
 }
 
 /* Which town is this transmission about? A town named out loud beats the

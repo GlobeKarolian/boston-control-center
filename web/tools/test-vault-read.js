@@ -357,6 +357,35 @@ async function run() {
        (await vr.listWindow(base, base + 19 * 60000, { slackMs: 60000, max: 500, legacy: false })).urls.length === 0);
   }
 
+  /* THE LEGACY DAY, WHICH IS THE WHOLE ARCHIVE UNTIL THIS SHIPS.
+   *
+   * Everything written before hour bucketing sits flat in vault/DAY/tx/, tens
+   * of thousands of objects deep. The newest-first trim inside listPrefix used
+   * to run BEFORE anybody checked which objects were in the window, so it
+   * threw away all but the last few thousand of the day and a morning question
+   * came back empty while the archive was holding hundreds of objects for it.
+   * Empty, and reported as complete, so the page told the reporter it had
+   * never been written down. */
+  {
+    const flatDay = [];
+    const start = ET('2026-08-16T04:00:00Z');
+    for (let t = start; t < start + 86400000; t += 3000) {      // ~28,800 objects
+      flatDay.push({ pathname: 'vault/2026-08-16/tx/' + t + '-1.json' });
+    }
+    blob._inject(fakeStore(flatDay), 'test-token-not-a-credential');
+    const from = ET('2026-08-16T13:00:00Z');       // 09:00 ET, the middle of the day
+    const to   = ET('2026-08-16T13:30:00Z');
+    const r = await vr.listWindow(from, to, { slackMs: 0, max: 2000 });
+    ok('a mid-morning window of a flat legacy day is not empty',
+       r.urls.length > 0, r.urls.length + ' urls from ' + flatDay.length + ' objects');
+    const stamps = r.urls.map(vr.stampOf);
+    ok('and holds the window that was asked for',
+       stamps.every(x => x >= from && x <= to) && stamps.length >= 500,
+       stamps.length + ' objects, ' + new Date(Math.min(...stamps)).toISOString() +
+       '..' + new Date(Math.max(...stamps)).toISOString());
+    ok('and did not have to be truncated to get there', r.truncated !== true);
+  }
+
   /* THE WEEK QUESTION.
 
      "It should have all the way back through last week." A window that wide
@@ -386,6 +415,62 @@ async function run() {
        full.urls.length + ' of ' + week.length);
     ok('and the capped read cost a fraction of the full one',
        weekCalls < CALLS / 3, weekCalls + ' calls vs ' + CALLS);
+  }
+
+  /* "NO FIGHTS" OVER A WINDOW THAT CONTAINED A FIGHT.
+   *
+   * 17 August, 02:20. Somebody typed "any fights?" at the desk. The answer was
+   * "There are no fights dispatched in this window", and the small print under
+   * it read: read 150 of 3121 transmissions, the last 48 hours, sampled, the
+   * window was too big to read whole. There had been a brawl outside Russell
+   * House Tavern.
+   *
+   * The desk asked for EVEN coverage of the window. But the reader had already
+   * cut the window down to a contiguous newest-first block before the sampler
+   * ever saw it, so "spread evenly across two days" was spreading evenly
+   * across the newest few minutes of them. The fight was never fetched, and
+   * the model was handed a quiet half hour and asked what happened all night.
+   *
+   * A sample that does not span the window is not a sample. It is the end of
+   * the window wearing a sample's confidence. */
+  {
+    const twoDays = [];
+    for (const d of ['2026-08-16T04:00:00Z', '2026-08-17T04:00:00Z']) {
+      twoDays.push(...dayOfTraffic(d, 60000));       // 1440 objects a day
+    }
+    blob._inject(fakeStore(twoDays), 'test-token-not-a-credential');
+    const from = ET('2026-08-16T04:00:00Z'), to = ET('2026-08-18T03:59:00Z');
+
+    const even = await vr.listWindow(from, to, { slackMs: 0, max: 150, evenly: true });
+    const stamps = even.urls.map(vr.stampOf).sort((a, b) => a - b);
+    ok('an even read says it sampled', even.sampled === true && even.truncated === true);
+    ok('and does not stop at the newest day', even.stoppedEarly !== true);
+    ok('it reaches the far end of the window, which is where the fight was',
+       stamps[0] <= from + 2 * 3600000,
+       'oldest read ' + new Date(stamps[0]).toISOString());
+    ok('and still covers the other end',
+       stamps[stamps.length - 1] >= to - 2 * 3600000,
+       'newest read ' + new Date(stamps[stamps.length - 1]).toISOString());
+
+    /* Both halves have to be represented, which is the assertion that fails if
+       anybody reintroduces a contiguous slice anywhere in this path. */
+    const mid = ET('2026-08-17T04:00:00Z');
+    const older = stamps.filter(x => x < mid).length;
+    const newer = stamps.length - older;
+    ok('both days are in the sample', older > 20 && newer > 20,
+       older + ' from the first day, ' + newer + ' from the second');
+
+    /* And the newest end is never thinned away: somebody asking at 02:32 about
+       a stabbing dispatched at 02:24 must be given it. */
+    const last20 = stamps.filter(x => x >= to - 20 * 60000).length;
+    ok('the last twenty minutes survive the sampling', last20 >= 5, last20 + ' objects');
+
+    /* The listener's read is unchanged: newest first, no sampling, early exit
+       intact. */
+    const live = await vr.listWindow(from, to, { slackMs: 0, max: 150 });
+    ok('a listener still gets the newest end, whole', live.sampled !== true);
+    ok('and still stops early rather than paging what it cannot use',
+       live.stoppedEarly === true);
   }
 
   /* THE LEXICAL HAZARD. Now that the hour is in the path, a string sort of the

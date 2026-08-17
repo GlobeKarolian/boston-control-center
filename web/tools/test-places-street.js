@@ -130,9 +130,22 @@ ok('and a bare house number on a street is still not a highway',
   ok('unless the sentence is plainly about transit',
      (places.scanText('Party struck by an inbound train at Arlington.', ['Boston']) || {}).kind === 'station',
      matched('Party struck by an inbound train at Arlington.', ['Boston']));
-  ok('a corner made of two stop names is a corner, not a platform',
-     (places.scanText('Disorderly at Arlington and Boylston.', ['Boston']) || {}).kind !== 'station',
+  /* "Arlington and Boylston" is a corner and both arms are Green Line stops,
+     so the scan answers with a platform. Tried and REVERTED: rejecting a
+     station sitting next to the word "and" killed 59 of 134 station aliases,
+     because "and" next to a place name is ordinary scanner grammar rather than
+     a corner. "person struck by a car at Ruggles and we need EMS" resolved to
+     nothing. Losing Ruggles, Andrew, Broadway, Central, JFK/UMass and Boston
+     College to save one corner is a bad trade, and lib/geo.js resolves corners
+     properly at step 3 whenever the extractor names a cross street at all.
+     Kept as a note so nobody tries it a third time. */
+  ok('a corner of two stop names still answers with one of them, which is accepted',
+     (places.scanText('Disorderly at Arlington and Boylston.', ['Boston']) || {}).kind === 'station',
      matched('Disorderly at Arlington and Boylston.', ['Boston']));
+
+  ok('and a place next to the word "and" is not thrown away',
+     !!places.scanText('person struck by a car at Ruggles and we need EMS', ['Boston']),
+     matched('person struck by a car at Ruggles and we need EMS', ['Boston']));
   ok('and a stop that is not also a street or a town still resolves plainly',
      !!places.scanText('Assault at Downtown Crossing.', ['Boston']),
      matched('Assault at Downtown Crossing.', ['Boston']));
@@ -146,6 +159,45 @@ ok('and a bare house number on a street is still not a highway',
   const r = places.scanText('Engine 4 responding, structure fire in Worcester.', ['Boston']);
   ok('a town the feed does not cover is not offered as a location',
      !r || r.kind !== 'town', r && r.matched);
+}
+
+/* --- a scanner is made of numbers in front of words ---------------------- */
+/*
+   The house-number rule went in to stop "155 Harvard" resolving to Harvard
+   Square, and immediately started eating apparatus. "Engine 4, Ladder 24,
+   Fenway" is not an address on Fenway. Two things separate a unit designator
+   from a house number, and both are needed: the comma that punctuates it off,
+   which only exists in the RAW text because norm() strips it, and the word in
+   front of the number. */
+{
+  const UNITS = [
+    ['Engine 4, Ladder 24, Fenway', 'Fenway'],
+    ['Car 12, Andrew', 'Andrew'],
+    ['District 4, Copley', 'Copley'],
+    ['Sector 3, Chinatown', 'Chinatown'],
+    ['Box 2242, Nubian', 'Nubian'],
+  ];
+  for (const [t, want] of UNITS) {
+    const r = places.scanText(t, ['Boston']);
+    ok('a unit designator is not a house number: "' + t + '"',
+       !!r && r.matched.indexOf(want) === 0, r && r.matched);
+  }
+  ok('while a real address still is',
+     !/Cambridge/.test(String(matched('Party at 155 Harvard, second floor.'))),
+     matched('Party at 155 Harvard, second floor.'));
+}
+
+/* --- "station" is a word fire and police use all night ------------------- */
+{
+  ok('a gas station on a street named after a trolley stop is not the stop',
+     (places.scanText('fire at the gas station on Washington Street', ['Boston']) || {}).kind !== 'station',
+     matched('fire at the gas station on Washington Street', ['Boston']));
+  ok('and commuter rail stops named after arterials are guarded too',
+     (places.scanText('shooting on Blue Hill Avenue', ['Boston']) || {}).kind !== 'commuter rail',
+     matched('shooting on Blue Hill Avenue', ['Boston']));
+  ok('but a named rotary is not a street and still resolves',
+     !!places.scanText('MVA at Charles Circle', ['Boston']),
+     matched('MVA at Charles Circle', ['Boston']));
 }
 
 /* --- scope: a known town beats a famous name elsewhere -------------------- */

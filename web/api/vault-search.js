@@ -250,9 +250,14 @@ module.exports = async (req, res) => {
      folders the window touches, returns them NEWEST FIRST, and only then
      applies the cap, so a window too wide to fetch whole loses its oldest
      edge rather than the night being asked about. */
-  const listed = await vaultRead.listWindow(+f.from, +f.to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS });
-  const urls = listed.urls;                       // newest first
-  const truncated = !!listed.truncated;
+  const got = await vaultRead.listWindow(+f.from, +f.to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS });
+  const urls = got.urls;                          // newest first
+  const truncated = !!got.truncated;
+  /* A COUNT, not the result object. This was `listed` before the shared reader
+     landed and it went on being spread into the response afterwards, which
+     shipped every blob URL a second time: two thirds of a megabyte of JSON on
+     a wide search, for a field nothing reads. */
+  const listed = got.listed || 0;
 
   const tx = await fetchAll(urls);
   let hits = [];

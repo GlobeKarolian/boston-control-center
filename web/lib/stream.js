@@ -144,7 +144,17 @@ async function since(fromISO, toISO, opts) {
      so both answered from midnight to about 6pm and called the evening empty.
      Fixing one did not fix the other. lib/vault-read owns it now, and it
      returns newest-first so a cap keeps the traffic that matters. */
-  const got = await vaultRead.listWindow(+from, +to, { slackMs: BATCH_SLACK_MS, max: Math.max(maxObjects * 3, maxObjects) });
+  /* `evenly` has to reach the LISTING, not just the fetch. It used to be
+     applied here, to a list the reader had already cut down to a contiguous
+     newest-first block, so "cover the whole window thinly" was spreading
+     evenly across the last few minutes of it. That is how the desk answered
+     "any fights?" over two days by reading 150 transmissions that were all
+     from the same quiet half hour. */
+  const got = await vaultRead.listWindow(+from, +to, {
+    slackMs: BATCH_SLACK_MS,
+    max: Math.max(maxObjects * 3, maxObjects),
+    evenly,
+  });
   let urls = got.urls.slice().reverse();   // chronological for the sampler below
 
   /* Already chronological: listWindow returns newest-first and the reverse

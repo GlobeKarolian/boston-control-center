@@ -265,17 +265,27 @@ const FEED_TOWN = [
 ];
 
 function townFromFeed(feedSrc, declared) {
+  const f = String(feedSrc || '').toLowerCase();
+  /* The channel's own name first. `declared` looks like configuration and is
+     often just a default: the relay's City box starts at "Boston" and
+     api/ingest.js falls back to [city] when the Scope box is blank, so a
+     Cambridge feed nobody finished configuring sends ["Boston"]. Trusting that
+     over a slug that literally reads "cambridge-ma-police" moved calls into
+     the wrong city. The slug is what somebody typed on purpose. */
+  if (f) {
+    for (const [needle, town] of FEED_TOWN) if (f.includes(needle)) return town;
+    if (f.includes('mbta') || f.includes('transit')) return 'Boston';
+    /* Order matters and is preserved from the two tables this replaced: a
+       state or regional channel covers dozens of municipalities, and guessing
+       one is worse than admitting none. Checked before mit, because
+       "mass-mit-emergency" contains both. */
+    if (f.includes('state') || f.includes('mass')) return null;
+    if (f.includes('mit')) return 'Cambridge';
+  }
+  /* Nothing in the name. A coverage list naming exactly one municipality is
+     the next best thing to knowing. */
   const list = Array.isArray(declared) ? declared.filter(Boolean) : [];
   if (list.length === 1) return String(list[0]).trim() || null;
-  if (!feedSrc) return null;
-  const f = String(feedSrc).toLowerCase();
-  for (const [needle, town] of FEED_TOWN) if (f.includes(needle)) return town;
-  if (f.includes('mbta') || f.includes('transit')) return 'Boston';
-  if (f.includes('mit')) return 'Cambridge';
-  /* A state or regional channel covers dozens of municipalities. Guessing one
-     is worse than admitting none: a pin in the wrong town is worse than no
-     pin, and lib/geo.js is built to say so. */
-  if (f.includes('state') || f.includes('mass')) return null;
   return null;
 }
 

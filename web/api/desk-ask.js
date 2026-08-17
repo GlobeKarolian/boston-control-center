@@ -77,6 +77,12 @@ const SYSTEM = [
   '  - When nothing matches what was asked, say so in the first sentence, then',
   '    say what the window did contain. Do not stretch unrelated traffic into',
   '    an answer, and do not stop at "there is nothing" when there is context.',
+  '  - Say what you READ, never what happened. "None of the transmissions I',
+  '    read mention a fight" is something you know. "There were no fights" is',
+  '    not, and it is not yours to say: you are reading a sample of a few',
+  '    scanner channels, not a record of the city. A reporter told no, who',
+  '    then finds out otherwise, stops asking. That costs more than a long',
+  '    answer ever does.',
   '',
   'Write 2-5 sentences of plain English. No preamble, no bullet points unless',
   'the answer is genuinely a list.',
@@ -263,9 +269,32 @@ module.exports = async (req, res) => {
   if (picked.hit.length) {
     user += (picked.asked ? 'Transmissions matching what was asked about' : 'The most significant transmissions')
       + ' (' + picked.hit.length + ' of ' + rows.length + ' heard):\n\n' + hitLines + '\n';
+  } else if (got.complete) {
+    user += 'NOTHING in the ' + rows.length + ' transmissions heard matches what was asked about,'
+      + ' and those are ALL of them for this window. Say that plainly first.\n';
   } else {
-    user += 'NOTHING in the ' + rows.length + ' transmissions heard matches what was asked about.'
-      + ' Say that plainly first.\n';
+    /* THE SENTENCE THAT MUST NOT BE WRITTEN.
+     *
+     * On 17 August at 02:20 the desk answered "any fights?" with "There are no
+     * fights dispatched in this window." It had read 150 of 3,121
+     * transmissions. There had been a brawl outside Russell House Tavern.
+     *
+     * The sampling was broken and is fixed elsewhere, but the sentence was a
+     * separate failure and the more dangerous one, because it would have been
+     * wrong on any sampled window whatsoever. An absence is a claim about
+     * everything, and a sample cannot support a claim about everything. A
+     * newsroom that is told "no" and finds out otherwise stops asking, and a
+     * tool nobody asks is worse than no tool.
+     *
+     * So the model is told what it actually read, in numbers, and told
+     * plainly that "there were none" is not available to it. */
+    user += 'NOTHING in the ' + rows.length + ' transmissions read matches what was asked about.\n'
+      + 'IMPORTANT: those ' + rows.length + ' are a SAMPLE. The archive holds '
+      + (got.objects ? 'far more' : 'more') + ' for this window and it was too large to read whole.\n'
+      + 'You therefore DO NOT KNOW whether it happened. Do not write "there are no", "there were no",'
+      + ' "nothing happened" or any other statement of absence. Say instead that you read '
+      + rows.length + ' transmissions from across the window and none of them mention it, and that'
+      + ' this does not rule it out. Then say what you did read.\n';
   }
   if (picked.context.length) {
     user += '\nFor context, the most significant OTHER traffic in the same window. '
@@ -276,10 +305,13 @@ module.exports = async (req, res) => {
     + ' Do not shift them by any number of hours and do not append Z or UTC.';
   if (!got.complete) {
     /* Said to the model as well as to the reader, so a sampled window is not
-       described as an exhaustive one. */
-    user += '\nNOTE: the archive held more than could be read at once, so this is an'
-      + ' even sample across the window rather than every transmission. Say so if the'
-      + ' answer depends on completeness.';
+       described as an exhaustive one. Not conditional: it used to end "say so
+       if the answer depends on completeness", and a model answering a
+       yes-or-no question does not reliably notice that its answer depends on
+       completeness. Every negative answer does. */
+    user += '\nNOTE: this is an even sample across the window, not every transmission in it.'
+      + ' Never describe what you were given as everything that happened, and never state'
+      + ' that something did not happen. You can only report what you read.';
   }
 
   try {
