@@ -84,6 +84,11 @@ const ARCHIVE_AFTER_CLEAR_MS  = 3  * 60 * 60 * 1000; // drop 3h after clearing
 const TIMELINE_KEEP_ACTIVE  = 30;
 const TIMELINE_KEEP_CLEARED = 4;
 const SAME_SCENE_METERS       = 200;             // a city block plus the corner
+/* How close a point-level approximate fix has to be to join an exact scene.
+   Tighter than the block-and-corner allowed between two exact fixes, because
+   the incoming pin is a building rather than a doorway: near enough to be the
+   same address, not near enough to hoover up the next call down the street. */
+const NEAR_SCENE_METERS       = 90;
 
 /* The alerting bar, and the ceiling that makes it safe to have one.
 
@@ -463,11 +468,25 @@ function createStore(geocode, extractFn, opt) {
 
     const precision = precisionOf(geo);
 
-    // 2) else match an active scene at the same PLACE inside the window.
-    //    Distance, not string equality: "12 Boylston St" and "Boylston Street,
-    //    Boston" used to be two incidents. Exact fixes only, because a town
-    //    centroid would swallow every call in the town.
-    if (!inc && geo && precision === 'exact') {
+    /* 2) else match an active scene at the same PLACE inside the window.
+          Distance, not string equality: "12 Boylston St" and "Boylston Street,
+          Boston" used to be two incidents.
+
+          A point-level approximate fix may JOIN a scene, but never anchor one.
+          "Exact only" was written against town centroids swallowing a town,
+          and lib/geo now marks those separately as `wide`. What it was also
+          excluding was a pub matched by name: on 16 Aug the first call to
+          Russell House Tavern geocoded to "14 JFK ST" and the follow-up
+          sixty seconds later matched the pub itself, so one bar fight became
+          two cards a minute apart on the same feed. A named building standing
+          on top of an exact scene is the same scene.
+
+          The candidate must still be exact, so an approximate fix can never
+          be the thing others gather around, and the radius for a non-exact
+          join is tighter than the block-and-corner used between two exact
+          fixes. */
+    const joinable = geo && !geo.wide && (precision === 'exact' || precision === 'approx');
+    if (!inc && joinable) {
       let best = null, bestD = Infinity;
       for (const id in incidents) {
         const c = incidents[id];
@@ -476,7 +495,8 @@ function createStore(geocode, extractFn, opt) {
         if (c.matched && c.matched === geo.matched) { best = c; bestD = 0; break; }
         if (typeof c.lat !== 'number') continue;
         const d = metersBetween(c, geo);
-        if (d < SAME_SCENE_METERS && d < bestD) { best = c; bestD = d; }
+        const limit = (precision === 'exact') ? SAME_SCENE_METERS : NEAR_SCENE_METERS;
+        if (d < limit && d < bestD) { best = c; bestD = d; }
       }
       if (best) { inc = best; joinedBy = bestD === 0 ? 'address' : 'proximity'; }
     }

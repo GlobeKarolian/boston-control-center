@@ -114,5 +114,46 @@ ok('an archived incident is never rejoined',
      joinsAllowed <= cap, 'grew to ' + (units.length) + ' units');
 }
 
+/* --- the same bar, named two ways ------------------------------------
+ *
+ * 16 August, 10:42:45 PM and 10:43:49 PM, both cambridge-ma-police:
+ *
+ *   "First on Russell House Tavern, 14 JFK Street for a fight..."
+ *   "To the units responding at the House Tavern, about eight bikers..."
+ *
+ * Sixty-four seconds apart, same bar, same feed, one event. The archive
+ * showed them as two cards, because the first geocoded to a street address
+ * (exact) and the second matched the pub by name (approximate), and the store
+ * refused to let anything approximate join a scene.
+ *
+ * That rule was written against town centroids swallowing a town, which is a
+ * real risk and still guarded: lib/geo now marks area-sized fixes `wide`, and
+ * those may neither join nor anchor. A named building is a point and may join
+ * a scene it is standing on, within a tighter radius than two exact fixes get.
+ */
+{
+  const SAME = 200, NEAR = 90;
+  /* Mirrors the store's rule at the join site. */
+  function mayJoin(geo, cand, meters) {
+    if (!geo || geo.wide) return false;
+    const prec = geo.approx ? 'approx' : 'exact';
+    if (!cand || cand.precision !== 'exact' || cand.status !== 'active') return false;
+    const limit = (prec === 'exact') ? SAME : NEAR;
+    return meters < limit;
+  }
+  const scene = { status: 'active', precision: 'exact', located: true };
+
+  ok('the pub matched by name joins the street-address scene it sits on',
+     mayJoin({ approx: true }, scene, 15));
+  ok('an exact follow-up still joins across a block',
+     mayJoin({}, scene, 150));
+  ok('a named building 400m away does NOT join',
+     !mayJoin({ approx: true }, scene, 400));
+  ok('a town centroid never joins, however close it lands',
+     !mayJoin({ approx: true, wide: true }, scene, 5));
+  ok('and an approximate fix cannot be the thing others gather around',
+     !mayJoin({}, { status: 'active', precision: 'approx', located: true }, 10));
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
 process.exit(fail ? 1 : 0);

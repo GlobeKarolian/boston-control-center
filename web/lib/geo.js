@@ -165,10 +165,25 @@ function osmVerdict(row, wantedHouseNumber) {
   if (cls === 'highway' && NOT_ADDRESSABLE.has(typ)) return 'reject';
   if (NOT_ADDRESSABLE.has(typ) && cls !== 'building') return 'reject';
   if (wantedHouseNumber && !(row.address && row.address.house_number)) return 'approx';
-  if (AREA_CLASS.has(cls)) return 'approx';
-  if (cls === 'place' && WIDE_PLACE.has(typ)) return 'approx';
+  if (AREA_CLASS.has(cls)) return 'wide';
+  if (cls === 'place' && WIDE_PLACE.has(typ)) return 'wide';
   return 'ok';
 }
+
+/* Two very different things were both called "approx".
+ *
+ * A pub matched by name is a POINT: we know the building, we just did not get
+ * a house number off the radio. A town or a postcode is an AREA the size of a
+ * map. Collapsing them cost the product a real grouping: on 16 Aug the first
+ * call to Russell House Tavern geocoded to "14 JFK ST" (exact) and the
+ * follow-up sixty seconds later matched the pub by name (approx), and because
+ * lib/incident-store refuses to join anything not exact, one bar fight became
+ * two cards a minute apart.
+ *
+ * `wide` marks only the area-sized fixes. Everything downstream can now let a
+ * point-level approx join a scene it is standing on top of, while still
+ * refusing to let a town centroid swallow the town. */
+function isWide(verdict) { return verdict === 'wide'; }
 
 async function nominatimRaw(q) {
   // bounded=1 turns the viewbox from a preference into a fence. Without it a
@@ -199,7 +214,8 @@ async function nominatimRaw(q) {
       matched: display.split(',').slice(0, 3).join(',').trim(),
       src: 'osm',
       confident: true,
-      approx: verdict === 'approx' ? true : undefined,
+      approx: (verdict === 'approx' || verdict === 'wide') ? true : undefined,
+      wide: isWide(verdict) ? true : undefined,
     };
     if (verdict === 'ok') return out;
     if (!fallback) fallback = out;
