@@ -239,6 +239,72 @@ const PLACE_ALIASES = {
    because Boylston runs for two miles and half of it is nowhere near Copley;
    a landmark that quietly matches a whole neighborhood is worse than one that
    matches nothing, because the reporter cannot see it happening. */
+/* WHERE THE LANDMARKS ACTUALLY ARE.
+ *
+ * Matching a landmark by its spelling is how "bar fight in Harvard Square"
+ * returned nothing on the night eight men brawled outside Russell House
+ * Tavern. The call was in the archive, with audio, correctly labelled a fight,
+ * at 14 JFK ST, Cambridge, which is in the middle of Harvard Square. Dispatch
+ * said the street; it never said the square. A reporter naming the place
+ * correctly got zero results, which is the fastest way to lose a newsroom's
+ * trust in an archive.
+ *
+ * So a landmark is a POINT with a radius, and any transmission the pipeline
+ * geocoded inside that radius is in that place, whatever words were spoken.
+ * The vault already stores lat/lon on every record, so this costs nothing but
+ * arithmetic. Text matching stays as the first test, because it still catches
+ * the calls that were never geocoded.
+ *
+ * Radii are deliberately tight, a few city blocks, because a landmark that
+ * quietly swallows a neighbourhood is worse than one that misses. */
+const LANDMARK_POINTS = {
+  'td garden': [42.3662, -71.0621, 400],
+  'fenway park': [42.3467, -71.0972, 400],
+  'logan airport': [42.3656, -71.0096, 1800],
+  'south station': [42.3519, -71.0552, 350],
+  'back bay station': [42.3474, -71.0757, 300],
+  'boston common': [42.3550, -71.0656, 500],
+  'public garden': [42.3541, -71.0704, 350],
+  'faneuil hall': [42.3600, -71.0568, 300],
+  'copley square': [42.3499, -71.0777, 400],
+  'prudential center': [42.3473, -71.0821, 400],
+  'city hall': [42.3603, -71.0580, 300],
+  'mass general': [42.3632, -71.0686, 350],
+  'brigham': [42.3362, -71.1065, 350],
+  'boston medical center': [42.3348, -71.0730, 350],
+  'tufts medical': [42.3497, -71.0632, 300],
+  'seaport world trade': [42.3490, -71.0430, 500],
+  'bunker hill': [42.3763, -71.0608, 400],
+  'harvard square': [42.3736, -71.1190, 500],
+  'kendall square': [42.3625, -71.0862, 450],
+  'assembly row': [42.3925, -71.0777, 450],
+  'encore casino': [42.3960, -71.0660, 400],
+  'boston university': [42.3505, -71.1054, 800],
+  'northeastern': [42.3398, -71.0892, 500],
+  'zakim bridge': [42.3664, -71.0631, 400],
+  'tobin bridge': [42.3860, -71.0570, 700],
+};
+
+/* Metres between two points. Equirectangular rather than haversine: at these
+   distances the error is centimetres and this runs per transmission. */
+function metresApart(aLat, aLon, bLat, bLon) {
+  const R = 6371000;
+  const dLat = (bLat - aLat) * Math.PI / 180;
+  const dLon = (bLon - aLon) * Math.PI / 180;
+  const mLat = ((aLat + bLat) / 2) * Math.PI / 180;
+  const x = dLon * Math.cos(mLat);
+  return Math.sqrt(dLat * dLat + x * x) * R;
+}
+
+/* Is this transmission physically inside the named landmark? */
+function nearLandmark(tx, canon) {
+  const p = LANDMARK_POINTS[canon];
+  if (!p) return false;
+  const lat = Number(tx && tx.lat), lon = Number(tx && tx.lon);
+  if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) return false;
+  return metresApart(lat, lon, p[0], p[1]) <= p[2];
+}
+
 const LANDMARKS = {
   'td garden': ['td garden', 'the garden', 'boston garden', 'fleetcenter', 'fleet center',
                 'north station', 'causeway st', 'causeway street', 'legends way'],
@@ -467,6 +533,10 @@ function score(tx, f) {
   if (f.landmark) {
     const aliases = LANDMARKS[f.landmark] || [f.landmark];
     if (aliases.some(a => hay.includes(a))) { s += 7; hit++; named++; }
+    /* Said the street, not the square. The pipeline geocoded it; trust the
+       coordinates over the vocabulary. Scored a shade below a spoken match
+       because a name is a stronger signal than a radius. */
+    else if (nearLandmark(tx, f.landmark)) { s += 6; hit++; named++; }
     else return 0;                       // asked for the Garden, this is not there
   }
 
@@ -513,7 +583,7 @@ function score(tx, f) {
   return s * (1 + hit / Math.max(asked, 1));
 }
 
-module.exports = {
+module.exports = { nearLandmark, metresApart, LANDMARK_POINTS,
   parse, score, whenOf, dayString, tokenize, hasWord,
   TYPES, PLACES, LANDMARKS, KIN, TZ,
 };

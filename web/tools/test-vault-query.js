@@ -301,5 +301,58 @@ console.log('\ntokens');
   eq('plurals fold', vq.hasWord(vq.tokenize('two garages'), 'garage'), true);
 }
 
+
+/* --- a landmark is a place, not a spelling --------------------------------
+ *
+ * 16 August, 10:42pm: eight men brawling outside Russell House Tavern, 14 JFK
+ * Street, dead centre of Harvard Square. It was in the archive with audio and
+ * correctly labelled a fight. Searching "bar fight in Harvard Square" returned
+ * nothing, because dispatch said the street and never said the square, and the
+ * landmark test was a substring match on the transcript. A reporter who named
+ * the place correctly got zero results.
+ *
+ * Landmarks are points with a radius now, and anything the pipeline geocoded
+ * inside one is in that place whatever words were spoken. */
+{
+  const f = vq.parse('Bar Fight Harvard Square');
+  ok('the query still parses the landmark', f.landmark === 'harvard square', JSON.stringify(f.landmark));
+
+  const brawl = {
+    at: '2026-08-17T02:42:45.000Z', lat: 42.3730, lon: -71.1187,
+    text: '419. First on Russell House Tavern, 14 JFK Street for a fight. About 8 men fighting another. No weapons.',
+    matched: '14 JFK ST, CAMBRIDGE, MA, 02138', callType: 'fight', town: 'Cambridge',
+  };
+  ok('the brawl at 14 JFK St is found by "Harvard Square"', vq.score(brawl, f) > 0,
+     'score=' + vq.score(brawl, f));
+
+  ok('and it is inside the radius by coordinates alone',
+     vq.nearLandmark({ lat: 42.3730, lon: -71.1187 }, 'harvard square') === true);
+
+  /* The radius must stay tight. A landmark that swallows a neighbourhood is
+     worse than one that misses. */
+  ok('a call 3.5km away is not in Harvard Square',
+     vq.nearLandmark({ lat: 42.3348, lon: -71.0730 }, 'harvard square') === false);
+  ok('a record with no coordinates is not in any landmark',
+     vq.nearLandmark({}, 'harvard square') === false);
+  ok('and neither is a null island record',
+     vq.nearLandmark({ lat: 0, lon: 0 }, 'harvard square') === false);
+
+  /* Spoken names still work, which is what catches calls never geocoded. */
+  const spoken = {
+    at: '2026-08-17T02:00:00.000Z',
+    text: 'units responding to Harvard Square for a disturbance', callType: 'disturbance',
+  };
+  ok('a spoken landmark with no coordinates still matches',
+     vq.score(spoken, vq.parse('disturbance harvard square')) > 0);
+
+  /* And an unrelated call at the same moment stays out. */
+  const other = {
+    at: '2026-08-17T02:40:00.000Z', lat: 42.3000, lon: -71.0700,
+    text: 'ambulance for a minor illness on Spencer Street',
+    matched: '85 SPENCER ST', callType: 'medical', town: 'Boston',
+  };
+  ok('an unrelated Dorchester call is not pulled in', vq.score(other, f) === 0);
+}
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
 process.exit(fail ? 1 : 0);
