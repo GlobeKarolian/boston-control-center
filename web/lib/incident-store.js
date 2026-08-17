@@ -47,6 +47,22 @@ const { read: readSpoken } = require('./spoken.js');
 const threat = require('./threat.js');
 
 const ADDRESS_MATCH_WINDOW_MS = 120 * 60 * 1000; // correlate to a scene up to 2h old
+/* A unit joins the scene it is ON, not every scene it has ever been on.
+   The unit path had no time bound at all while the address path had two
+   hours, so a cruiser that cleared a call at 7am dragged its 2pm traffic into
+   that same incident, and because every joining transmission re-registers all
+   of its units to the incident, the thing snowballed. Live QA on 17 Aug found
+   a four-year-old's seizure carrying 117 units and 1,049 transmissions, which
+   is not a scene, it is a morning. Forty-five minutes is longer than the gap
+   between two transmissions on a live scene and far shorter than the gap
+   before the same unit turns up somewhere unrelated. */
+const UNIT_MATCH_WINDOW_MS    = 45 * 60 * 1000;
+/* And a ceiling, because the runaway is self-feeding: the more units an
+   incident holds the more transmissions match it. Real scenes are big but not
+   unbounded; a multiple-alarm fire runs to a couple of dozen pieces. Past
+   this, the incident stops recruiting by unit and a genuinely new scene gets
+   to be its own card. Address and proximity matching are unaffected. */
+const UNIT_JOIN_CAP           = 24;
 const STALE_AUTOCLEAR_MS      = 90 * 60 * 1000;  // no chatter for 90m -> auto-clear
 const ARCHIVE_AFTER_CLEAR_MS  = 3  * 60 * 60 * 1000; // drop 3h after clearing
 
@@ -389,7 +405,17 @@ function createStore(geocode, extractFn, opt) {
 
     // 1) match an existing active incident by unit
     let inc = null, joinedBy = null;
-    for (const u of ex.units) { const id = unitToIncident[u.toLowerCase()]; if (id && incidents[id] && incidents[id].status !== 'archived') { inc = incidents[id]; joinedBy = 'unit'; break; } }
+    for (const u of ex.units) {
+      const id = unitToIncident[u.toLowerCase()];
+      const cand = id ? incidents[id] : null;
+      if (!cand || cand.status === 'archived') continue;
+      /* Recent enough that the unit is plausibly still on it. */
+      const last = +new Date(cand.lastUpdate || cand.firstHeard || 0);
+      if (!last || (+new Date(time) - last) >= UNIT_MATCH_WINDOW_MS) continue;
+      /* And not already a scene that has eaten the shift. */
+      if ((cand.units || []).length >= UNIT_JOIN_CAP) continue;
+      inc = cand; joinedBy = 'unit'; break;
+    }
 
     // geocode via cascade (address -> landmark -> cross street)
     let geo = null;
