@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# ship — push main and deploy to production, with the pre-flight that has
+# bitten this project most often.
+#
+#   ./ship            push + deploy
+#   ./ship --no-test  skip the test suite (don't)
+#
+# Why this exists: the deploy is two commands in two directories, the Vercel
+# CLI session expires every few hours, and forgetting either half means a fix
+# that is committed, tested, and invisible. That happened repeatedly on the
+# night of 16 August.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+say() { printf '\n\033[1m%s\033[0m\n' "$*"; }
+
+if [ "${1:-}" != "--no-test" ]; then
+  say "running tests"
+  cd web
+  fails=""
+  for t in tools/test-*.js; do
+    [ "$t" = "tools/test-openrouter.js" ] && continue
+    node "$t" >/dev/null 2>&1 || fails="$fails ${t##*/}"
+  done
+  cd ..
+  if [ -n "$fails" ]; then
+    printf '\033[31mFAILING:%s\033[0m\n' "$fails"
+    printf 'Not shipping. Fix these or run ./ship --no-test if you know why.\n'
+    exit 1
+  fi
+  echo "all suites green"
+fi
+
+say "pushing"
+git push origin main
+
+say "deploying"
+cd web
+# The CLI session expires silently and often; a failed deploy here means the
+# push landed and production did not move, which is the worst of both.
+if ! npx vercel --prod --yes; then
+  printf '\n\033[33mDeploy failed. If it said "Not authorized", your CLI session expired:\033[0m\n'
+  printf '  cd %s/web && npx vercel login && npx vercel --prod --yes\n' "$(cd .. && pwd)"
+  exit 1
+fi
+
+say "live: https://www.scan.boston"
