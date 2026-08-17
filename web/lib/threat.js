@@ -40,7 +40,13 @@ function context(text, index) {
 // the city is on fire. Tune by watching the count, not by reading the code.
 const SIGNALS = [
   { id: 'shots-fired',     cls: 'violence', tier: 3, label: 'shots fired',        re: /\b(shots? fired|gun ?shots?|person shot|shot in the|multiple shots)\b/i },
-  { id: 'shooting',        cls: 'violence', tier: 3, label: 'shooting',           re: /\bshooting\b(?!\s+(?:for|over|up|straight|range))/i },
+  /* "shooting pain in his chest" and "pain shooting down her arm" are how EMS
+     describes a cardiac or neuro complaint, and both scored a tier 3 shooting.
+     A multi-car crash in Quincy ran as a BIG STORY reading "heard on the
+     radio: shooting" off exactly this. Medical usage is excluded ahead and
+     behind, and the range is excluded properly: the old lookahead expected
+     "shooting range" but people say "shooting AT the range". */
+  { id: 'shooting',        cls: 'violence', tier: 3, label: 'shooting',           re: /(?<!\bpain\s)(?<!\bpains\s)\bshooting\b(?!\s+(?:for|over|up|straight|range|pain|pains|down|through|across|into|sensation|at the range))/i },
   { id: 'active-shooter',  cls: 'violence', tier: 3, label: 'active shooter',     re: /\bactive shooter\b/i },
   { id: 'stabbing',        cls: 'violence', tier: 3, label: 'stabbing',           re: /\b(stabb(?:ing|ed)|person stabbed|cutting victim)\b/i },
   { id: 'armed-person',    cls: 'violence', tier: 3, label: 'armed person',       re: /\b((?:man|male|female|person|party|subject) with a (?:gun|firearm|knife|machete|weapon)|armed (?:subject|suspect|robbery|and dangerous)|brandish)\b/i },
@@ -52,7 +58,15 @@ const SIGNALS = [
   { id: 'bomb',            cls: 'hazard',   tier: 3, label: 'bomb threat',        re: /\b(bomb (?:threat|squad|tech)|suspicious (?:package|device|backpack)|improvised explosive|\bied\b)/i },
   { id: 'mass-casualty',   cls: 'medical',  tier: 3, label: 'mass casualty',      re: /\b(mass casualt|\bmci\b|multiple (?:victims|patients|casualties)|triage (?:tag|area))\b/i },
   { id: 'civil-unrest',    cls: 'crowd',    tier: 3, label: 'civil unrest',       re: /\b(riot|civil unrest|crowd control|unruly crowd|mob|looting)\b/i },
-  { id: 'hostage',         cls: 'violence', tier: 3, label: 'hostage or barricade', re: /\b(hostage|barricaded?(?: subject| suspect| party)?|refusing to come out)\b/i },
+  /* `barricaded?` matched the bare word "barricade", which on a scanner is a
+     traffic barrier several times an hour: "crash barricade on the median",
+     "barricade set up for traffic". Every one of those scored tier 3, which
+     GRAVE turns into severity 4 on the spot. On 17 Aug a four-year-old's
+     seizure ran as a BIG STORY reading "heard on the radio: hostage".
+     A barricade is only a barricade when a person is behind it, so the word
+     now needs a subject, or the reflexive "barricaded himself". "refusing to
+     come out" likewise needs a standoff context, not a wellness check. */
+  { id: 'hostage',         cls: 'violence', tier: 3, label: 'hostage or barricade', re: /\b(hostage|barricaded?\s+(?:subject|suspect|party|person|male|female|individual)|barricaded\s+(?:him|her|them)sel(?:f|ves)|(?:subject|suspect|party|male|female)\s+(?:is\s+)?barricaded|refusing to come out\s+(?:of the (?:house|residence|apartment|building)|and (?:is )?armed))\b/i },
   { id: 'abduction',       cls: 'violence', tier: 3, label: 'abduction',          re: /\b(abduct|kidnapp?(?:ing|ed)|amber alert|attempted luring)\b/i },
 
   // Tier 2 is significant and worth a look. Several of these are the words that
