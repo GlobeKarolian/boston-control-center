@@ -237,7 +237,49 @@ function roleFor(text) {
   return 'unknown';
 }
 
-function regexExtract(text, feedSrc) {
+/* WHICH TOWN, FROM THE FEED.
+ *
+ * Most transmissions never say their city. The feed always knows: a
+ * boston-police transmission is in Boston, cambridge-ma-police is in
+ * Cambridge. This is the single biggest geocoding win in the pipeline, and a
+ * transmission with no town is a transmission that cannot be placed, cannot
+ * join the scene it belongs to, and cannot be found by a search that names a
+ * neighbourhood.
+ *
+ * This table used to exist twice, character for character, in regexExtract and
+ * in mapFields. Two copies of one fact is one place to fix and one place to
+ * forget, and the mini path forgot: api/ingest.js called mapFields without the
+ * feed at all, so every transmission the Mac's own model extracted came
+ * through with town: null.
+ *
+ * `declared` is the feed's own coverage list, sent by the relay. When it names
+ * exactly one municipality that is not a guess at all, it is configuration,
+ * and it wins over any amount of string matching on a channel label. */
+const FEED_TOWN = [
+  ['boston', 'Boston'], ['cambridge', 'Cambridge'], ['somerville', 'Somerville'],
+  ['brookline', 'Brookline'], ['needham', 'Needham'], ['melrose', 'Melrose'],
+  ['lowell', 'Lowell'], ['quincy', 'Quincy'], ['newton', 'Newton'],
+  ['waltham', 'Waltham'], ['medford', 'Medford'], ['malden', 'Malden'],
+  ['everett', 'Everett'], ['revere', 'Revere'], ['chelsea', 'Chelsea'],
+  ['winthrop', 'Winthrop'],
+];
+
+function townFromFeed(feedSrc, declared) {
+  const list = Array.isArray(declared) ? declared.filter(Boolean) : [];
+  if (list.length === 1) return String(list[0]).trim() || null;
+  if (!feedSrc) return null;
+  const f = String(feedSrc).toLowerCase();
+  for (const [needle, town] of FEED_TOWN) if (f.includes(needle)) return town;
+  if (f.includes('mbta') || f.includes('transit')) return 'Boston';
+  if (f.includes('mit')) return 'Cambridge';
+  /* A state or regional channel covers dozens of municipalities. Guessing one
+     is worse than admitting none: a pin in the wrong town is worse than no
+     pin, and lib/geo.js is built to say so. */
+  if (f.includes('state') || f.includes('mass')) return null;
+  return null;
+}
+
+function regexExtract(text, feedSrc, declared) {
   const t = String(text || '');
   const units = [];
   let m;
@@ -266,32 +308,8 @@ function regexExtract(text, feedSrc) {
       else { const r = ROUTE_RE.exec(t); if (r) street = r[0].trim(); }
     }
   }
-  /* Infer the town from the feed when the transmission does not name one.
-     A boston-police transmission is in Boston; cambridge-ma-police is in
-     Cambridge. This is the single biggest geocoding win: most transmissions
-     never say their city, but the feed always knows. */
-  if (!town && feedSrc) {
-    const src = String(feedSrc).toLowerCase();
-    if (src.includes('boston')) town = 'Boston';
-    else if (src.includes('cambridge')) town = 'Cambridge';
-    else if (src.includes('somerville')) town = 'Somerville';
-    else if (src.includes('brookline')) town = 'Brookline';
-    else if (src.includes('needham')) town = 'Needham';
-    else if (src.includes('melrose')) town = 'Melrose';
-    else if (src.includes('lowell')) town = 'Lowell';
-    else if (src.includes('quincy')) town = 'Quincy';
-    else if (src.includes('newton')) town = 'Newton';
-    else if (src.includes('waltham')) town = 'Waltham';
-    else if (src.includes('medford')) town = 'Medford';
-    else if (src.includes('malden')) town = 'Malden';
-    else if (src.includes('everett')) town = 'Everett';
-    else if (src.includes('revere')) town = 'Revere';
-    else if (src.includes('chelsea')) town = 'Chelsea';
-    else if (src.includes('winthrop')) town = 'Winthrop';
-    else if (src.includes('mbta') || src.includes('transit')) town = 'Boston';
-    else if (src.includes('state') || src.includes('mass')) town = null; // state police could be anywhere
-    else if (src.includes('mit')) town = 'Cambridge';
-  }
+  if (!town) town = townFromFeed(feedSrc, declared);
+
   const isStop = ST_.OPEN_RE.test(t);
   return {
     units: [...new Set(units)],
@@ -375,19 +393,19 @@ const HOUSE_RE = /\b\d{1,5}\s+[A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)?\s*(?:street|s
    decoder already gates hard, a numbered address, a stop opening, a records
    answer, or a callsign and a call type together. On the same 150 that rescues
    4 and leaves 62 as noise, and all four are real. */
-function carriesFact(src, feedSrc) {
+function carriesFact(src, feedSrc, declared) {
   try {
     if (SP_ && SP_.read(src).any) return true;
     if (HOUSE_RE.test(src)) return true;
     if (ST_.OPEN_RE.test(src) || ST_.RECORD_RE.test(src)) return true;
-    const R = regexExtract(src, feedSrc);
+    const R = regexExtract(src, feedSrc, declared);
     if (R.address) return true;
     if (R.units && R.units.length && R.callType) return true;
   } catch (e) { /* never let the rescue itself break extraction */ }
   return false;
 }
 
-function mapFields(o, by, text, feedSrc) {
+function mapFields(o, by, text, feedSrc, declared) {
   const src = String(text || '');
   let landmark = clean(o.landmark);
   let hallucinated = false;
@@ -397,29 +415,7 @@ function mapFields(o, by, text, feedSrc) {
   /* The model does not know which feed it is reading. The town it names is a
      guess from the transcript alone; the feed source is a fact. When the two
      disagree, the feed wins. */
-  let town = clean(o.town);
-  if (!town && feedSrc) {
-    const f = String(feedSrc).toLowerCase();
-    if (f.includes('boston')) town = 'Boston';
-    else if (f.includes('cambridge')) town = 'Cambridge';
-    else if (f.includes('somerville')) town = 'Somerville';
-    else if (f.includes('brookline')) town = 'Brookline';
-    else if (f.includes('needham')) town = 'Needham';
-    else if (f.includes('melrose')) town = 'Melrose';
-    else if (f.includes('lowell')) town = 'Lowell';
-    else if (f.includes('quincy')) town = 'Quincy';
-    else if (f.includes('newton')) town = 'Newton';
-    else if (f.includes('waltham')) town = 'Waltham';
-    else if (f.includes('medford')) town = 'Medford';
-    else if (f.includes('malden')) town = 'Malden';
-    else if (f.includes('everett')) town = 'Everett';
-    else if (f.includes('revere')) town = 'Revere';
-    else if (f.includes('chelsea')) town = 'Chelsea';
-    else if (f.includes('winthrop')) town = 'Winthrop';
-    else if (f.includes('mbta') || f.includes('transit')) town = 'Boston';
-    else if (f.includes('state') || f.includes('mass')) town = null;
-    else if (f.includes('mit')) town = 'Cambridge';
-  }
+  let town = clean(o.town) || townFromFeed(feedSrc, declared);
   return {
     units: Array.isArray(o.units) ? o.units.map(u => String(u).toUpperCase().replace(/[\s-]/g, '')).filter(Boolean) : [],
     callType: clean(o.call_type),
@@ -438,7 +434,7 @@ function mapFields(o, by, text, feedSrc) {
     role: o.speaker_role || 'unknown',
     // The model's noise call is a judgement about the audio, and it is
     // overruled by anything in the line that speaks for itself.
-    noise: !!o.noise && !carriesFact(src, o._feedSrc),
+    noise: !!o.noise && !carriesFact(src, feedSrc, declared),
     isStop: !!o.is_stop || ST_.OPEN_RE.test(src),
     stopKind: clean(o.stop_kind),
     vehicle: clean(o.vehicle) || ST_.vehicleOf(src),
@@ -464,7 +460,7 @@ function contextBlock(prior) {
     prior.slice(-3).map(p => '- ' + String(p).slice(0, 220)).join('\n') + '\n\n';
 }
 
-async function callAnthropic(text, timeoutMs, prior, feedSrc) {
+async function callAnthropic(text, timeoutMs, prior, feedSrc, declared) {
   const r = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -486,7 +482,7 @@ async function callAnthropic(text, timeoutMs, prior, feedSrc) {
   const j = await r.json();
   const use = (j.content || []).find(c => c.type === 'tool_use');
   if (!use || !use.input) throw new Error('anthropic: no tool_use in response');
-  return mapFields(use.input, 'cloud', text, feedSrc);
+  return mapFields(use.input, 'cloud', text, feedSrc, declared);
 }
 
 /* The same extraction through OpenRouter's OpenAI-shaped endpoint. No tool
@@ -496,13 +492,13 @@ async function callAnthropic(text, timeoutMs, prior, feedSrc) {
    then a regex row, never a corrupt one. A failed primary retries once on
    the fallback model before giving up, so one dead slug or one provider
    outage costs latency, not the batch. */
-async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr, feedSrc) {
+async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr, feedSrc, declared) {
   const model = modelId || OR_MODEL;
   const began = Date.now();
   const fail = (why) => {
     const msg = 'openrouter ' + model + ': ' + why;
     llmlog.record('extract', { model, ms: Date.now() - began, ok: false, why });
-    if (!modelId) return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK, msg, feedSrc);
+    if (!modelId) return callOpenRouter(text, timeoutMs, prior, OR_FALLBACK, msg, feedSrc, declared);
     throw new Error((priorErr ? priorErr + ' ; then ' : '') + msg);
   };
   /* The timeout is a failure like any other. Unwrapped, an AbortError flew
@@ -552,7 +548,7 @@ async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr, feedSrc
   const u = j.usage || {};
   llmlog.record('extract', { model, ms: Date.now() - began, ok: true,
     inTok: u.prompt_tokens, outTok: u.completion_tokens });
-  return mapFields(obj, 'cloud', text, feedSrc);
+  return mapFields(obj, 'cloud', text, feedSrc, declared);
 }
 
 // Extract a whole batch. Runs concurrently, but the first failure trips a
@@ -563,7 +559,9 @@ async function callOpenRouter(text, timeoutMs, prior, modelId, priorErr, feedSrc
 // can be shown the last few from its own channel. Mixing channels would be
 // worse than no context at all.
 async function extractBatch(items, { concurrency = 6, timeoutMs = 20000, priorBySrc = {} } = {}) {
-  const rows = items.map(it => (typeof it === 'string' ? { text: it, src: '' } : { text: it.text, src: it.src || '' }));
+  const rows = items.map(it => (typeof it === 'string'
+    ? { text: it, src: '', towns: [] }
+    : { text: it.text, src: it.src || '', towns: Array.isArray(it.towns) ? it.towns : [] }));
   const texts = rows.map(r => r.text);
   const out = new Array(rows.length);
 
@@ -576,11 +574,11 @@ async function extractBatch(items, { concurrency = 6, timeoutMs = 20000, priorBy
 
   let skipped = 0;
   for (let i = 0; i < rows.length; i++) {
-    if (isNoise(rows[i].text)) { out[i] = { ...regexExtract(rows[i].text, rows[i].src), noise: true, _by: 'noise' }; skipped++; }
+    if (isNoise(rows[i].text)) { out[i] = { ...regexExtract(rows[i].text, rows[i].src, rows[i].towns), noise: true, _by: 'noise' }; skipped++; }
   }
 
   if (!OR_KEY() && !KEY()) {
-    for (let i = 0; i < rows.length; i++) if (!out[i]) out[i] = regexExtract(texts[i], rows[i].src);
+    for (let i = 0; i < rows.length; i++) if (!out[i]) out[i] = regexExtract(texts[i], rows[i].src, rows[i].towns);
     return { results: out, by: 'regex', errors: ['no OPENROUTER_API_KEY or ANTHROPIC_API_KEY set'], skipped };
   }
 
@@ -599,19 +597,19 @@ async function extractBatch(items, { concurrency = 6, timeoutMs = 20000, priorBy
       const i = cursor++;
       if (i >= rows.length) return;
       if (out[i]) continue;                                   // noise, already handled
-      const { text, src } = rows[i];
-      if (down) { out[i] = regexExtract(text, src); continue; }
-      if (allow <= 0) { out[i] = regexExtract(text, src); remember(src, text); continue; }
+      const { text, src, towns } = rows[i];
+      if (down) { out[i] = regexExtract(text, src, towns); continue; }
+      if (allow <= 0) { out[i] = regexExtract(text, src, towns); remember(src, text); continue; }
       allow--;
       const prior = priorFor(src);
       try {
         out[i] = OR_KEY()
-          ? await callOpenRouter(text, timeoutMs, prior, undefined, undefined, src)
-          : await callAnthropic(text, timeoutMs, prior, src);
+          ? await callOpenRouter(text, timeoutMs, prior, undefined, undefined, src, towns)
+          : await callAnthropic(text, timeoutMs, prior, src, towns);
       } catch (e) {
         down = true;
         if (errors.length < 3) errors.push(String(e.message || e).slice(0, 200));
-        out[i] = regexExtract(text, src);
+        out[i] = regexExtract(text, src, towns);
       }
       remember(src, text);
     }
@@ -635,4 +633,4 @@ async function extract(text) {
 
 // mapFields and carriesFact are exported for the test harness only. Nothing in
 // the running app calls them from outside this file.
-module.exports = { extract, extractBatch, regexExtract, roleFor, isNoise, heardIn, mapFields, carriesFact, SYSTEM, SCHEMA, MODEL };
+module.exports = { extract, extractBatch, regexExtract, roleFor, isNoise, heardIn, mapFields, carriesFact, townFromFeed, SYSTEM, SCHEMA, MODEL };

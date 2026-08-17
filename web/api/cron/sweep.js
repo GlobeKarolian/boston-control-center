@@ -14,7 +14,6 @@
 const { cronAuth, json } = require('../../lib/http');
 const store_io = require('../../lib/store-io');
 const blob = require('../../lib/blob');
-const vault = require('../../lib/vault');
 
 /* Audio retention rides this cron rather than owning one, because a schedule
    in vercel.json is configuration in a second place and the sweep is already
@@ -40,28 +39,18 @@ module.exports = async (req, res) => {
     let before = 0, after = 0;
     // withStore() sweeps and saves on its own. The callback just measures, so
     // the lock hold stays at the same two Redis round trips an ingest costs.
-    const { store } = await store_io.withStore(async (s) => {
+    const { store, archived } = await store_io.withStore(async (s) => {
       before = s.snapshotIncidents().length;
     }, { waitMs: 4000 });
     after = store.snapshotIncidents().length;
 
-    /* The last moment these scenes exist. withStore has already swept and
-       saved, so what comes back here is a set of incidents that are gone from
-       Redis and live nowhere else. Written with their FULL timeline, which is
-       the one place the archive and the live board deliberately disagree: the
-       board keeps the last few lines to stay small, the vault keeps the whole
-       call because that is what somebody will ask for in six months.
-
-       Failures are counted, not thrown. A sweep that cannot reach the object
-       store still owes the board its render. */
-    let archived = 0, archiveFails = 0;
-    try {
-      const gone = typeof store.takeDropped === 'function' ? store.takeDropped() : [];
-      for (const inc of gone) {
-        const r = await vault.putIncident(inc);
-        if (r && r.ok) archived++; else archiveFails++;
-      }
-    } catch (e) { archiveFails++; }
+    /* withStore() archives what it retired, on every path that touches the
+       store rather than only here. This used to be the only drain, and it was
+       the wrong one: withStore sweeps on every ingest, at thirty to seventy a
+       minute, and the store is rebuilt from Redis per request, so almost every
+       retirement happened on an ingest and went out with the process. This
+       route then found nothing and reported archiving zero, which read as "no
+       scenes retired" rather than "the archive is not running". */
 
     const counts = await store_io.renderOutputs(store, { extractorLabel: 'sweep' });
 
@@ -72,7 +61,17 @@ module.exports = async (req, res) => {
     let clips;
     if (blob.enabled() && blobDue()) clips = await blob.sweep();
 
-    return json(res, { ok: true, before, after, archived: before - after, ...counts, ...(clips ? { clips } : {}), ms: Date.now() - t0 });
+    /* `retired` is how many scenes left the board; `archived` is how many of
+       them reached the vault. They were the same number under one name, which
+       hid the case that matters: scenes retiring and none of them being
+       written. */
+    return json(res, {
+      ok: true, before, after,
+      retired: before - after,
+      archived: (archived && archived.ok) || 0,
+      archiveFails: (archived && archived.failed) || 0,
+      ...counts, ...(clips ? { clips } : {}), ms: Date.now() - t0,
+    });
   } catch (e) {
     // A busy store means ingests are flowing, which means sweep() is already
     // running on every one of them. Skipping this tick costs nothing.

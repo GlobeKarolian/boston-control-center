@@ -15,6 +15,7 @@
 
 const kv = require('./kv');
 const { createStore } = require('./incident-store');
+const vault = require('./vault');
 
 const K = {
   store: 'bcc:store',
@@ -131,15 +132,57 @@ async function withStore(fn, { ttlMs = 15000, waitMs = 8000 } = {}) {
     e.status = 503;
     throw e;
   }
+  let out;
   try {
     const store = await loadStore();
     const result = await fn(store);
     store.sweep();
     await saveStore(store);
-    return { store, result };
+    out = { store, result };
   } finally {
     await kv.unlock(K.lock, token);
   }
+  /* Outside the lock, because these are object-store writes and nothing else
+     should wait behind them. */
+  out.archived = await archiveDropped(out.store);
+  return out;
+}
+
+/* THE LAST MOMENT A RETIRED SCENE EXISTS.
+ *
+ * sweep() retires incidents that have gone quiet and hands them to
+ * takeDropped(). Once that has happened they are gone from Redis and live
+ * nowhere else, so if nobody writes them to the vault the full timeline is
+ * simply lost: the board keeps only the last few lines to stay small, and the
+ * archive was supposed to keep the whole call because that is what somebody
+ * asks for six months later.
+ *
+ * Only api/cron/sweep.js ever drained it. But withStore() sweeps on EVERY
+ * ingest, at thirty to seventy a minute, and the store is rebuilt from Redis
+ * on each request, so almost every retirement happened on an ingest and was
+ * dropped on the floor with the process. By the time the five-minute cron ran
+ * there was nothing left for it to find, and it dutifully reported archiving
+ * zero. The full-incident archive has effectively never existed.
+ *
+ * Failures are counted, not thrown. A scene that cannot be archived is a lost
+ * record; an ingest that throws is a lost transmission and a relay retry
+ * storm, which is worse. */
+async function archiveDropped(store) {
+  if (!store || typeof store.takeDropped !== 'function') return { ok: 0, failed: 0 };
+  let gone = [];
+  try { gone = store.takeDropped() || []; } catch (e) { return { ok: 0, failed: 0 }; }
+  if (!gone.length) return { ok: 0, failed: 0 };
+  let ok = 0, failed = 0, i = 0;
+  const worker = async () => {
+    for (;;) {
+      const n = i++;
+      if (n >= gone.length) return;
+      try { const r = await vault.putIncident(gone[n]); if (r && r.ok) ok++; else failed++; }
+      catch (e) { failed++; }
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(6, gone.length) }, worker));
+  return { ok, failed };
 }
 
 // ------------------------------------------------------------------ dedupe
@@ -448,4 +491,4 @@ async function readOut(key, fallback = '[]') {
   } catch (e) { return fallback; }
 }
 
-module.exports = { K, withStore, loadStore, saveStore, claimNew, putHealth, getHealth, recentBySource, renderOutputs, readOut, outVersion, OFFLINE_AFTER_MS };
+module.exports = { K, withStore, archiveDropped, loadStore, saveStore, claimNew, putHealth, getHealth, recentBySource, renderOutputs, readOut, outVersion, OFFLINE_AFTER_MS };

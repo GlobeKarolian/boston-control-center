@@ -226,7 +226,14 @@ module.exports = async (req, res) => {
       const raw = fresh[i].ex;
       if (!raw) continue;
       try {
-        const mapped = mapFields(raw, 'mini', fresh[i].text);
+        /* The feed and its declared coverage, which this call used to omit
+           entirely. mapFields infers the town from the feed when the
+           transmission does not say one, and that inference is the single
+           biggest geocoding win in the pipeline. Without these two arguments
+           every transmission the Mac's own model extracted arrived with
+           town: null, could not be placed, could not join the scene it
+           belonged to, and could not be found by a search naming a town. */
+        const mapped = mapFields(raw, 'mini', fresh[i].text, fresh[i].src, fresh[i].towns);
         if (mapped && typeof mapped === 'object') { exs[i] = mapped; mini++; }
       } catch (e) { /* fall through to the batch */ }
     }
@@ -235,7 +242,9 @@ module.exports = async (req, res) => {
     for (let i = 0; i < fresh.length; i++) if (!exs[i]) need.push(i);
     let by = 'mini', errors = [], skipped = 0, hallucinated = 0;
     if (need.length) {
-      const batch = await extractBatch(need.map(i => ({ text: fresh[i].text, src: fresh[i].src })), { priorBySrc: prior });
+      const batch = await extractBatch(
+        need.map(i => ({ text: fresh[i].text, src: fresh[i].src, towns: fresh[i].towns })),
+        { priorBySrc: prior });
       need.forEach((idx, k) => { exs[idx] = batch.results[k]; });
       by = mini ? 'mini+' + batch.by : batch.by;
       errors = batch.errors; skipped = batch.skipped; hallucinated = batch.hallucinated;
