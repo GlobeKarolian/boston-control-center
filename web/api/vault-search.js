@@ -143,7 +143,13 @@ function group(hits) {
        by how talkative a call was. A forty-line structure fire then buries the
        three lines that are the actual answer to the question, which is the
        opposite of what a reporter at 1am needs. */
-    score: g.best + Math.log2(1 + g.tx.length),
+    /* The corroboration bonus is CAPPED. It was log2(1+n) uncapped, so a
+       ten-transmission call earned +3.5 and a precise one-line match earned
+       +1, and a chatty Needham incident that merely contained the word
+       "Harvard" outranked the Harvard Square brawl the reporter was actually
+       looking for. Agreement among transmissions is a tiebreak, not a reason
+       to outrank a better answer. */
+    score: g.best + Math.min(1.5, Math.log2(1 + g.tx.length)),
     units: [...g.units].slice(0, 12),
     tx: g.tx.sort((a, b) => String(a.at).localeCompare(String(b.at))),
     clips: g.tx.filter(t => t.clip).map(t => ({ u: t.clip, at: t.at })).slice(0, 40),
