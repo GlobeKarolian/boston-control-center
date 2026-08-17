@@ -278,4 +278,47 @@ function densityByFeed(rows) {
   return n;
 }
 
-module.exports = { spread, since, forListening, densityByFeed, MAX_ROWS, MAX_OBJECTS };
+/* THE LIVE BOARD, FOR THE MINUTES THE VAULT HAS NOT CAUGHT UP ON.
+ *
+ * The vault is the archive and it lags: on a busy night its newest object can
+ * be hours behind the radio, because writes are batched and Blob is eventually
+ * consistent. The desk reads the vault, so a running read of "the last 20
+ * minutes" comes back empty while the console one panel below shows traffic
+ * from a minute ago, and an ask reaches 48 hours back and answers with old
+ * calls while missing the one that is happening now.
+ *
+ * bcc:out:transcripts is the same buffer the live board renders: current,
+ * small (the last few hundred), authoritative for right now. This reads it and
+ * normalises to the listener shape, so the desk can fold the live minutes in
+ * front of the lagging archive. The field names are the buffer's actual ones,
+ * time/text/source, not the vault's at/text/feed. Reading the wrong name is
+ * how an earlier version of this dropped every row it fetched.
+ */
+async function bufferSince(fromISO) {
+  try {
+    const store = require('./store-io');
+    const raw = await store.readOut(store.K.outTranscripts, '[]');
+    const list = JSON.parse(raw);
+    if (!Array.isArray(list)) return [];
+    const cutoff = String(fromISO || '');
+    const out = [];
+    for (const r of list) {
+      const at = r && (r.time || r.at || r.t);
+      if (!at || (cutoff && at <= cutoff)) continue;
+      out.push({
+        at,
+        src: r.source || r.feed || r.src || 'unknown',
+        feed: r.source || r.feed || r.src || 'unknown',
+        source: r.source || r.feed || r.src || 'unknown',
+        text: r.text || r.transcript || '',
+        clip: r.clip,
+        incidentId: r.incidentId || null,
+        id: r.id,
+      });
+    }
+    out.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    return out;
+  } catch (e) { return []; }
+}
+
+module.exports = { spread, since, bufferSince, forListening, densityByFeed, MAX_ROWS, MAX_OBJECTS };

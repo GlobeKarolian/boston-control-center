@@ -216,6 +216,25 @@ module.exports = async (req, res) => {
   }
 
   const rows = got.rows || [];
+
+  /* Fold in the live board for the minutes the vault has not caught up on.
+     The vault lags on a busy night, so a question asked at 23:36 was answered
+     from data that ended at 13:30 and missed the shots-fired call that was
+     active on screen. The buffer is deduped against the vault by id and by
+     timestamp+feed, so nothing is counted twice, and the freshest traffic is
+     in the set the model actually reads. */
+  try {
+    const live = await stream.bufferSince(from.toISOString());
+    if (live.length) {
+      const seen = new Set(rows.map(r => r.id || (r.at + '|' + (r.feed || r.src))));
+      for (const r of live) {
+        const k = r.id || (r.at + '|' + (r.feed || r.src));
+        if (!seen.has(k)) { seen.add(k); rows.push(r); }
+      }
+      rows.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+    }
+  } catch (e) { /* the buffer is a bonus, never a blocker */ }
+
   if (!rows.length) {
     return json(res, {
       ok: true,

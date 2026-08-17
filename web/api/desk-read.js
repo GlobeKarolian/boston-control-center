@@ -105,25 +105,13 @@ module.exports = async (req, res) => {
      bcc:out:transcripts, so when the vault comes back empty on a fresh
      deployment, read the buffer the live board is already reading. */
   if (!rows.length) {
-    try {
-      const store_io = require('../lib/store-io');
-      const raw = await store_io.readOut(store_io.K.outTranscripts, '[]');
-      const list = JSON.parse(raw);
-      if (Array.isArray(list) && list.length) {
-        const cutoff = from.toISOString();
-        const fresh = list.filter(t => t && t.at && t.at > cutoff);
-        if (fresh.length) {
-          rows.push(...fresh.map(t => ({
-            at: t.at, feed: t.source || t.src, src: t.source || t.src,
-            text: t.text, clip: t.clip, units: t.units || [],
-            callType: t.callType || null, town: t.city || t.town || null,
-            address: t.address || null, matched: t.matched || null,
-          })));
-          got.complete = false;
-          got.sampled = true;
-        }
-      }
-    } catch (e) { /* Redis fallback is a convenience, never a failure */ }
+    /* Vault empty for this window, which on a busy night usually means it is
+       lagging, not that the city is quiet. Read the live board's buffer, which
+       carries the exact minutes the vault has not caught up on. The earlier
+       inline version of this filtered on `t.at`; the buffer field is `time`,
+       so it dropped every row and the desk still said silence. */
+    const live = await stream.bufferSince(from.toISOString());
+    if (live.length) { rows.push(...live); got.complete = false; got.sampled = true; }
   }
   /* The transmissions go back with the read, always, so the answer is
      checkable without a second request. This is the whole difference between
