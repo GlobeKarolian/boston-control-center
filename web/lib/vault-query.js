@@ -297,6 +297,68 @@ function metresApart(aLat, aLon, bLat, bLon) {
 }
 
 /* Is this transmission physically inside the named landmark? */
+/* WHERE THE NEIGHBOURHOODS ARE.
+ *
+ * The same hole the landmark points closed, one level up. A place was matched
+ * by spelling alone: `hay.includes('back bay')`. But dispatch says the street.
+ * A Back Bay call geocoded to "Boylston St, Boston" contains the words back
+ * and bay in no field of the record, so "fire in Back Bay last night" returned
+ * nothing while the fire sat in the archive with its audio. The record has no
+ * neighbourhood field and nothing was ever going to give it one.
+ *
+ * It has coordinates, though, and the pipeline worked hard for those. A
+ * transmission geocoded inside the neighbourhood is in the neighbourhood,
+ * whatever words were spoken. Same trade the landmarks make, and scored a
+ * shade lower for the same reason: a name is a stronger claim than a radius.
+ *
+ * The radii are per neighbourhood because Boston's are not remotely the same
+ * size, and they are deliberately tight. A place that quietly matches half the
+ * city is worse than one that matches nothing, because the reporter cannot see
+ * it happening. Centroids come from lib/places.json; a few are the T stop
+ * rather than the geographic centre, which is close enough at this radius.
+ *
+ * Towns are not in here. A Cambridge call already carries "Cambridge" in its
+ * town or city field, so the spelling path works, and a radius around a town
+ * centroid would reach into the three towns next door. */
+const PLACE_POINTS = {
+  'north end':     [42.36510, -71.05450,  700],
+  'chinatown':     [42.35255, -71.06275,  600],
+  'beacon hill':   [42.35871, -71.06783,  700],
+  'downtown':      [42.35584, -71.05562,  800],
+  'kenmore':       [42.34895, -71.09517,  700],
+  'longwood':      [42.34181, -71.10978,  700],
+  'mission hill':  [42.33327, -71.10203,  800],
+  'fenway':        [42.34533, -71.10427,  900],
+  'south end':     [42.34283, -71.07378, 1000],
+  'back bay':      [42.34735, -71.07573, 1100],
+  'seaport':       [42.34576, -71.04374, 1200],
+  'allston':       [42.35554, -71.13275, 1200],
+  'charlestown':   [42.37787, -71.06200, 1300],
+  'roslindale':    [42.29121, -71.12450, 1500],
+  'mattapan':      [42.26756, -71.09223, 1600],
+  'brighton':      [42.34916, -71.15339, 1800],
+  'south boston':  [42.33343, -71.04949, 1800],
+  'jamaica plain': [42.31160, -71.11438, 1800],
+  'roxbury':       [42.32891, -71.08509, 1800],
+  'east boston':   [42.37510, -71.03922, 2000],
+  'west roxbury':  [42.28136, -71.16006, 2000],
+  'hyde park':     [42.25503, -71.12553, 2000],
+  'dorchester':    [42.29732, -71.07450, 2600],
+};
+
+function nearPlace(tx, canon) {
+  const p = PLACE_POINTS[canon];
+  if (!p) return false;
+  const lat = Number(tx && tx.lat), lon = Number(tx && tx.lon);
+  if (!isFinite(lat) || !isFinite(lon) || (lat === 0 && lon === 0)) return false;
+  /* A pin the pipeline itself called vague is not evidence of which
+     neighbourhood something was in. A town centroid sits in exactly one of
+     them and would drag every unplaceable call in the city into whichever
+     neighbourhood happens to be nearest City Hall. */
+  if (tx.precision === 'wide' || tx.precision === 'weak' || tx.precision === 'town') return false;
+  return metresApart(lat, lon, p[0], p[1]) <= p[2];
+}
+
 function nearLandmark(tx, canon) {
   const p = LANDMARK_POINTS[canon];
   if (!p) return false;
@@ -542,6 +604,9 @@ function score(tx, f) {
 
   if (f.place) {
     if (hay.includes(f.place)) { s += 5; hit++; named++; }
+    /* Said the street, not the neighbourhood. Trust the coordinates the
+       pipeline worked for over the vocabulary that happened to be spoken. */
+    else if (nearPlace(tx, f.place)) { s += 4; hit++; named++; }
     else return 0;                       // asked for Back Bay, this is not there
   }
 
@@ -584,6 +649,6 @@ function score(tx, f) {
 }
 
 module.exports = { nearLandmark, metresApart, LANDMARK_POINTS,
-  parse, score, whenOf, dayString, tokenize, hasWord,
+  parse, score, whenOf, dayString, tokenize, hasWord, nearPlace,
   TYPES, PLACES, LANDMARKS, KIN, TZ,
 };

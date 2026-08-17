@@ -354,5 +354,51 @@ console.log('\ntokens');
   ok('an unrelated Dorchester call is not pulled in', vq.score(other, f) === 0);
 }
 
+/* ------------------------------------------------------------------
+   A NEIGHBOURHOOD IS A PLACE ON THE MAP, NOT A WORD ON THE RADIO.
+
+   The same hole the landmark points closed, one level up. `place` was matched
+   by spelling alone, so a Back Bay fire geocoded to "Boylston St, Boston" had
+   the words back and bay in no field of the record, and "fire in Back Bay"
+   returned nothing while the fire sat in the archive with its audio. Dispatch
+   says the street. The reporter says the neighbourhood. Both are right and
+   only the coordinates know it.
+   ------------------------------------------------------------------ */
+{
+  const f = vq.parse('fire in back bay last night', new Date(NOW));
+  const tx = (o) => Object.assign({
+    at: T(4), feed: 'boston-fire', callType: 'fire',
+    text: 'Working fire, heavy smoke showing on arrival.',
+  }, o);
+
+  ok('a Back Bay fire that only ever named the street is found',
+     vq.score(tx({ lat: 42.3486, lon: -71.0810, matched: 'Boylston St, Boston', precision: 'exact' }), f) > 0);
+  ok('and the spoken one still scores higher than the inferred one',
+     vq.score(tx({ text: 'Working fire in Back Bay, heavy smoke.' }), f) >
+     vq.score(tx({ lat: 42.3486, lon: -71.0810, precision: 'exact' }), f));
+  ok('a Dorchester fire is not a Back Bay fire',
+     vq.score(tx({ lat: 42.2973, lon: -71.0745, matched: 'Dot Ave, Boston', precision: 'exact' }), f) === 0);
+  ok('nor is one across the river in Cambridge',
+     vq.score(tx({ lat: 42.3736, lon: -71.1097, matched: 'Mass Ave, Cambridge', precision: 'exact' }), f) === 0);
+
+  /* A pin the pipeline already called vague is not evidence of neighbourhood.
+     A town centroid sits inside exactly one of them, and without this every
+     unplaceable call in the city would answer to whichever neighbourhood is
+     nearest City Hall. */
+  ok('a vague pin does not put a call in a neighbourhood',
+     vq.score(tx({ lat: 42.3486, lon: -71.0810, precision: 'wide' }), f) === 0);
+  ok('and neither does no pin at all',
+     vq.score(tx({}), f) === 0);
+
+  /* The tight ones have to stay tight, or a place that matches half the city
+     is worse than one that matches nothing. */
+  const g = vq.parse('anything in the north end last night', new Date(NOW));
+  ok('the North End does not reach across to Charlestown',
+     vq.score(tx({ callType: null, lat: 42.3779, lon: -71.0620, precision: 'exact' }), g) === 0);
+  ok('but does cover the North End itself',
+     vq.score(tx({ callType: null, lat: 42.3648, lon: -71.0542, precision: 'exact' }), g) > 0);
+}
+
+
 console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
 process.exit(fail ? 1 : 0);

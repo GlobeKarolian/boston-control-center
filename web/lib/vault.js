@@ -64,6 +64,27 @@ function dayOf(at) {
    will ask why a transcript reads the way it does, and "which model read this,
    on which Mac" is the answer. A regex-extracted line and one a model judged
    are different kinds of evidence and the archive should say which it was. */
+/* HOW MUCH TO TRUST THE PIN.
+ *
+ * The record has always had a `precision` field and it has always been null,
+ * because it read g.precision and lib/geo.js has never set that. What geo
+ * actually returns is a set of flags, and this turns them into the same
+ * vocabulary lib/incident-store.js uses, plus `wide` for the answers that
+ * cover a whole area rather than a point.
+ *
+ * It matters downstream: the archive search decides whether a call was in a
+ * neighbourhood by asking whether its coordinates fall inside one, and a town
+ * centroid sits inside exactly one neighbourhood while meaning nothing of the
+ * kind. Without this field every unplaceable call in the city would answer to
+ * whichever neighbourhood is nearest its town hall. */
+function precisionOf(g) {
+  if (!g || g.lat === null || g.lat === undefined) return null;
+  if (g.wide) return 'wide';
+  if (g.weak) return 'weak';
+  if (g.approx) return 'approx';
+  return 'exact';
+}
+
 function txRecord(it, { ex, geo, threat, incidentId, by, machine, at }) {
   const e = ex || {};
   const g = geo || {};
@@ -91,7 +112,7 @@ function txRecord(it, { ex, geo, threat, incidentId, by, machine, at }) {
     lat: g.lat ?? null,
     lon: g.lon ?? null,
     matched: g.matched || null,
-    precision: g.precision || null,
+    precision: g.precision || precisionOf(g),
 
     // how alarming it sounded
     tier: t.tier ?? null,
@@ -157,4 +178,4 @@ async function putIncident(inc) {
   return blob.putJSON(path, { v: 1, day, archivedAt: new Date().toISOString(), incident: inc });
 }
 
-module.exports = { dayOf, txRecord, putBatch, putIncident, TZ };
+module.exports = { dayOf, txRecord, putBatch, putIncident, precisionOf, TZ };
