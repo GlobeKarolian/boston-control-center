@@ -93,6 +93,14 @@
     {
       "source": "/shift-change.json",
       "destination": "/api/shift-change"
+    },
+    {
+      "source": "/vault-audio",
+      "destination": "/api/vault-audio"
+    },
+    {
+      "source": "/vault-audio.json",
+      "destination": "/api/vault-audio"
     }
   ],
   "functions": {

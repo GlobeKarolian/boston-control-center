@@ -689,6 +689,25 @@
   .be-ev-st .sv .newinc{color:var(--wire);font-weight:700}
   .be-idle{color:var(--text-faint);font-style:italic;padding:22px 4px}
 
+  /* --- audio archive (historical clip browser) --- */
+  #audioview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
+  #audioview.show{display:flex}
+  .av-wrap{flex:1;overflow-y:auto;padding:18px 24px 34px;max-width:960px;margin:0 auto;width:100%}
+  .av-wrap::-webkit-scrollbar{width:9px}.av-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .av-bar{display:flex;gap:10px;align-items:center;margin:10px 0 16px;flex-wrap:wrap}
+  .av-out{display:flex;flex-direction:column;gap:14px}
+  .av-feed{margin-bottom:18px}
+  .av-feed-head{display:flex;align-items:baseline;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);margin-bottom:6px}
+  .av-feed-head h3{font-family:var(--mono);font-size:12px;font-weight:600;letter-spacing:1.5px;text-transform:uppercase;color:var(--scanner)}
+  .av-feed-head .n{font-family:var(--mono);font-size:11px;color:var(--text-faint)}
+  .av-clip{display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--border-soft);font-size:12px}
+  .av-clip:last-child{border-bottom:0}
+  .av-clip .t{font-family:var(--mono);font-size:11px;color:var(--text-faint);width:56px;flex:0 0 auto}
+  .av-clip .p{flex:0 0 auto}
+  .av-clip .x{flex:1;color:var(--text-dim);min-width:0}
+  .av-clip .u{font-family:var(--mono);font-size:10px;color:var(--text-faint);flex:0 0 auto}
+  .av-empty{padding:40px 0;text-align:center;color:var(--text-faint);font-style:italic}
+
   /* --- shift change (the handoff briefing) --- */
   #shiftview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
   #shiftview.show{display:flex}
@@ -1349,6 +1368,7 @@
       <button class="tab" data-view="desk">Desk</button>
       <button class="tab" data-view="story">Story</button>
       <button class="tab" data-view="archive">Archive</button>
+      <button class="tab" data-view="audio">Audio</button>
       <button class="tab" data-view="shift">Shift</button>
       <button class="tab" data-view="backend"><span class="tdot"></span>Under the Hood</button>
     </div>
@@ -1497,6 +1517,27 @@
       </div>
       <div id="arRead" class="ar-read"></div>
       <div id="arOut"></div>
+    </div>
+  </div>
+
+  <!-- Audio archive: every clip from a day, playable. Not a search — a browse.
+       "Play me the overnight" gets the overnight, not a matched subset. -->
+  <div id="audioview">
+    <div class="av-wrap">
+      <p class="st-note">
+        Every clip the radio kept from a day, in order, with the transcript it came from.
+        Not a search — a browse. Pick a day, pick a feed, play the whole shift.
+      </p>
+      <div class="av-bar">
+        <input id="avDay" class="ar-input" type="date" aria-label="Archive day">
+        <select id="avFeed" class="ar-input" style="flex:0 0 220px" aria-label="Feed filter">
+          <option value="">every feed</option>
+        </select>
+        <button id="avGo" class="ar-go">Open the archive</button>
+      </div>
+      <div id="avOut" class="av-out">
+        <div class="sc-empty">Pick a day and open the archive.</div>
+      </div>
     </div>
   </div>
 
@@ -2856,7 +2897,9 @@ const VIEWS={ stops:{el:'stopsview',poll:()=>pollStops()},
      than watching the radio, so it should be silent until somebody speaks. */
   archive:{el:'archiveview',poll:()=>{}},
   /* Shift Change loads once on open and again when the shift toggle flips. */
-  shift:{el:'shiftview',poll:()=>shiftLoad()} };
+  shift:{el:'shiftview',poll:()=>shiftLoad()},
+  /* Audio archive: every clip from a day, playable. Not a search — a browse. */
+  audio:{el:'audioview',poll:()=>audioLoad()} };
 /* The Desk and the Story open no connection of their own. Everything they draw
    is already in this scope because the pollers that own the map put it there,
    so the whole integration is this function: hand the module the arrays, let it
@@ -3185,6 +3228,54 @@ async function pollPipeline(){
       '</div></div>';
   }).join('');
 }
+
+/* Audio archive: every clip from a day, playable. Not a search — a browse.
+   The vault records carry clip URLs on every transmission that produced one. */
+let AV_DAY='';
+async function audioLoad(){
+  const out=document.getElementById('avOut'), dayEl=document.getElementById('avDay'), feedEl=document.getElementById('avFeed');
+  if(!out)return;
+  const day=dayEl?dayEl.value:'';
+  const feed=feedEl?feedEl.value:'';
+  if(!day){ out.innerHTML='<div class="av-empty">Pick a day and open the archive.</div>'; return; }
+  if(day===AV_DAY&&!feed)return;
+  AV_DAY=day;
+  out.innerHTML='<div class="av-empty">Reading the archive…</div>';
+  let d=null;
+  try{
+    const r=await fetch('./vault-audio.json?day='+encodeURIComponent(day)+(feed?'&feed='+encodeURIComponent(feed):''),{cache:'no-store'});
+    if(r.ok)d=await r.json();
+  }catch(e){}
+  if(!d||!d.ok){
+    out.innerHTML='<div class="av-empty">'+(d&&d.why?esc(d.why):'The archive did not answer.')+'</div>';
+    return;
+  }
+  const feeds=d.feeds||[];
+  if(!feeds.length){
+    out.innerHTML='<div class="av-empty">No clips from '+esc(day)+(feed?' on '+esc(feed):'')+'. The radio was quiet, or the archive was not running.</div>';
+    return;
+  }
+  out.innerHTML=feeds.map(f=>{
+    const clips=f.clips.map(c=>{
+      const time=c.at?new Date(c.at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}):'';
+      const units=(c.units||[]).slice(0,4).join(' ');
+      return '<div class="av-clip"><span class="t">'+esc(time)+'</span>'+
+        '<span class="p"><button class="cplay" data-clip="'+esc(c.clip)+'" title="Play this clip">▶</button></span>'+
+        '<span class="x">'+esc(c.text)+'</span>'+
+        (units?'<span class="u">'+esc(units)+'</span>':'')+
+        (c.callType?'<span class="u">'+esc(c.callType)+'</span>':'')+
+        (c.town?'<span class="u">'+esc(c.town)+'</span>':'')+
+        '</div>';
+    }).join('');
+    return '<div class="av-feed"><div class="av-feed-head"><h3>'+esc(f.id)+'</h3><span class="n">'+f.count+' clips</span></div>'+clips+'</div>';
+  }).join('');
+}
+/* Play a clip through the shared player. */
+document.addEventListener('click',e=>{
+  const b=e.target.closest('.cplay'); if(!b)return;
+  const u=b.dataset.clip; if(!(window.BCCClips&&BCCClips.ok(u)))return;
+  clipToggle(u,b);
+});
 
 /* Shift Change. Loads the handoff briefing for the selected shift and renders
    the sections a desk editor would ask about. */
