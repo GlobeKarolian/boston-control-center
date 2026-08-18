@@ -36,10 +36,11 @@ const et = require('../lib/etime');
    question about a night, small enough to stay honest and cheap. */
 const SHOW = 150;
 /* How far back a bare question reaches when it names no time of its own.
-   Two days, because that is the span a reporter means by "recently" and the
-   span an editor is asked about at the start of a shift. It is also six
-   thousand transmissions, which is the reason for everything below. */
-const DEFAULT_HOURS = 48;
+   Two hours, because that is what "recently" means at a desk and because the
+   vault can answer it in milliseconds. Forty-eight was the cause of "why did
+   it take ten seconds to say nothing happened", which is the wrong shape for
+   the question. */
+const DEFAULT_HOURS = 2;
 
 /* A question is allowed to read far more of the radio than the live listener,
    because it is a deliberate act by a person waiting for an answer rather than
@@ -209,7 +210,7 @@ module.exports = async (req, res) => {
      time gets a shift rather than the parser's two-day default, because
      somebody at the desk means recently. */
   const f = vq.parse(q);
-  const namedTime = /\b(tonight|last night|yesterday|today|this morning|this evening|last (hour|week|month)|\d{4}-\d{2}-\d{2})\b/i.test(q);
+  const namedTime = /\b(tonight|last night|yesterday|today|this morning|this evening|last (hour|week|month)|\d{4}-\d{2}-\d{2}|\d+ hours?)\b/i.test(q);
   const from = namedTime ? f.from : new Date(Date.now() - DEFAULT_HOURS * 3600000);
   const to = namedTime ? f.to : new Date();
 
