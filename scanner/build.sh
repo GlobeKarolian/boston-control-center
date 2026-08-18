@@ -78,10 +78,15 @@ else
 fi
 
 echo "==> compile"
+# headerpad_max_install_names leaves room in the Mach-O header for the app
+# libraries step below to rewrite a load command with a longer path. Without
+# it install_name_tool can refuse the change, silently here because its errors
+# are swallowed, and the guard after it is what would then stop the build.
 SLICES=()
 for ARCH in arm64 x86_64; do
   if swiftc -O -parse-as-library -swift-version 5 \
       -sdk "$SDK" -target "$ARCH-apple-macosx$MINOS" \
+      -Xlinker -headerpad_max_install_names \
       "${OPUS_FLAGS[@]}" \
       -o "$BUILD/$EXEC-$ARCH" "${SOURCES[@]}" 2>"$BUILD/compile-$ARCH.log"; then
     SLICES+=("$BUILD/$EXEC-$ARCH")
@@ -154,6 +159,55 @@ absorb() {
 absorb "$WDIR/whisper-cli" || exit 1
 echo "    libraries: $(ls -1 "$WDIR"/*.dylib 2>/dev/null | wc -l | tr -d ' ')"
 
+echo "==> app libraries"
+# absorb() above carries the speech engine's dependencies into the bundle, and
+# Opus.swift says so, but nothing ever did the same for the app binary itself.
+# ScannerRelay left every build still linked to Homebrew's libopus by absolute
+# path, which is fine on the Mac that built it and a crash before main() on any
+# Mac where that exact path is not there. Build 12 shipped with a load command
+# reading /opt/homebrew/*/libopus.0.dylib, a literal asterisk, and dyld does
+# not expand globs. So: everything the binary needs that is not part of macOS
+# is copied into Contents/Frameworks and referenced from @executable_path, and
+# the build refuses to finish while any Homebrew or /usr/local path is left in
+# the load commands. Read with `read` rather than a for loop on purpose: a for
+# over command output would glob-expand a path like the one above.
+FDIR="$APP/Contents/Frameworks"
+mkdir -p "$FDIR"
+absorb_app() {
+  local bin="$1" dep base found
+  while IFS= read -r dep; do
+    case "$dep" in
+      ""|/usr/lib/*|/System/*|@executable_path/*|@loader_path/*|@rpath/*) continue ;;
+    esac
+    base="$(basename "$dep")"
+    if [ ! -f "$FDIR/$base" ]; then
+      found="$(find_lib "$base")" || { echo "    missing dependency $base, wanted by $(basename "$bin")"; return 1; }
+      cp "$found" "$FDIR/$base"
+      chmod 755 "$FDIR/$base"
+      install_name_tool -id "@executable_path/../Frameworks/$base" "$FDIR/$base" 2>/dev/null || true
+      absorb_app "$FDIR/$base" || return 1
+    fi
+    install_name_tool -change "$dep" "@executable_path/../Frameworks/$base" "$bin" 2>/dev/null || true
+  done < <(otool -L "$bin" | awk 'NR>1 {print $1}')
+}
+absorb_app "$APP/Contents/MacOS/$EXEC" || exit 1
+STRAY="$(otool -L "$APP/Contents/MacOS/$EXEC" | awk 'NR>1 {print $1}' | grep -E '^/opt/homebrew|^/usr/local' || true)"
+if [ -n "$STRAY" ]; then
+  echo "    the app still depends on something outside the bundle:"
+  echo "$STRAY" | sed 's/^/      /'
+  exit 1
+fi
+# And every load command that points into the bundle has to point at a file
+# that is there. dyld checks this before main() runs; so does the build now.
+while IFS= read -r dep; do
+  case "$dep" in
+    @executable_path/*) [ -f "$APP/Contents/MacOS/${dep#@executable_path/}" ] \
+      || { echo "    $dep is referenced but not in the bundle"; exit 1; } ;;
+  esac
+done < <(otool -L "$APP/Contents/MacOS/$EXEC" | awk 'NR>1 {print $1}')
+echo "    frameworks: $(ls -1 "$FDIR"/*.dylib 2>/dev/null | wc -l | tr -d ' ')"
+rmdir "$FDIR" 2>/dev/null || true
+
 # The compute backends are opened at runtime rather than linked, so nothing in
 # the dependency graph points at them. Copy every Apple Silicon variant so one
 # build runs on an M1 and an M4 alike.
@@ -222,7 +276,7 @@ echo "==> sign"
 # Nested code gets signed first, then the bundle around it. Ad hoc is enough:
 # the point is a stable identity so the keychain entry survives a rebuild.
 xattr -cr "$APP" 2>/dev/null || true
-for f in "$WDIR"/*.dylib "$WDIR"/*.so "$WDIR/whisper-cli"; do
+for f in "$WDIR"/*.dylib "$WDIR"/*.so "$WDIR/whisper-cli" "$APP/Contents/Frameworks"/*.dylib; do
   [ -e "$f" ] || continue
   codesign --force --sign - --timestamp=none "$f" >/dev/null 2>&1 || true
 done
@@ -233,6 +287,7 @@ echo "==> self test"
 "$WDIR/whisper-cli" --help >/dev/null 2>&1 \
   && echo "    engine runs from inside the bundle" \
   || echo "    WARNING: the bundled engine would not start"
+
 
 echo "==> installer"
 # A disk image rather than a package installer. The app is ad hoc signed, so
