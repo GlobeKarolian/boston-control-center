@@ -3270,6 +3270,14 @@ async function audioLoad(){
     return '<div class="av-feed"><div class="av-feed-head"><h3>'+esc(f.id)+'</h3><span class="n">'+f.count+' clips</span></div>'+clips+'</div>';
   }).join('');
 }
+/* The day input and the feed select both need to fire a reload. The go
+   button names the obvious one; the change events are the convenience. */
+document.getElementById('avGo').addEventListener('click',()=>{ AV_DAY=''; audioLoad(); });
+const avDayEl=document.getElementById('avDay');
+if(avDayEl)avDayEl.addEventListener('change',()=>{ AV_DAY=''; audioLoad(); });
+const avFeedEl=document.getElementById('avFeed');
+if(avFeedEl)avFeedEl.addEventListener('change',()=>{ AV_DAY=''; audioLoad(); });
+
 /* Play a clip through the shared player. */
 document.addEventListener('click',e=>{
   const b=e.target.closest('.cplay'); if(!b)return;
