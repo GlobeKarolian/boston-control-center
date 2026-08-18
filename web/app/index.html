@@ -4,6 +4,24 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <meta name="robots" content="noindex, nofollow, noarchive" />
+<meta name="color-scheme" content="dark light" />
+<!-- The theme, decided before the stylesheet is parsed so the page never paints
+     dark and then flips. ?theme=light|dark|auto in the URL wins and is
+     remembered, which is how a wall screen or a bookmark pins one; otherwise
+     what this browser last chose; otherwise dark, which is what the board has
+     always been. Everything else about the theme lives in the main script. -->
+<script>
+(function(){
+  var t=null;
+  try{
+    var q=new URLSearchParams(location.search).get('theme');
+    if(q==='light'||q==='dark'||q==='auto'){t=q;try{localStorage.setItem('bcc.theme',t);}catch(e){}}
+    else{t=localStorage.getItem('bcc.theme');}
+  }catch(e){}
+  if(t!=='light'&&t!=='auto')t='dark';
+  document.documentElement.setAttribute('data-theme',t);
+})();
+</script>
 <title>Boston Newsroom Control Center</title>
 <!-- The tab icon. A newsroom keeps this open all day in a row of twenty tabs,
      and until now it was the browser's default globe, which is the same icon
@@ -14,18 +32,54 @@
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
 <style>
   :root{
-    --bg:#05070b;--panel:rgba(14,18,26,.86);--panel-solid:#0e121a;--border:#232c3b;--border-soft:#1a2230;
-    --text:#e9edf4;--text-dim:#9aa4b6;--text-faint:#5f6a7e;
-    --crash:#ff4d4d;--road:#ffb020;--transit:#4da3ff;--scanner:#34d399;--alert:#c07cff;--wire:#ff3b30;
+    --bg:light-dark(#f5f3ef,#05070b);--panel:light-dark(rgba(255,253,250,.88),rgba(14,18,26,.86));--panel-solid:light-dark(#fffdfa,#0e121a);--border:light-dark(#dbd5ca,#232c3b);--border-soft:light-dark(#e9e4db,#1a2230);
+    --text:light-dark(#16181c,#e9edf4);--text-dim:light-dark(#575d69,#9aa4b6);--text-faint:light-dark(#8a8f9a,#5f6a7e);
+    --crash:light-dark(#c8102e,#ff4d4d);--road:light-dark(#a86a00,#ffb020);--transit:light-dark(#0b52a8,#4da3ff);--scanner:light-dark(#0d6b45,#34d399);--alert:light-dark(#6a35a0,#c07cff);--wire:light-dark(#b3261e,#ff3b30);
     /* Stale, not alarming. Held back from --road's #ffb020 on purpose: a feed that
        missed one refresh is worth noticing on the second glance, not the first, and
        it must not compete with the reds and oranges that mean something happened. */
-    --stale:#e8a33d;
+    --stale:light-dark(#8a6414,#e8a33d);
     --red-l:#DA291C;--orange-l:#ED8B00;--blue-l:#003DA5;--green-l:#00843D;
     --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
     --serif:Georgia,"Times New Roman",serif;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    /* Colours the map layers and the popups need by name. Leaflet writes vector
+       colours as SVG presentation attributes, which cannot read a variable, so
+       the vector layers take theirs from PAL in the script instead; these are
+       for everything drawn as HTML, and the two lists have to agree. */
+    --mk-stroke:light-dark(#fff,#06090f);          /* the outline that lifts a marker off the basemap */
+    --mk-cleared:light-dark(#9aa0ab,#6b7280);
+    --mk-other:light-dark(#6b7280,#7C878E);
+    --mk-cam:light-dark(#64748b,#94a3b8);
+    --mk-webcam:light-dark(#b8236f,#f472b6);
+    --mk-outage:light-dark(#6a35a0,#a78bfa);
+    --mk-heli:light-dark(#a67c00,#ffd23f);
+    --t11-road:light-dark(#a86a00,#f59e0b);--t11-trash:light-dark(#0369a1,#38bdf8);--t11-tree:light-dark(#0d6b45,#34d399);
+    --t11-water:light-dark(#0b52a8,#60a5fa);--t11-pest:light-dark(#6a35a0,#c084fc);--t11-other:light-dark(#64748b,#94a3b8);
+    --pop-cam:light-dark(#16181c,#cbd5e1);--pop-webcam:light-dark(#b8236f,#f9a8d4);--pop-outage:light-dark(#6a35a0,#c4b5fd);
+    /* Both were referenced and neither was defined, so the quake popup title
+       and the Fires heading on the Shift page were falling back to inherited
+       text colour. Named now, in both themes. */
+    --quake:light-dark(#b8430a,#e8590c);
+    --fire:light-dark(#c2410c,#ff8c42);
   }
+  /* THE THEME.
+     One attribute on <html> and every colour above follows it. light-dark()
+     resolves against the element's colour scheme, so dark is the default,
+     data-theme="light" flips the lot, and data-theme="auto" hands the choice
+     to the operating system. Nothing below this line knows which theme it is
+     in, which is the whole reason a second theme could be added to a 1300
+     line stylesheet without restating it. The dark side of every pair is the
+     value that shipped, so dark is pixel for pixel what it was.
+     One thing does change under dark: form controls and the default
+     scrollbars now render in the browser's dark scheme rather than its light
+     one, which is what a dark page should have been asking for all along. */
+  html{color-scheme:dark}
+  html[data-theme="light"]{color-scheme:light}
+  html[data-theme="auto"]{color-scheme:light dark}
+  /* Vector markers. CSS outranks a presentation attribute, so the outline of
+     every circle marker reads the token whatever hex Leaflet wrote on it. */
+  .leaflet-overlay-pane path.mk{stroke:var(--mk-stroke)}
   *{box-sizing:border-box}
   html,body{height:100%;margin:0;overflow:hidden;background:var(--bg)}
   body{font-family:var(--sans);color:var(--text)}
@@ -45,8 +99,8 @@
      Green because .st-find already made green mean focus in this file, and one
      focus colour is worth more than a prettier second one. */
   :focus-visible{outline:2px solid var(--scanner);outline-offset:-2px}
-  #map{position:fixed;inset:0;z-index:0;background:#05070b}
-  .leaflet-container{background:#05070b}
+  #map{position:fixed;inset:0;z-index:0;background:light-dark(#f5f3ef,#05070b)}
+  .leaflet-container{background:light-dark(#f5f3ef,#05070b)}
   /* The map is built with zoomControl:false so this control is the only one, and
      it is lifted clear of the console. The default top-left slot parks it under
      the masthead, where it clipped the first three letters of the name. */
@@ -65,11 +119,11 @@
        what you are reading in the seconds a call is open on a screen this size. */
     body:has(.detail.show) .leaflet-control-zoom{display:none}}
   .leaflet-control-zoom a{background:var(--panel-solid);color:var(--text-dim);border-color:var(--border)}
-  .leaflet-control-zoom a:hover{background:#1b2434;color:var(--text)}
+  .leaflet-control-zoom a:hover{background:light-dark(#e2ddd3,#1b2434);color:var(--text)}
 
   /* header */
   .hud-top{position:fixed;top:0;left:0;right:0;z-index:1000;display:flex;align-items:center;gap:16px;
-    padding:11px 18px;background:linear-gradient(180deg,rgba(5,7,11,.92),rgba(5,7,11,.55) 70%,transparent);
+    padding:11px 18px;background:linear-gradient(180deg,light-dark(rgba(245,243,239,.92),rgba(5,7,11,.92)),light-dark(rgba(245,243,239,.55),rgba(5,7,11,.55)) 70%,transparent);
     pointer-events:none}
   .hud-top > *{pointer-events:auto}
   /* The unverified chip is 109px of header that was not there before, and under
@@ -82,14 +136,14 @@
   @media(max-width:1010px){.hud-top{gap:10px;padding:11px 12px}
     .hud-meta{gap:10px}
     #updated{display:none}}
-  .mast{font-family:var(--serif);font-weight:700;font-size:20px;white-space:nowrap;text-shadow:0 1px 6px #000}
+  .mast{font-family:var(--serif);font-weight:700;font-size:20px;white-space:nowrap;text-shadow:0 1px 6px light-dark(rgba(0,0,0,0),#000)}
   .sub{font-family:var(--mono);font-size:9.5px;letter-spacing:2.5px;text-transform:uppercase;color:var(--text-faint);white-space:nowrap}
   .live-badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:11px;letter-spacing:1.5px;color:var(--wire);text-transform:uppercase;font-weight:700}
   .dot{width:8px;height:8px;border-radius:50%;background:var(--wire);animation:pulse 1.8s infinite}
-  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(255,59,48,.55)}70%{box-shadow:0 0 0 9px rgba(255,59,48,0)}100%{box-shadow:0 0 0 0 rgba(255,59,48,0)}}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 light-dark(rgba(179,38,30,.55),rgba(255,59,48,.55))}70%{box-shadow:0 0 0 9px light-dark(rgba(179,38,30,0),rgba(255,59,48,0))}100%{box-shadow:0 0 0 0 light-dark(rgba(179,38,30,0),rgba(255,59,48,0))}}
   .spacer{flex:1}
-  .hud-meta{display:flex;align-items:center;gap:18px;font-family:var(--mono);font-size:12px;color:var(--text-dim);text-shadow:0 1px 4px #000}
-  .hud-meta .clock{color:#fff;font-size:14px}
+  .hud-meta{display:flex;align-items:center;gap:18px;font-family:var(--mono);font-size:12px;color:var(--text-dim);text-shadow:0 1px 4px light-dark(rgba(0,0,0,0),#000)}
+  .hud-meta .clock{color:light-dark(#16181c,#fff);font-size:14px}
   .status-pill{display:inline-flex;align-items:center;gap:6px}
   .status-pill .sdot{width:7px;height:7px;border-radius:50%;background:var(--scanner)}
   .status-pill.degraded .sdot{background:var(--road)}.status-pill.down .sdot{background:var(--crash)}
@@ -97,7 +151,7 @@
   /* left feed rail */
   .rail{position:fixed;top:58px;left:14px;bottom:46px;width:340px;z-index:900;display:flex;flex-direction:column;
     background:var(--panel);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:12px;overflow:hidden;
-    box-shadow:0 12px 40px rgba(0,0,0,.5)}
+    box-shadow:0 12px 40px light-dark(rgba(20,18,14,.16),rgba(0,0,0,.5))}
   .rail-head{display:flex;align-items:center;gap:9px;padding:11px 14px;border-bottom:1px solid var(--border-soft)}
   .rail-head .tag{width:3px;height:15px;border-radius:2px;background:var(--crash)}
   .rail-head h2{margin:0;font-size:12px;letter-spacing:1.5px;text-transform:uppercase}
@@ -105,8 +159,8 @@
   .rail-body{flex:1;overflow-y:auto}
   /* The thumbs were #212a3a on a #0e121a panel, near enough invisible, so four
      scrolling panels gave no sign there was anything below the fold. */
-  .rail-body::-webkit-scrollbar{width:8px}.rail-body::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
-  .rail-body::-webkit-scrollbar-thumb:hover{background:#4d5b78}
+  .rail-body::-webkit-scrollbar{width:8px}.rail-body::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#3b4760);border-radius:8px}
+  .rail-body::-webkit-scrollbar-thumb:hover{background:light-dark(#b9b1a2,#4d5b78)}
   /* macOS hides the bar completely until you are already scrolling, so a list cut
      off mid sentence still reads as a list that ended. These four layers give a
      resting edge instead. The two covers are attached local, so they ride the
@@ -116,16 +170,16 @@
     background-position:center top,center bottom,center top,center bottom;
     background-size:100% 26px,100% 26px,100% 20px,100% 20px;
     background-attachment:local,local,scroll,scroll;
-    background-image:linear-gradient(var(--panel-solid),rgba(14,18,26,0)),
-      linear-gradient(rgba(14,18,26,0),var(--panel-solid)),
-      radial-gradient(farthest-side at 50% 0,rgba(0,0,0,.92),rgba(0,0,0,0)),
-      radial-gradient(farthest-side at 50% 100%,rgba(0,0,0,.92),rgba(0,0,0,0))}
+    background-image:linear-gradient(var(--panel-solid),light-dark(rgba(255,253,250,0),rgba(14,18,26,0))),
+      linear-gradient(light-dark(rgba(255,253,250,0),rgba(14,18,26,0)),var(--panel-solid)),
+      radial-gradient(farthest-side at 50% 0,light-dark(rgba(20,18,14,.18),rgba(0,0,0,.92)),rgba(0,0,0,0)),
+      radial-gradient(farthest-side at 50% 100%,light-dark(rgba(20,18,14,.18),rgba(0,0,0,.92)),rgba(0,0,0,0))}
   .feed-item{padding:9px 14px;border-bottom:1px solid var(--border-soft);cursor:pointer;transition:background .12s}
-  .feed-item:hover{background:rgba(255,255,255,.04)}
+  .feed-item:hover{background:light-dark(rgba(20,18,14,.04),rgba(255,255,255,.04))}
   .feed-item.fresh{animation:flash 2.4s ease-out}
-  @keyframes flash{from{background:rgba(255,77,77,.16)}to{background:transparent}}
+  @keyframes flash{from{background:light-dark(rgba(200,16,46,.16),rgba(255,77,77,.16))}to{background:transparent}}
   .fi-top{display:flex;align-items:center;gap:8px;margin-bottom:3px}
-  .pill{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 6px;border-radius:4px;color:#06090f}
+  .pill{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 6px;border-radius:4px;color:light-dark(#fff,#06090f)}
   .fi-time{font-family:var(--mono);font-size:10px;color:var(--text-faint);margin-left:auto;white-space:nowrap}
   .fi-title{font-size:13px;line-height:1.3;color:var(--text)}
   .fi-loc{font-size:11.5px;color:var(--text-dim);margin-top:2px}
@@ -135,7 +189,7 @@
 
   /* right layer control */
   .layers{position:fixed;top:58px;right:14px;z-index:900;width:232px;max-height:calc(100vh - 400px);overflow-y:auto;background:var(--panel);backdrop-filter:blur(12px);
-    border:1px solid var(--border);border-radius:12px;overflow-x:hidden;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+    border:1px solid var(--border);border-radius:12px;overflow-x:hidden;box-shadow:0 12px 40px light-dark(rgba(20,18,14,.16),rgba(0,0,0,.5))}
   /* The alert bar sits between the header and the panel, so the cap has to drop
      when it shows or the bottom rows slide under the console. */
   body:has(.big-alert.show) .layers{max-height:calc(100vh - 480px)}
@@ -145,23 +199,23 @@
      switches outright. On a 700px window that was the bottom rows of this panel.
      Same thumb and same resting edge as the other four panels, so a row cut in
      half reads as a row cut in half here too. */
-  .layers::-webkit-scrollbar{width:8px}.layers::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
-  .layers::-webkit-scrollbar-thumb:hover{background:#4d5b78}
+  .layers::-webkit-scrollbar{width:8px}.layers::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#3b4760);border-radius:8px}
+  .layers::-webkit-scrollbar-thumb:hover{background:light-dark(#b9b1a2,#4d5b78)}
   .layers{background-repeat:no-repeat;
     background-position:center top,center bottom,center top,center bottom;
     background-size:100% 26px,100% 26px,100% 20px,100% 20px;
     background-attachment:local,local,scroll,scroll;
-    background-image:linear-gradient(var(--panel-solid),rgba(14,18,26,0)),
-      linear-gradient(rgba(14,18,26,0),var(--panel-solid)),
-      radial-gradient(farthest-side at 50% 0,rgba(0,0,0,.92),rgba(0,0,0,0)),
-      radial-gradient(farthest-side at 50% 100%,rgba(0,0,0,.92),rgba(0,0,0,0))}
+    background-image:linear-gradient(var(--panel-solid),light-dark(rgba(255,253,250,0),rgba(14,18,26,0))),
+      linear-gradient(light-dark(rgba(255,253,250,0),rgba(14,18,26,0)),var(--panel-solid)),
+      radial-gradient(farthest-side at 50% 0,light-dark(rgba(20,18,14,.18),rgba(0,0,0,.92)),rgba(0,0,0,0)),
+      radial-gradient(farthest-side at 50% 100%,light-dark(rgba(20,18,14,.18),rgba(0,0,0,.92)),rgba(0,0,0,0))}
   .layers h3{margin:0;padding:10px 13px;font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--text-dim);border-bottom:1px solid var(--border-soft)}
   .lyr{display:flex;align-items:center;gap:9px;padding:8px 13px;cursor:pointer;border-bottom:1px solid var(--border-soft);font-size:12.5px}
   .lyr:last-child{border-bottom:none}
-  .lyr:hover{background:rgba(255,255,255,.03)}
-  .lyr .sw{width:32px;height:18px;border-radius:20px;background:#222b3a;position:relative;flex:0 0 auto;transition:background .15s}
-  .lyr .sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:#8b93a3;transition:transform .15s,background .15s}
-  .lyr.on .sw{background:rgba(77,163,255,.35)}
+  .lyr:hover{background:light-dark(rgba(20,18,14,.03),rgba(255,255,255,.03))}
+  .lyr .sw{width:32px;height:18px;border-radius:20px;background:light-dark(#cfc8bb,#222b3a);position:relative;flex:0 0 auto;transition:background .15s}
+  .lyr .sw::after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:light-dark(#fff,#8b93a3);transition:transform .15s,background .15s}
+  .lyr.on .sw{background:light-dark(rgba(11,82,168,.8),rgba(77,163,255,.35))}
   .lyr.on .sw::after{transform:translateX(14px);background:#fff}
   .lyr .ldot{width:9px;height:9px;border-radius:50%;flex:0 0 auto}
   .lyr .lname{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -195,7 +249,7 @@
 
   /* bottom wire ticker */
   .wire{position:fixed;left:0;right:0;bottom:0;z-index:1000;height:36px;display:flex;align-items:center;
-    background:linear-gradient(180deg,transparent,rgba(5,7,11,.92));overflow:hidden}
+    background:linear-gradient(180deg,transparent,light-dark(rgba(245,243,239,.92),rgba(5,7,11,.92)));overflow:hidden}
   .wire .label{flex:0 0 auto;height:100%;display:flex;align-items:center;gap:7px;padding:0 15px;background:var(--wire);color:#fff;
     font-family:var(--mono);font-size:11px;font-weight:700;letter-spacing:2px;text-transform:uppercase;
     clip-path:polygon(0 0,100% 0,calc(100% - 11px) 100%,0 100%)}
@@ -220,8 +274,8 @@
      frame arrives, which on a click near the edge of the map drags the whole
      view. cam-dead hides the element rather than shrinking it, because a broken
      image icon on a wall screen reads as the dashboard being broken. */
-  .cam-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
-  .cam-img{display:block;width:100%;margin:7px 0 3px;border-radius:6px;background:#0b0f16;min-height:112px}
+  .cam-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px light-dark(rgba(0,0,0,.35),rgba(0,0,0,.7)))}
+  .cam-img{display:block;width:100%;margin:7px 0 3px;border-radius:6px;background:light-dark(#ebe7e0,#0b0f16);min-height:112px}
   .cam-img.cam-dead{display:none}
   .cam-raw{font-family:var(--mono);font-size:9.5px;color:var(--text-faint);word-break:break-word;margin-top:4px}
   /* Live webcam popup. Wider than the traffic one because this is video, and a
@@ -231,9 +285,9 @@
      camera src is: Leaflet builds every popup when the layer goes on, and twelve
      YouTube players booting at once because somebody flipped a switch is a
      different order of expensive than twelve JPEGs. */
-  .wc-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+  .wc-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px light-dark(rgba(0,0,0,.35),rgba(0,0,0,.7)))}
   .wc-box{position:relative;width:100%;aspect-ratio:16/9;margin:7px 0 4px;border-radius:6px;
-    overflow:hidden;background:#0b0f16;border:1px solid var(--border-soft)}
+    overflow:hidden;background:light-dark(#ebe7e0,#0b0f16);border:1px solid var(--border-soft)}
   .wc-box iframe{position:absolute;inset:0;width:100%;height:100%;border:0;display:block}
   /* Sits under the frame, so it is what shows through if the embed never paints:
      a blocked or ended stream leaves a transparent iframe, not an error page. */
@@ -241,7 +295,7 @@
     font-family:var(--mono);font-size:10px;letter-spacing:1px;text-transform:uppercase;color:var(--text-faint)}
   .wc-meta{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:3px}
   .wc-face{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;
-    color:#f472b6;background:rgba(244,114,182,.12);border:1px solid rgba(244,114,182,.3);border-radius:4px;padding:1px 5px}
+    color:light-dark(#b8236f,#f472b6);background:light-dark(rgba(184,35,111,.12),rgba(244,114,182,.12));border:1px solid light-dark(rgba(184,35,111,.3),rgba(244,114,182,.3));border-radius:4px;padding:1px 5px}
   /* Always shown, never conditional on the frame working. An embed can fail for
      reasons the catalog cannot predict, and a dead box next to a live link is a
      camera you can still watch. A dead box on its own is a bug report. */
@@ -254,19 +308,19 @@
      because they move the map rather than leaving it. */
   .wc-sibs{display:flex;align-items:center;gap:5px;flex-wrap:wrap;margin-top:5px}
   .wc-sibl{font-family:var(--mono);font-size:9px;letter-spacing:.5px;text-transform:uppercase;color:var(--text-faint)}
-  .wc-sib{font-family:var(--mono);font-size:9.5px;color:var(--text-dim);background:rgba(244,114,182,.08);
-    border:1px solid rgba(244,114,182,.28);border-radius:4px;padding:2px 6px;cursor:pointer;line-height:1.3}
-  .wc-sib:hover{color:var(--text);background:rgba(244,114,182,.18);border-color:rgba(244,114,182,.5)}
-  .wc-sib:focus-visible{outline:2px solid #f472b6;outline-offset:1px}
+  .wc-sib{font-family:var(--mono);font-size:9.5px;color:var(--text-dim);background:light-dark(rgba(184,35,111,.08),rgba(244,114,182,.08));
+    border:1px solid light-dark(rgba(184,35,111,.28),rgba(244,114,182,.28));border-radius:4px;padding:2px 6px;cursor:pointer;line-height:1.3}
+  .wc-sib:hover{color:var(--text);background:light-dark(rgba(184,35,111,.18),rgba(244,114,182,.18));border-color:light-dark(rgba(184,35,111,.5),rgba(244,114,182,.5))}
+  .wc-sib:focus-visible{outline:2px solid light-dark(#b8236f,#f472b6);outline-offset:1px}
   .veh-pop{font-family:var(--mono);font-size:11px}
-  .train-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px rgba(0,0,0,.7))}
+  .train-ico{background:transparent;border:0;filter:drop-shadow(0 1px 2px light-dark(rgba(0,0,0,.35),rgba(0,0,0,.7)))}
   /* The caveat used to float at top-centre, in the same 40px band as the toast
      stack and the priority alert, so the one line carrying legal weight was the
      line that got buried the moment anything happened. It lives in the header
      now: always on screen, never covered, and it survives the narrow breakpoint,
      which used to delete it outright. The full sentence is on the tooltip. */
   .caveat{display:inline-flex;align-items:center;font-family:var(--mono);font-size:9.5px;letter-spacing:1.4px;
-    text-transform:uppercase;color:var(--road);background:rgba(255,176,32,.10);border:1px solid rgba(255,176,32,.34);
+    text-transform:uppercase;color:var(--road);background:light-dark(rgba(168,106,0,.10),rgba(255,176,32,.10));border:1px solid light-dark(rgba(168,106,0,.34),rgba(255,176,32,.34));
     border-radius:20px;padding:4px 11px;white-space:nowrap;cursor:help}
   /* Steps down before it can push the header onto a second line. The rail and the
      layer panel are pinned at top:58px against a 53px header, so a wrapped header
@@ -319,28 +373,28 @@
      heatmap under it is just a confusing slider. */
   .pulsebar{position:fixed;left:50%;transform:translateX(-50%);bottom:162px;z-index:900;display:none;
     width:min(560px,calc(100vw - 620px));min-width:360px;background:var(--panel);backdrop-filter:blur(12px);
-    border:1px solid var(--border);border-radius:12px;padding:9px 13px 8px;box-shadow:0 10px 30px rgba(0,0,0,.5)}
+    border:1px solid var(--border);border-radius:12px;padding:9px 13px 8px;box-shadow:0 10px 30px light-dark(rgba(20,18,14,.16),rgba(0,0,0,.5))}
   .pulsebar.show{display:block}
   /* The heat canvas sits above the basemap and the vector layers. At full opacity it
      buries the street grid and the cyan Bluebikes dots, so you lose the ability to say
      WHERE the crowd is. Knocking it back keeps the roads legible underneath. */
   .leaflet-heatmap-layer{opacity:.82}
   .pb-row{display:flex;align-items:center;gap:10px}
-  .pb-row button{background:#141b26;color:var(--text-dim);border:1px solid var(--border);border-radius:7px;
+  .pb-row button{background:light-dark(#ebe7e0,#141b26);color:var(--text-dim);border:1px solid var(--border);border-radius:7px;
     font-family:var(--mono);font-size:11px;cursor:pointer;padding:0;transition:background .15s,color .15s}
-  .pb-row button:hover{background:#1c2634;color:var(--text)}
+  .pb-row button:hover{background:light-dark(#dbd5ca,#1c2634);color:var(--text)}
   .pb-play{width:28px;height:26px;flex:none;line-height:1}
   .pb-play.playing{background:#f97316;border-color:#f97316;color:#0b0d12}
   .pb-now{height:26px;flex:none;padding:0 9px;letter-spacing:1px}
-  .pb-now.live{color:var(--scanner);border-color:#1f4a3c}
+  .pb-now.live{color:var(--scanner);border-color:light-dark(#9fcdb8,#1f4a3c)}
   .pb-hour{font-family:var(--mono);font-size:11px;color:var(--text);flex:none;width:60px;text-align:right;
     font-variant-numeric:tabular-nums}
   #pbSlider{flex:1;-webkit-appearance:none;appearance:none;background:transparent;height:18px;margin:0;cursor:pointer}
   #pbSlider::-webkit-slider-runnable-track{height:4px;border-radius:3px;
-    background:linear-gradient(90deg,#1e2a3a,#3a2a1c 55%,#7c3a12)}
+    background:linear-gradient(90deg,light-dark(#e3ded5,#1e2a3a),light-dark(#f0d6bf,#3a2a1c) 55%,light-dark(#e08a4a,#7c3a12))}
   #pbSlider::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;width:14px;height:14px;border-radius:50%;
     background:#f97316;border:2px solid #0b0d12;margin-top:-5px;box-shadow:0 0 8px rgba(249,115,22,.7)}
-  #pbSlider::-moz-range-track{height:4px;border-radius:3px;background:#1e2a3a}
+  #pbSlider::-moz-range-track{height:4px;border-radius:3px;background:light-dark(#e3ded5,#1e2a3a)}
   #pbSlider::-moz-range-thumb{width:12px;height:12px;border-radius:50%;background:#f97316;border:2px solid #0b0d12}
   .pb-note{margin-top:7px;padding-top:6px;border-top:1px solid var(--border-soft);
     font-size:10px;line-height:1.45;color:var(--text-faint)}
@@ -354,33 +408,33 @@
 
   /* --- live scanner additions --- */
   .rail{bottom:158px}
-  .console{position:fixed;left:0;right:0;bottom:0;z-index:1000;height:150px;display:flex;flex-direction:column;background:linear-gradient(180deg,rgba(5,7,11,.55),rgba(5,7,11,.97) 32%);border-top:1px solid var(--border);backdrop-filter:blur(8px)}
+  .console{position:fixed;left:0;right:0;bottom:0;z-index:1000;height:150px;display:flex;flex-direction:column;background:linear-gradient(180deg,light-dark(rgba(245,243,239,.55),rgba(5,7,11,.55)),light-dark(rgba(245,243,239,.97),rgba(5,7,11,.97)) 32%);border-top:1px solid var(--border);backdrop-filter:blur(8px)}
   .console .chead{display:flex;align-items:center;gap:9px;padding:6px 16px;border-bottom:1px solid var(--border-soft)}
   .console .rec{width:9px;height:9px;border-radius:50%;background:var(--wire);animation:pulse 1.4s infinite}
   .console h3{margin:0;font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text)}
   .console .sub2{font-family:var(--mono);font-size:10px;color:var(--text-faint);margin-left:auto}
   .clog{flex:1;overflow-y:auto;padding:4px 0;font-family:var(--mono);font-size:12px;line-height:1.55}
-  .clog::-webkit-scrollbar{width:8px}.clog::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
+  .clog::-webkit-scrollbar{width:8px}.clog::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#3b4760);border-radius:8px}
   /* Same resting edge as the rail panels, mixed for the darker console floor. */
   .clog{background-repeat:no-repeat;
     background-position:center top,center bottom,center top,center bottom;
     background-size:100% 22px,100% 22px,100% 16px,100% 16px;
     background-attachment:local,local,scroll,scroll;
-    background-image:linear-gradient(rgba(5,7,11,.92),rgba(5,7,11,0)),
-      linear-gradient(rgba(5,7,11,0),rgba(5,7,11,.92)),
-      radial-gradient(farthest-side at 50% 0,rgba(0,0,0,.85),rgba(0,0,0,0)),
-      radial-gradient(farthest-side at 50% 100%,rgba(0,0,0,.85),rgba(0,0,0,0))}
+    background-image:linear-gradient(light-dark(rgba(245,243,239,.92),rgba(5,7,11,.92)),light-dark(rgba(245,243,239,0),rgba(5,7,11,0))),
+      linear-gradient(light-dark(rgba(245,243,239,0),rgba(5,7,11,0)),light-dark(rgba(245,243,239,.92),rgba(5,7,11,.92))),
+      radial-gradient(farthest-side at 50% 0,light-dark(rgba(20,18,14,.16),rgba(0,0,0,.85)),rgba(0,0,0,0)),
+      radial-gradient(farthest-side at 50% 100%,light-dark(rgba(20,18,14,.16),rgba(0,0,0,.85)),rgba(0,0,0,0))}
   .cline{padding:1px 16px;color:var(--text-dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-  .cline.hit{color:var(--text);cursor:pointer}.cline.hit:hover{background:rgba(52,211,153,.08)}
-  .cline .csrc{color:var(--scanner);font-weight:700}.cline.clear .csrc{color:#6b7280}
+  .cline.hit{color:var(--text);cursor:pointer}.cline.hit:hover{background:light-dark(rgba(13,107,69,.08),rgba(52,211,153,.08))}
+  .cline .csrc{color:var(--scanner);font-weight:700}.cline.clear .csrc{color:light-dark(#9aa0ab,#6b7280)}
   .cline .ctime{color:var(--text-faint);margin-right:8px}.cline .ctag{color:var(--road)}
   /* A pill, not a glyph. The 9px triangle was the whole audio feature to a
      reader who did not know to look for it, and it was a 9px click target to
      one who did. The pill is text-height, so the one-line row still ellipsizes
      the same, but it reads as a control and clicks like one. */
-  .cline .cplay{background:#0b0f16;border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin-right:5px;cursor:pointer;color:var(--scanner);font-size:9px;line-height:1.5;vertical-align:baseline}
+  .cline .cplay{background:light-dark(#ebe7e0,#0b0f16);border:1px solid var(--border);border-radius:9px;padding:1px 8px;margin-right:5px;cursor:pointer;color:var(--scanner);font-size:9px;line-height:1.5;vertical-align:baseline}
   .cline .cplay:hover{border-color:var(--scanner)}
-  .cline .cplay.playing{background:#0d1f19;border-color:var(--scanner)}
+  .cline .cplay.playing{background:light-dark(#e3f2ea,#0d1f19);border-color:var(--scanner)}
   .cline .cdl{color:var(--text-faint);text-decoration:none;margin-right:6px;font-size:10px}
   .cline .cdl:hover{color:var(--text-dim)}
   .radiobtn{background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-dim);font-family:var(--mono);font-size:9px;padding:1px 8px;margin-left:10px;cursor:pointer;letter-spacing:.4px}
@@ -393,36 +447,36 @@
   /* The story's own listen control on the situation card. Filled, not
      outlined, because on the rail it is the primary verb and should read as
      one press away from sound. */
-  .sit-listen{background:#0d1f19;border-color:var(--scanner);color:var(--scanner);margin-top:8px;padding:4px 11px;font-size:10px}
-  .sit-listen:hover{box-shadow:0 0 12px rgba(52,211,153,.2)}
+  .sit-listen{background:light-dark(#e3f2ea,#0d1f19);border-color:var(--scanner);color:var(--scanner);margin-top:8px;padding:4px 11px;font-size:10px}
+  .sit-listen:hover{box-shadow:0 0 12px light-dark(rgba(13,107,69,.2),rgba(52,211,153,.2))}
   .ba-listen{margin-top:10px;background:rgba(255,255,255,.08);border-color:rgba(255,255,255,.35);color:#fff;padding:5px 13px;font-size:11px}
   .ba-listen:hover{background:rgba(255,255,255,.16)}
-  .thr-beat .cplay{width:20px;height:20px;background:#0b0f16;border:1px solid var(--border);border-radius:50%;padding:0;margin:0 6px 0 0;cursor:pointer;color:var(--scanner);font-size:7px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
+  .thr-beat .cplay{width:20px;height:20px;background:light-dark(#ebe7e0,#0b0f16);border:1px solid var(--border);border-radius:50%;padding:0;margin:0 6px 0 0;cursor:pointer;color:var(--scanner);font-size:7px;display:inline-flex;align-items:center;justify-content:center;flex:0 0 auto}
   .thr-beat .cplay:hover{border-color:var(--scanner)}
-  .thr-beat .cplay.playing{background:var(--scanner);color:#06090f}
+  .thr-beat .cplay.playing{background:var(--scanner);color:light-dark(#fff,#06090f)}
   .sp-rad .cplay{background:none;border:0;padding:0 5px 0 0;cursor:pointer;color:var(--scanner);font-size:8px}
   .sp-rad .cplay.playing{color:var(--road)}
   /* The Deck. The big control earns its size: it is the one thing the desk
      asked for by name, and it should not have to be hunted. */
-  .dchain-big{display:flex;align-items:center;gap:11px;background:#0d1f19;border:1px solid var(--scanner);border-radius:8px;padding:8px 13px;margin-top:11px;cursor:pointer}
-  .dchain-big:hover{box-shadow:0 0 14px rgba(52,211,153,.18)}
-  .dcb-ico{width:30px;height:30px;border-radius:50%;background:var(--scanner);color:#06090f;display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex:0 0 auto}
+  .dchain-big{display:flex;align-items:center;gap:11px;background:light-dark(#e3f2ea,#0d1f19);border:1px solid var(--scanner);border-radius:8px;padding:8px 13px;margin-top:11px;cursor:pointer}
+  .dchain-big:hover{box-shadow:0 0 14px light-dark(rgba(13,107,69,.18),rgba(52,211,153,.18))}
+  .dcb-ico{width:30px;height:30px;border-radius:50%;background:var(--scanner);color:light-dark(#fff,#06090f);display:inline-flex;align-items:center;justify-content:center;font-size:11px;flex:0 0 auto}
   .dcb-t{display:block;font-family:var(--mono);font-size:11px;color:var(--scanner);font-weight:700;letter-spacing:.07em}
   .dcb-s{display:block;font-family:var(--mono);font-size:9.5px;color:var(--text-dim);margin-top:1px}
-  .tl-item .cplay{width:22px;height:22px;background:#0b0f16;border:1px solid var(--border);border-radius:50%;padding:0;margin-right:4px;cursor:pointer;color:var(--scanner);font-size:8px;display:inline-flex;align-items:center;justify-content:center;vertical-align:-6px}
+  .tl-item .cplay{width:22px;height:22px;background:light-dark(#ebe7e0,#0b0f16);border:1px solid var(--border);border-radius:50%;padding:0;margin-right:4px;cursor:pointer;color:var(--scanner);font-size:8px;display:inline-flex;align-items:center;justify-content:center;vertical-align:-6px}
   .tl-item .cplay:hover{border-color:var(--scanner)}
-  .tl-item .cplay.playing{background:var(--scanner);color:#06090f;border-color:var(--scanner)}
-  .tl-item.playing{background:rgba(52,211,153,.07);border-left-color:var(--scanner)}
+  .tl-item .cplay.playing{background:var(--scanner);color:light-dark(#fff,#06090f);border-color:var(--scanner)}
+  .tl-item.playing{background:light-dark(rgba(13,107,69,.07),rgba(52,211,153,.07));border-left-color:var(--scanner)}
   .tl-item .tlprog{height:2px;background:var(--border-soft);margin-top:5px;border-radius:1px;overflow:hidden}
   .tl-item .tlprog span{display:block;height:100%;width:0;background:var(--scanner)}
   .tl-item .tnoclip{display:inline-flex;align-items:center;justify-content:center;width:22px;height:14px;border:1px dashed var(--border);border-radius:7px;color:var(--text-faint);font-size:7px;margin-right:4px;vertical-align:-2px}
   .tl-item .cdl{color:var(--text-faint);text-decoration:none;margin-left:5px;font-size:10px}
   .tl-item .cdl:hover{color:var(--text-dim)}
-  .cline.playing{background:rgba(52,211,153,.08)}
+  .cline.playing{background:light-dark(rgba(13,107,69,.08),rgba(52,211,153,.08))}
   .inc-wrap{background:transparent;border:0}
   .inc-ico{width:18px;height:18px;position:relative;display:flex;align-items:center;justify-content:center}
-  .inc-ico .dot{width:9px;height:9px;border-radius:50%;background:var(--c);border:1.5px solid #06090f;box-shadow:0 0 6px var(--c)}
-  .inc-ico.cleared .dot{background:#6b7280;box-shadow:none;opacity:.75;width:7px;height:7px}
+  .inc-ico .dot{width:9px;height:9px;border-radius:50%;background:var(--c);border:1.5px solid light-dark(#fff,#06090f);box-shadow:0 0 6px var(--c)}
+  .inc-ico.cleared .dot{background:light-dark(#9aa0ab,#6b7280);box-shadow:none;opacity:.75;width:7px;height:7px}
   .inc-ico.high .dot{width:12px;height:12px}
   .inc-ico.pulse::before{content:'';position:absolute;width:9px;height:9px;border-radius:50%;background:var(--c);opacity:.55;animation:ring 1.5s ease-out infinite}
   @keyframes ring{0%{transform:scale(1);opacity:.55}100%{transform:scale(3.6);opacity:0}}
@@ -432,7 +486,7 @@
      call you opened sits next to the list you opened it from and the switches stay.
      While a priority alert is up the panel steps down out from under it. */
   .detail{--dtop:58px;--dfloor:168px;
-    position:fixed;top:var(--dtop);left:368px;width:335px;max-height:calc(100vh - var(--dtop) - var(--dfloor));z-index:1100;display:none;flex-direction:column;background:var(--panel);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 16px 50px rgba(0,0,0,.6);transition:top .22s ease,max-height .22s ease}
+    position:fixed;top:var(--dtop);left:368px;width:335px;max-height:calc(100vh - var(--dtop) - var(--dfloor));z-index:1100;display:none;flex-direction:column;background:var(--panel);backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:12px;overflow:hidden;box-shadow:0 16px 50px light-dark(rgba(20,18,14,.18),rgba(0,0,0,.6));transition:top .22s ease,max-height .22s ease}
   /* The priority alert takes a bite off the top of this column and the pulse
      scrubber takes one off the bottom, and either can be up without the other.
      Each moves its own edge through its own variable, so the two rules compose
@@ -449,15 +503,15 @@
   .detail .dclose{position:absolute;top:6px;right:7px;width:27px;height:27px;display:flex;align-items:center;
     justify-content:center;border-radius:7px;cursor:pointer;color:var(--text-dim);font-size:18px;line-height:1;
     transition:background .12s,color .12s}
-  .detail .dclose:hover{background:rgba(255,255,255,.09);color:var(--text)}
+  .detail .dclose:hover{background:light-dark(rgba(20,18,14,.08),rgba(255,255,255,.09));color:var(--text)}
   .detail .dtype{font-size:15px;font-weight:700;padding-right:34px;text-transform:capitalize}
   .detail .dloc{font-size:12px;color:var(--text-dim);margin-top:3px}
   .detail .dmeta{display:flex;align-items:center;gap:7px;margin-top:8px;flex-wrap:wrap}
-  .heli-tip{background:rgba(6,9,15,.82)!important;border:1px solid rgba(255,255,255,.18)!important;color:#fff!important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;box-shadow:0 1px 5px rgba(0,0,0,.7);white-space:nowrap;text-shadow:0 1px 2px #000}
+  .heli-tip{background:light-dark(rgba(255,253,250,.94),rgba(6,9,15,.82))!important;border:1px solid light-dark(rgba(20,18,14,.16),rgba(255,255,255,.18))!important;color:light-dark(#16181c,#fff)!important;font-size:10px;font-weight:700;padding:1px 6px;border-radius:5px;box-shadow:0 1px 5px light-dark(rgba(0,0,0,.35),rgba(0,0,0,.7));white-space:nowrap;text-shadow:0 1px 2px light-dark(rgba(0,0,0,0),#000)}
   .heli-tip:before{display:none!important}
   .pop-meta{display:flex;gap:5px;margin:7px 0 3px;flex-wrap:wrap}
   .pop-tls{margin-top:8px;border-top:1px solid var(--border-soft);padding-top:7px;max-height:140px;overflow-y:auto}
-  .pop-tls::-webkit-scrollbar{width:6px}.pop-tls::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .pop-tls::-webkit-scrollbar{width:6px}.pop-tls::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#212a3a);border-radius:8px}
   .pop-tl{font-size:11.5px;line-height:1.4;color:var(--text);margin-bottom:5px}
   .pop-tl.clear{color:var(--text-dim)}
   .pop-tlt{font-family:var(--mono);font-size:9.5px;color:var(--text-faint);margin-right:5px}
@@ -476,12 +530,12 @@
   .pop-more{margin:2px -8px 0;padding:6px 8px;font-size:11px;color:var(--scanner);cursor:pointer;font-weight:700;display:inline-block;border-radius:6px}
   .pop-more:hover{text-decoration:underline}
   .badge{font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 7px;border-radius:4px}
-  .badge.active{background:var(--scanner);color:#06090f}.badge.high{background:var(--wire);color:#fff}.badge.cleared{background:#374151;color:#cbd5e1}
+  .badge.active{background:var(--scanner);color:light-dark(#fff,#06090f)}.badge.high{background:var(--wire);color:#fff}.badge.cleared{background:light-dark(#e3ded5,#374151);color:light-dark(#575d69,#cbd5e1)}
   .dunits{font-family:var(--mono);font-size:10px;color:var(--text-faint)}
-  .dtl{flex:1;overflow-y:auto;padding:8px 0}.dtl::-webkit-scrollbar{width:8px}.dtl::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
+  .dtl{flex:1;overflow-y:auto;padding:8px 0}.dtl::-webkit-scrollbar{width:8px}.dtl::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#3b4760);border-radius:8px}
   .tl-item{padding:6px 14px 6px 8px;position:relative;border-left:2px solid var(--border);margin-left:18px}
   .tl-item::before{content:'';position:absolute;left:-5px;top:10px;width:8px;height:8px;border-radius:50%;background:var(--scanner)}
-  .tl-item.clear::before{background:#6b7280}.tl-item.onscene::before{background:var(--road)}
+  .tl-item.clear::before{background:light-dark(#9aa0ab,#6b7280)}.tl-item.onscene::before{background:var(--road)}
   .tl-item .tlt{font-family:var(--mono);font-size:10px;color:var(--text-faint)}
   .tl-item .tlx{font-size:12.5px;color:var(--text);line-height:1.35}
   .tl-item .tlsrc{font-family:var(--mono);font-size:9.5px;color:var(--scanner)}
@@ -506,25 +560,25 @@
   @media(max-width:1180px){.toast-wrap{top:auto;bottom:14px;left:auto;right:14px;transform:none;
     align-items:flex-end;max-width:min(320px,calc(100vw - 28px))}}
   @media(max-width:820px){.toast-wrap{left:10px;right:10px;bottom:10px;max-width:none;align-items:stretch}}
-  .toast{background:var(--panel-solid);border:1px solid var(--wire);border-left:4px solid var(--wire);border-radius:9px;padding:9px 14px;box-shadow:0 10px 30px rgba(0,0,0,.55);cursor:pointer;animation:toastin .3s ease-out;max-width:440px}
+  .toast{background:var(--panel-solid);border:1px solid var(--wire);border-left:4px solid var(--wire);border-radius:9px;padding:9px 14px;box-shadow:0 10px 30px light-dark(rgba(20,18,14,.16),rgba(0,0,0,.55));cursor:pointer;animation:toastin .3s ease-out;max-width:440px}
   .toast .tt{font-size:9.5px;font-family:var(--mono);letter-spacing:1px;text-transform:uppercase;color:var(--wire);font-weight:700}
   .toast .tx{font-size:13px;color:var(--text);margin-top:2px}
   @keyframes toastin{from{transform:translateY(-12px);opacity:0}to{transform:translateY(0);opacity:1}}
-  .feed-item.cleared{opacity:.5}.feed-item.cleared .pill{background:#374151 !important;color:#cbd5e1}
+  .feed-item.cleared{opacity:.5}.feed-item.cleared .pill{background:light-dark(#e3ded5,#374151) !important;color:light-dark(#575d69,#cbd5e1)}
 
   /* --- tabs (front-end / back-end) --- */
   .hud-top{z-index:1600}
-  .tabs{display:inline-flex;gap:2px;background:rgba(20,26,36,.72);border:1px solid var(--border-soft);border-radius:9px;padding:3px}
+  .tabs{display:inline-flex;gap:2px;background:light-dark(rgba(235,231,224,.8),rgba(20,26,36,.72));border:1px solid var(--border-soft);border-radius:9px;padding:3px}
   .tab{font-family:var(--mono);font-size:11px;letter-spacing:.5px;text-transform:uppercase;color:var(--text-dim);padding:5px 12px;border-radius:6px;cursor:pointer;border:0;background:transparent;white-space:nowrap}
   .tab:hover{color:var(--text)}
-  .tab.active{background:var(--scanner);color:#06090f;font-weight:700}
+  .tab.active{background:var(--scanner);color:light-dark(#fff,#06090f);font-weight:700}
   .tab .tdot{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--wire);margin-right:6px;vertical-align:middle;animation:pulse 1.8s infinite}
-  .tab.active .tdot{background:#06090f;animation:none}
+  .tab.active .tdot{background:light-dark(#fff,#06090f);animation:none}
 
   /* --- dispatch vs field role badges --- */
   .rolebadge{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 5px;border-radius:3px;vertical-align:middle;white-space:nowrap}
-  .rolebadge.dispatch{background:rgba(192,124,255,.18);color:#c07cff;border:1px solid rgba(192,124,255,.42)}
-  .rolebadge.field{background:rgba(77,163,255,.16);color:#6fb4ff;border:1px solid rgba(77,163,255,.42)}
+  .rolebadge.dispatch{background:light-dark(rgba(106,53,160,.18),rgba(192,124,255,.18));color:light-dark(#6a35a0,#c07cff);border:1px solid light-dark(rgba(106,53,160,.42),rgba(192,124,255,.42))}
+  .rolebadge.field{background:light-dark(rgba(11,82,168,.16),rgba(77,163,255,.16));color:light-dark(#0b52a8,#6fb4ff);border:1px solid light-dark(rgba(11,82,168,.42),rgba(77,163,255,.42))}
 
   /* --- stops and field contacts --- */
   /* The archive. Same shell as Stops on purpose: a reporter should not have to
@@ -532,31 +586,31 @@
   #archiveview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
   #archiveview.show{display:flex}
   .ar-wrap{flex:1;overflow-y:auto;padding:16px 22px 34px}
-  .ar-wrap::-webkit-scrollbar{width:9px}.ar-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .ar-wrap::-webkit-scrollbar{width:9px}.ar-wrap::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#212a3a);border-radius:8px}
   .ar-bar{display:flex;gap:8px;max-width:840px;margin:0 0 9px}
   .ar-more{margin:14px 0}
-  .ar-sum{margin:0 0 6px;padding:9px 11px;border-left:2px solid #2f6f4f;background:rgba(47,111,79,.09);border-radius:0 6px 6px 0}
+  .ar-sum{margin:0 0 6px;padding:9px 11px;border-left:2px solid light-dark(#8fbfa6,#2f6f4f);background:light-dark(rgba(13,107,69,.09),rgba(47,111,79,.09));border-radius:0 6px 6px 0}
   .ar-sum:empty{display:none}
-  .ar-sum-wait{color:#7c8598;font-size:12.5px}
+  .ar-sum-wait{color:light-dark(#6b7280,#7c8598);font-size:12.5px}
   .ar-sum-head{font-weight:600;margin-bottom:3px}
   .ar-sum-body{font-size:13.5px;line-height:1.45}
-  .ar-sum-unclear{margin-top:5px;font-size:12px;color:#b9a05a}
+  .ar-sum-unclear{margin-top:5px;font-size:12px;color:light-dark(#8a6d1a,#b9a05a)}
   .ar-sum-conf{font-size:11px;padding:1px 6px;border-radius:9px;margin-left:5px;vertical-align:1px}
-  .ar-conf-clear{background:#1e5b3c;color:#9fe3bd}
-  .ar-conf-likely{background:#4a4420;color:#e0d08a}
+  .ar-conf-clear{background:light-dark(#d3eedd,#1e5b3c);color:light-dark(#0d6b45,#9fe3bd)}
+  .ar-conf-likely{background:light-dark(#f6ecc4,#4a4420);color:light-dark(#7a5a10,#e0d08a)}
   .ar-partial{color:var(--road);font-size:12px}
-  .ar-conf-murky{background:#512a2a;color:#e8a9a9}
-  .ar-dl{margin-left:5px;color:#7c8598;text-decoration:none;font-size:12px}
-  .ar-dl:hover{color:#9fe3bd}
-  .ar-dlall{margin-left:8px;font:inherit;font-size:12px;background:transparent;border:1px solid #2f6f4f;color:#9fe3bd;border-radius:5px;padding:3px 9px;cursor:pointer}
+  .ar-conf-murky{background:light-dark(#f7dada,#512a2a);color:light-dark(#a3202a,#e8a9a9)}
+  .ar-dl{margin-left:5px;color:light-dark(#6b7280,#7c8598);text-decoration:none;font-size:12px}
+  .ar-dl:hover{color:light-dark(#0d6b45,#9fe3bd)}
+  .ar-dlall{margin-left:8px;font:inherit;font-size:12px;background:transparent;border:1px solid light-dark(#8fbfa6,#2f6f4f);color:light-dark(#0d6b45,#9fe3bd);border-radius:5px;padding:3px 9px;cursor:pointer}
   .ar-line.ar-ctx{opacity:.72}
-  .ar-more summary{cursor:pointer;color:var(--muted,#8b93a7);font-size:13px;padding:6px 2px}
-  .ar-input{flex:1;background:#0e1420;border:1px solid var(--border);border-radius:7px;color:var(--text);
+  .ar-more summary{cursor:pointer;color:var(--muted,light-dark(#575d69,#8b93a7));font-size:13px;padding:6px 2px}
+  .ar-input{flex:1;background:light-dark(#fffdfa,#0e1420);border:1px solid var(--border);border-radius:7px;color:var(--text);
     font-family:inherit;font-size:14px;padding:11px 13px}
-  .ar-input:focus{outline:none;border-color:var(--scanner);box-shadow:0 0 0 3px rgba(52,211,153,.12)}
-  .ar-go{background:#0d1f19;border:1px solid var(--scanner);color:var(--scanner);border-radius:7px;
+  .ar-input:focus{outline:none;border-color:var(--scanner);box-shadow:0 0 0 3px light-dark(rgba(13,107,69,.12),rgba(52,211,153,.12))}
+  .ar-go{background:light-dark(#e3f2ea,#0d1f19);border:1px solid var(--scanner);color:var(--scanner);border-radius:7px;
     font-family:var(--mono);font-size:12px;padding:0 18px;cursor:pointer}
-  .ar-go:hover{box-shadow:0 0 12px rgba(52,211,153,.2)}
+  .ar-go:hover{box-shadow:0 0 12px light-dark(rgba(13,107,69,.2),rgba(52,211,153,.2))}
   .ar-eg{display:flex;flex-wrap:wrap;gap:6px;align-items:center;font-family:var(--mono);font-size:10px;
     color:var(--text-faint);max-width:840px;margin-bottom:14px}
   .ar-chip{background:none;border:1px solid var(--border);border-radius:20px;color:var(--text-dim);
@@ -568,14 +622,14 @@
   .ar-read{font-family:var(--mono);font-size:11px;color:var(--text-dim);max-width:840px;margin-bottom:16px;line-height:1.7}
   .ar-read b{color:var(--scanner);font-weight:600}
   .ar-call{border:1px solid var(--border);border-radius:9px;margin-bottom:13px;overflow:hidden;max-width:1000px}
-  .ar-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:11px 13px;background:rgba(255,255,255,.02)}
+  .ar-head{display:flex;align-items:baseline;gap:10px;flex-wrap:wrap;padding:11px 13px;background:light-dark(rgba(20,18,14,.02),rgba(255,255,255,.02))}
   .ar-type{font-family:var(--mono);font-size:10px;text-transform:uppercase;letter-spacing:.5px;
-    background:#1b2434;border-radius:4px;padding:2px 8px;color:var(--text)}
+    background:light-dark(#e2ddd3,#1b2434);border-radius:4px;padding:2px 8px;color:var(--text)}
   .ar-where{font-size:13px;color:var(--text)}
   .ar-when{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);margin-left:auto}
   .ar-units{font-family:var(--mono);font-size:10px;color:var(--text-dim)}
   .ar-tx{padding:4px 13px 12px}
-  .ar-line{display:flex;gap:9px;align-items:flex-start;padding:4px 0;border-top:1px solid rgba(255,255,255,.04)}
+  .ar-line{display:flex;gap:9px;align-items:flex-start;padding:4px 0;border-top:1px solid light-dark(rgba(20,18,14,.04),rgba(255,255,255,.04))}
   .ar-t{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);white-space:nowrap;padding-top:2px}
   .ar-feed{font-family:var(--mono);font-size:10px;color:var(--scanner);white-space:nowrap;padding-top:2px}
   .ar-text{font-size:12.5px;line-height:1.55;color:var(--text)}
@@ -583,7 +637,7 @@
   #stopsview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
   #stopsview.show{display:flex}
   .st-wrap{flex:1;overflow-y:auto;padding:16px 22px 34px}
-  .st-wrap::-webkit-scrollbar{width:9px}.st-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .st-wrap::-webkit-scrollbar{width:9px}.st-wrap::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#212a3a);border-radius:8px}
   .st-note{font-size:11.5px;color:var(--text-dim);line-height:1.6;max-width:840px;margin:0 0 15px;border-left:2px solid var(--border);padding-left:11px}
   .st-tools{display:flex;gap:10px;align-items:center;margin-bottom:15px;flex-wrap:wrap}
   .st-find{flex:1 1 240px;max-width:380px;background:var(--panel-solid);border:1px solid var(--border);border-radius:8px;padding:8px 12px;color:var(--text);font-size:12.5px;font-family:var(--mono)}
@@ -604,7 +658,7 @@
      the biggest thing in the row and it keeps counting between polls. */
   .st-open{display:grid;grid-template-columns:repeat(auto-fill,minmax(290px,1fr));gap:10px}
   .st-live{background:var(--panel);border:1px solid var(--border);border-left:3px solid var(--scanner);border-radius:10px;padding:11px 13px;cursor:pointer;transition:border-color .15s}
-  .st-live:hover{border-color:#33405a;border-left-color:var(--scanner)}
+  .st-live:hover{border-color:light-dark(#c9c2b5,#33405a);border-left-color:var(--scanner)}
   .st-live.long{border-left-color:var(--road)}
   .st-live.vlong{border-left-color:var(--crash)}
   .st-live .top{display:flex;align-items:baseline;gap:9px}
@@ -616,21 +670,21 @@
   /* Tonight. A log, so a row rather than a card, and dense enough that a whole
      shift fits on a screen without scrolling past the thing you came for. */
   .st-row{display:flex;align-items:flex-start;gap:11px;padding:9px 12px;border-bottom:1px solid var(--border-soft);cursor:pointer;font-size:12.5px}
-  .st-row:hover{background:rgba(255,255,255,.028)}
+  .st-row:hover{background:light-dark(rgba(20,18,14,.03),rgba(255,255,255,.028))}
   .st-row .t{font-family:var(--mono);font-size:11px;color:var(--text-faint);width:52px;flex:0 0 auto;padding-top:1px}
   .st-row .u{font-family:var(--mono);font-size:11.5px;font-weight:600;width:74px;flex:0 0 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
   .st-row .dur{font-family:var(--mono);font-size:11px;width:48px;flex:0 0 auto;text-align:right;color:var(--text-dim)}
   .st-row .body{flex:1;min-width:0;line-height:1.45}
   .st-row .who{color:var(--text)}
   .st-row .sub{color:var(--text-faint);font-size:11px;margin-top:2px}
-  .st-plate{font-family:var(--mono);font-size:11px;background:rgba(255,176,32,.13);border:1px solid rgba(255,176,32,.4);color:var(--road);border-radius:4px;padding:1px 5px;letter-spacing:.5px;white-space:nowrap}
-  .st-name{font-family:var(--mono);font-size:11.5px;color:#e9edf4;border-bottom:1px dotted #46536b}
+  .st-plate{font-family:var(--mono);font-size:11px;background:light-dark(rgba(168,106,0,.13),rgba(255,176,32,.13));border:1px solid light-dark(rgba(168,106,0,.4),rgba(255,176,32,.4));color:var(--road);border-radius:4px;padding:1px 5px;letter-spacing:.5px;white-space:nowrap}
+  .st-name{font-family:var(--mono);font-size:11.5px;color:light-dark(#16181c,#e9edf4);border-bottom:1px dotted light-dark(#b9b1a2,#46536b)}
   .st-tag{font-family:var(--mono);font-size:9px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;border-radius:3px;padding:1px 5px;white-space:nowrap;vertical-align:middle}
-  .st-tag.arrest{background:rgba(255,77,77,.16);border:1px solid rgba(255,77,77,.45);color:#ff7b7b}
-  .st-tag.tow,.st-tag.summons,.st-tag.citation{background:rgba(255,176,32,.13);border:1px solid rgba(255,176,32,.4);color:var(--road)}
-  .st-tag.warning,.st-tag.none{background:rgba(154,164,182,.11);border:1px solid #2c3547;color:var(--text-dim)}
-  .st-tag.flag{background:rgba(192,124,255,.16);border:1px solid rgba(192,124,255,.42);color:var(--alert)}
-  .st-tag.stale{background:rgba(95,106,126,.13);border:1px solid #2c3547;color:var(--text-faint)}
+  .st-tag.arrest{background:light-dark(rgba(200,16,46,.16),rgba(255,77,77,.16));border:1px solid light-dark(rgba(200,16,46,.45),rgba(255,77,77,.45));color:light-dark(#a3202a,#ff7b7b)}
+  .st-tag.tow,.st-tag.summons,.st-tag.citation{background:light-dark(rgba(168,106,0,.13),rgba(255,176,32,.13));border:1px solid light-dark(rgba(168,106,0,.4),rgba(255,176,32,.4));color:var(--road)}
+  .st-tag.warning,.st-tag.none{background:light-dark(rgba(87,93,105,.1),rgba(154,164,182,.11));border:1px solid light-dark(#d3ccbf,#2c3547);color:var(--text-dim)}
+  .st-tag.flag{background:light-dark(rgba(106,53,160,.16),rgba(192,124,255,.16));border:1px solid light-dark(rgba(106,53,160,.42),rgba(192,124,255,.42));color:var(--alert)}
+  .st-tag.stale{background:light-dark(rgba(138,143,154,.15),rgba(95,106,126,.13));border:1px solid light-dark(#d3ccbf,#2c3547);color:var(--text-faint)}
   .st-empty{color:var(--text-faint);font-size:12px;padding:14px 2px;font-style:italic}
 
   /* The tape, under a row that has been opened. A name is not going anywhere
@@ -648,7 +702,7 @@
   #backend{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
   #backend.show{display:flex}
   .be-wrap{flex:1;overflow-y:auto;padding:16px 22px 34px}
-  .be-wrap::-webkit-scrollbar{width:9px}.be-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .be-wrap::-webkit-scrollbar{width:9px}.be-wrap::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#212a3a);border-radius:8px}
   .be-h{font-family:var(--mono);font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--text-faint);margin:18px 0 10px}
   .be-h:first-child{margin-top:0}
   .be-flow{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px}
@@ -660,20 +714,20 @@
   .be-card .v{font-size:22px;font-weight:700;margin-top:3px;font-family:var(--mono)}
   .be-feeds{display:flex;gap:9px;flex-wrap:wrap}
   .be-feed{display:flex;align-items:center;gap:8px;background:var(--panel);border:1px solid var(--border);border-radius:8px;padding:7px 11px;font-size:12px}
-  .be-feed .fdot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:#6b7280}
+  .be-feed .fdot{width:8px;height:8px;border-radius:50%;flex:0 0 auto;background:light-dark(#9aa0ab,#6b7280)}
   .be-feed.live .fdot{background:var(--scanner);box-shadow:0 0 7px var(--scanner)}
   /* Audio arriving, channel simply quiet. Same green family as live so it reads as
      healthy, dimmed and unglowing so the two are still tellable apart at a glance. */
-  .be-feed.connected .fdot{background:#1c7a5e;box-shadow:0 0 0 1px rgba(52,211,153,.35)}
+  .be-feed.connected .fdot{background:light-dark(#2f8f6a,#1c7a5e);box-shadow:0 0 0 1px light-dark(rgba(13,107,69,.35),rgba(52,211,153,.35))}
   /* Its own keyframe on purpose. These two used the shared `pulse`, whose halo is
      rgba(255,59,48,.55), so a feed that was merely dialling sat there flashing alarm
      red. Four of those after a restart is why the whole panel read as an outage. */
   .be-feed.connecting .fdot,.be-feed.reconnecting .fdot{background:var(--road);animation:fdot-wait 1.8s infinite}
-  @keyframes fdot-wait{0%{box-shadow:0 0 0 0 rgba(255,176,32,.5)}70%{box-shadow:0 0 0 7px rgba(255,176,32,0)}100%{box-shadow:0 0 0 0 rgba(255,176,32,0)}}
+  @keyframes fdot-wait{0%{box-shadow:0 0 0 0 light-dark(rgba(168,106,0,.5),rgba(255,176,32,.5))}70%{box-shadow:0 0 0 7px light-dark(rgba(168,106,0,0),rgba(255,176,32,0))}100%{box-shadow:0 0 0 0 light-dark(rgba(168,106,0,0),rgba(255,176,32,0))}}
   .be-feed.offline .fdot{background:var(--crash)}
   .be-feed .fmeta{font-family:var(--mono);font-size:10px;color:var(--text-faint)}
-  .be-ev{border:1px solid var(--border-soft);border-radius:9px;margin-bottom:9px;overflow:hidden;background:rgba(14,18,26,.5)}
-  .be-ev-top{display:flex;align-items:center;gap:9px;padding:8px 12px;background:rgba(255,255,255,.02);flex-wrap:wrap}
+  .be-ev{border:1px solid var(--border-soft);border-radius:9px;margin-bottom:9px;overflow:hidden;background:light-dark(rgba(255,253,250,.6),rgba(14,18,26,.5))}
+  .be-ev-top{display:flex;align-items:center;gap:9px;padding:8px 12px;background:light-dark(rgba(20,18,14,.02),rgba(255,255,255,.02));flex-wrap:wrap}
   .be-ev-top .etime{font-family:var(--mono);font-size:10px;color:var(--text-faint)}
   .be-ev-top .efeed{font-family:var(--mono);font-size:10px;font-weight:700;color:var(--scanner);text-transform:uppercase}
   .be-ev-top .eby{font-family:var(--mono);font-size:8.5px;color:var(--text-faint);border:1px solid var(--border-soft);border-radius:3px;padding:0 4px;text-transform:uppercase;margin-left:auto}
@@ -693,7 +747,7 @@
   #audioview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
   #audioview.show{display:flex}
   .av-wrap{flex:1;overflow-y:auto;padding:18px 24px 34px;max-width:960px;margin:0 auto;width:100%}
-  .av-wrap::-webkit-scrollbar{width:9px}.av-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .av-wrap::-webkit-scrollbar{width:9px}.av-wrap::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#212a3a);border-radius:8px}
   .av-bar{display:flex;gap:10px;align-items:center;margin:10px 0 16px;flex-wrap:wrap}
   .av-out{display:flex;flex-direction:column;gap:14px}
   .av-feed{margin-bottom:18px}
@@ -712,23 +766,23 @@
   #shiftview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
   #shiftview.show{display:flex}
   .sc-wrap{flex:1;overflow-y:auto;padding:20px 26px 34px;max-width:860px;margin:0 auto;width:100%}
-  .sc-wrap::-webkit-scrollbar{width:9px}.sc-wrap::-webkit-scrollbar-thumb{background:#212a3a;border-radius:8px}
+  .sc-wrap::-webkit-scrollbar{width:9px}.sc-wrap::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#212a3a);border-radius:8px}
   .sc-top{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:6px}
   .sc-top h1{font-family:var(--serif);font-size:24px;font-weight:700;letter-spacing:-.01em}
   .sc-win{font-family:var(--mono);font-size:12px;color:var(--text-dim)}
   .sc-switch{margin-left:auto;display:flex;background:var(--panel-solid);border:1px solid var(--border);border-radius:8px;overflow:hidden}
   .sc-switch button{font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--text-dim);background:none;border:0;padding:7px 16px;cursor:pointer;text-transform:uppercase}
-  .sc-switch button.on{background:var(--scanner);color:#05070b;font-weight:600}
-  .sc-switch button:hover:not(.on){background:rgba(255,255,255,.04);color:var(--text)}
+  .sc-switch button.on{background:var(--scanner);color:light-dark(#fff,#05070b);font-weight:600}
+  .sc-switch button:hover:not(.on){background:light-dark(rgba(20,18,14,.04),rgba(255,255,255,.04));color:var(--text)}
   .sc-lead{font-family:var(--serif);font-size:15px;line-height:1.6;border-left:3px solid var(--wire);padding:2px 0 2px 14px;margin:8px 0 20px;color:var(--text)}
   .sc-sect{margin-bottom:18px}
   .sc-sect-head{display:flex;align-items:baseline;gap:10px;padding-bottom:7px;border-bottom:1px solid var(--border);margin-bottom:2px}
   .sc-sect-head h2{font-family:var(--mono);font-size:11.5px;font-weight:600;letter-spacing:2px;text-transform:uppercase}
   .sc-sect-head .n{font-family:var(--mono);font-size:10.5px;color:var(--text-faint)}
-  .sc-sect-head.crit h2{color:var(--crash)} .sc-sect-head.crit{border-bottom-color:rgba(255,77,77,.3)}
-  .sc-sect-head.fire h2{color:var(--fire)} .sc-sect-head.fire{border-bottom-color:rgba(255,140,66,.3)}
-  .sc-sect-head.chase h2{color:var(--transit)} .sc-sect-head.chase{border-bottom-color:rgba(77,163,255,.3)}
-  .sc-sect-head.odd h2{color:var(--alert)} .sc-sect-head.odd{border-bottom-color:rgba(192,124,255,.3)}
+  .sc-sect-head.crit h2{color:var(--crash)} .sc-sect-head.crit{border-bottom-color:light-dark(rgba(200,16,46,.3),rgba(255,77,77,.3))}
+  .sc-sect-head.fire h2{color:var(--fire)} .sc-sect-head.fire{border-bottom-color:light-dark(rgba(194,65,12,.3),rgba(255,140,66,.3))}
+  .sc-sect-head.chase h2{color:var(--transit)} .sc-sect-head.chase{border-bottom-color:light-dark(rgba(11,82,168,.3),rgba(77,163,255,.3))}
+  .sc-sect-head.odd h2{color:var(--alert)} .sc-sect-head.odd{border-bottom-color:light-dark(rgba(106,53,160,.3),rgba(192,124,255,.3))}
   .sc-item{padding:12px 0 14px;border-bottom:1px solid var(--border-soft)}
   .sc-item:last-child{border-bottom:0}
   .sc-item-top{display:flex;align-items:baseline;gap:9px}
@@ -741,18 +795,18 @@
   .sc-meta{display:flex;gap:7px;flex-wrap:wrap;margin:7px 0 0 27px}
   .sc-chip{font-family:var(--mono);font-size:10px;letter-spacing:.5px;padding:2px 8px;border-radius:4px}
   .sc-chip.sev4{background:var(--wire);color:#fff;font-weight:700}
-  .sc-chip.sev3{background:rgba(255,176,32,.18);color:var(--road);border:1px solid rgba(255,176,32,.3)}
-  .sc-chip.sev2{background:rgba(77,163,255,.12);color:var(--transit);border:1px solid rgba(77,163,255,.2)}
-  .sc-chip.play{background:rgba(52,211,153,.12);color:var(--scanner);border:1px solid rgba(52,211,153,.25);cursor:pointer}
-  .sc-chip.play:hover{background:rgba(52,211,153,.25)}
-  .sc-chip.src{background:rgba(255,255,255,.04);color:var(--text-dim);border:1px solid var(--border)}
+  .sc-chip.sev3{background:light-dark(rgba(168,106,0,.18),rgba(255,176,32,.18));color:var(--road);border:1px solid light-dark(rgba(168,106,0,.3),rgba(255,176,32,.3))}
+  .sc-chip.sev2{background:light-dark(rgba(11,82,168,.12),rgba(77,163,255,.12));color:var(--transit);border:1px solid light-dark(rgba(11,82,168,.2),rgba(77,163,255,.2))}
+  .sc-chip.play{background:light-dark(rgba(13,107,69,.12),rgba(52,211,153,.12));color:var(--scanner);border:1px solid light-dark(rgba(13,107,69,.25),rgba(52,211,153,.25));cursor:pointer}
+  .sc-chip.play:hover{background:light-dark(rgba(13,107,69,.25),rgba(52,211,153,.25))}
+  .sc-chip.src{background:light-dark(rgba(20,18,14,.04),rgba(255,255,255,.04));color:var(--text-dim);border:1px solid var(--border)}
   .sc-foot{margin-top:24px;padding-top:14px;border-top:2px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text-faint);line-height:1.7}
   .sc-empty{padding:40px 0;text-align:center;color:var(--text-faint);font-style:italic}
 
   /* --- desk-editor SITUATIONS (the smart layer) --- */
   .rail{top:58px}
-  .sit-head{background:linear-gradient(90deg,rgba(192,124,255,.14),transparent)}
-  .sit-head h2{color:#d6b3ff}
+  .sit-head{background:linear-gradient(90deg,light-dark(rgba(106,53,160,.14),rgba(192,124,255,.14)),transparent)}
+  .sit-head h2{color:light-dark(#6a35a0,#d6b3ff)}
   /* 40% cut the third situation card in half on a laptop, headline showing and
      summary gone, which reads as a finished card rather than a truncated one. */
   /* 48% -> 62%: the State Police rail underneath is gone, and the situations
@@ -765,18 +819,18 @@
      the breakpoint block: both rules weigh the same, and a media query adds nothing
      to that, so the only thing separating them is which one is written last. */
   @media(max-width:820px){.sit-body{max-height:none}}
-  .sit-body::-webkit-scrollbar{width:8px}.sit-body::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
-  .sit-body::-webkit-scrollbar-thumb:hover{background:#4d5b78}
+  .sit-body::-webkit-scrollbar{width:8px}.sit-body::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#3b4760);border-radius:8px}
+  .sit-body::-webkit-scrollbar-thumb:hover{background:light-dark(#b9b1a2,#4d5b78)}
   .sit{padding:10px 14px;border-bottom:1px solid var(--border-soft);cursor:pointer;transition:background .12s}
-  .sit:hover{background:rgba(192,124,255,.06)}
+  .sit:hover{background:light-dark(rgba(106,53,160,.06),rgba(192,124,255,.06))}
   .sit.high{border-left:3px solid var(--wire)}
   .sit-top{display:flex;align-items:center;gap:7px;margin-bottom:4px}
-  .sit-type{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 6px;border-radius:4px;background:#2a3346;color:#c9d4e6}
+  .sit-type{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 6px;border-radius:4px;background:light-dark(#e3ded5,#2a3346);color:light-dark(#2b2f36,#c9d4e6)}
   .sit.high .sit-type{background:var(--wire);color:#fff}
   .sit-status{font-family:var(--mono);font-size:9px;color:var(--text-faint);margin-left:auto;text-transform:uppercase}
-  .sit-head-line{font-size:13px;font-weight:600;line-height:1.3;color:#fff}
+  .sit-head-line{font-size:13px;font-weight:600;line-height:1.3;color:light-dark(#16181c,#fff)}
   .sit-sum{font-size:11.5px;color:var(--text-dim);line-height:1.4;margin-top:3px}
-  .sit-loc{font-family:var(--mono);font-size:10px;color:#b39ddb;margin-top:4px}
+  .sit-loc{font-family:var(--mono);font-size:10px;color:light-dark(#7c4dab,#b39ddb);margin-top:4px}
   .sit-loc::before{content:"\25CE  "}
 
   /* --- story threads (#190) ---
@@ -787,11 +841,11 @@
      column at all: the rail budget is unchanged on every poll where nobody has
      pressed anything, and it only borrows a line from the live feed while a
      sentence is actually up. */
-  .desk-say{max-height:0;overflow:hidden;font-size:11px;line-height:1.35;color:#d6b3ff;
-    background:rgba(192,124,255,.10);border-left:2px solid #c07cff;padding:0 12px;
+  .desk-say{max-height:0;overflow:hidden;font-size:11px;line-height:1.35;color:light-dark(#6a35a0,#d6b3ff);
+    background:light-dark(rgba(106,53,160,.10),rgba(192,124,255,.10));border-left:2px solid light-dark(#6a35a0,#c07cff);padding:0 12px;
     transition:max-height .12s ease,padding .12s ease}
   .desk-say.show{max-height:64px;padding:6px 12px}
-  .desk-say.bad{color:#ffb3b3;background:rgba(255,59,48,.10);border-left-color:var(--wire)}
+  .desk-say.bad{color:light-dark(#8f1a1a,#ffb3b3);background:light-dark(rgba(179,38,30,.10),rgba(255,59,48,.10));border-left-color:var(--wire)}
   /* The chip is the handle for the whole card: it says how many beats are on it
      and pressing it is what puts the beats and the desk controls on screen. It
      is sized off the type row it sits in rather than given a height of its own,
@@ -800,13 +854,13 @@
   .thr-chip{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.4px;
     padding:1px 6px;border-radius:4px;border:1px solid var(--border);background:transparent;
     color:var(--text-faint);cursor:pointer}
-  .thr-chip:hover{border-color:#c07cff;color:#d6b3ff}
-  .thr-chip.many{border-color:#6b4a8f;color:#c9a6ef}
-  .sit.open .thr-chip{background:rgba(192,124,255,.18);border-color:#c07cff;color:#e6d0ff}
+  .thr-chip:hover{border-color:light-dark(#6a35a0,#c07cff);color:light-dark(#6a35a0,#d6b3ff)}
+  .thr-chip.many{border-color:light-dark(#b39ddb,#6b4a8f);color:light-dark(#6a35a0,#c9a6ef)}
+  .sit.open .thr-chip{background:light-dark(rgba(106,53,160,.18),rgba(192,124,255,.18));border-color:light-dark(#6a35a0,#c07cff);color:light-dark(#55308a,#e6d0ff)}
   /* The one line a folded thread owes the room: what has happened on it since
      the headline was written. Two lines is the cap, because the card above it is
      already a summary and this is a footnote on the summary. */
-  .thr-last{font-size:11px;color:#c9a6ef;margin-top:5px;font-style:italic;
+  .thr-last{font-size:11px;color:light-dark(#6a35a0,#c9a6ef);margin-top:5px;font-style:italic;
     display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
   .thr{margin-top:8px;border-top:1px solid var(--border-soft);padding-top:6px}
   .thr-more{font-family:var(--mono);font-size:9px;color:var(--text-faint);margin-bottom:5px}
@@ -817,116 +871,116 @@
      one rule, so a thread carrying a mix of the two does not read as a ragged
      right edge with a fault somewhere in it. */
   .thr-pull{font-family:var(--mono);font-size:9px;flex:0 0 auto;text-align:right;
-    background:transparent;border:0;padding:0;cursor:pointer;color:#8fb6ff}
-  .thr-pull:hover{color:#bcd4ff;text-decoration:underline}
+    background:transparent;border:0;padding:0;cursor:pointer;color:light-dark(#0b52a8,#8fb6ff)}
+  .thr-pull:hover{color:light-dark(#003DA5,#bcd4ff);text-decoration:underline}
   .thr-pull.off{color:var(--text-faint);cursor:help;font-style:italic}
   .sit-acts{display:flex;gap:6px;margin-top:8px}
   .sit-acts button{flex:1;font-family:var(--mono);font-size:9px;padding:4px 2px;cursor:pointer;
-    background:#232b3b;border:1px solid var(--border);border-radius:5px;color:#c9d4e6}
-  .sit-acts button:hover{background:#2d3852;border-color:#c07cff;color:#fff}
+    background:light-dark(#ebe7e0,#232b3b);border:1px solid var(--border);border-radius:5px;color:light-dark(#2b2f36,#c9d4e6)}
+  .sit-acts button:hover{background:light-dark(#dbd5ca,#2d3852);border-color:light-dark(#6a35a0,#c07cff);color:light-dark(#16181c,#fff)}
   /* Arming a fold changes what a plain click on every other card means, so the
      column has to look different while it is armed or the next click is a
      surprise. The armed card is the one that will move. Everything else is
      somewhere it can go, and says so under the cursor rather than in a line of
      its own, because eight copies of the same sentence in a 340px column is not
      eight times the guidance. */
-  .sit.armed{background:rgba(192,124,255,.14);outline:1px dashed #c07cff;outline-offset:-2px}
-  .sit.target:hover,.sit.target:focus{background:rgba(143,182,255,.12);outline:1px solid #8fb6ff;outline-offset:-2px}
+  .sit.armed{background:light-dark(rgba(106,53,160,.14),rgba(192,124,255,.14));outline:1px dashed light-dark(#6a35a0,#c07cff);outline-offset:-2px}
+  .sit.target:hover,.sit.target:focus{background:light-dark(rgba(11,82,168,.1),rgba(143,182,255,.12));outline:1px solid light-dark(#0b52a8,#8fb6ff);outline-offset:-2px}
   #situations.arming .sit{cursor:copy}
   .llm-row{display:flex;gap:9px;align-items:baseline;padding:3px 0;font-size:11.5px;font-family:var(--mono)}
-  .llm-row .r{flex:0 0 92px;color:#9aa3b5}
-  .llm-row .m{flex:1 1 auto;color:#5f8fbf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .llm-row .d{flex:0 0 54px;text-align:right;color:#6d7488}
-  .llm-row.bad .r{color:#e8a9a9}
-  .llm-why{font-size:11px;color:#e8a9a9;padding:0 0 4px 101px;font-family:var(--mono);word-break:break-word}
-  .llm-ok{color:#9fe3bd}
-  .llm-bad{color:#e8a9a9}
+  .llm-row .r{flex:0 0 92px;color:light-dark(#575d69,#9aa3b5)}
+  .llm-row .m{flex:1 1 auto;color:light-dark(#2c5f8f,#5f8fbf);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .llm-row .d{flex:0 0 54px;text-align:right;color:light-dark(#8a8f9a,#6d7488)}
+  .llm-row.bad .r{color:light-dark(#a3202a,#e8a9a9)}
+  .llm-why{font-size:11px;color:light-dark(#a3202a,#e8a9a9);padding:0 0 4px 101px;font-family:var(--mono);word-break:break-word}
+  .llm-ok{color:light-dark(#0d6b45,#9fe3bd)}
+  .llm-bad{color:light-dark(#a3202a,#e8a9a9)}
   #bezos{cursor:pointer}
-  #bezos:hover{border-color:#2f6f4f}
+  #bezos:hover{border-color:light-dark(#8fbfa6,#2f6f4f)}
   #deskPanel{position:fixed;right:14px;bottom:212px;z-index:1101;width:min(430px,calc(100vw - 28px));
     /* Sized against the space that actually exists. The panel is docked
      212px off the bottom, so a flat 78vh runs off the top of the screen on
      a laptop and clips at the other end instead. clamp keeps it usable on a
      short window and stops it colliding with the header on a tall one. */
-    max-height:clamp(240px,calc(100vh - 300px),760px);display:none;flex-direction:column;background:rgba(12,16,23,.97);
-    border:1px solid var(--border);border-radius:14px;box-shadow:0 18px 48px rgba(0,0,0,.6);
+    max-height:clamp(240px,calc(100vh - 300px),760px);display:none;flex-direction:column;background:light-dark(rgba(255,253,250,.97),rgba(12,16,23,.97));
+    border:1px solid var(--border);border-radius:14px;box-shadow:0 18px 48px light-dark(rgba(20,18,14,.18),rgba(0,0,0,.6));
     backdrop-filter:blur(10px);overflow:hidden}
   #deskPanel.show{display:flex}
   .dp-head{display:flex;align-items:center;gap:9px;padding:10px 12px;border-bottom:1px solid var(--border-soft)}
-  .dp-head h2{margin:0;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:#cfd6e4}
-  .dp-dot{width:7px;height:7px;border-radius:50%;background:#3fbf7f;box-shadow:0 0 8px #3fbf7f}
-  .dp-head select{margin-left:auto;font:inherit;font-size:11px;background:#161c27;color:#9aa3b5;
+  .dp-head h2{margin:0;font-size:12px;letter-spacing:1.4px;text-transform:uppercase;color:light-dark(#2b2f36,#cfd6e4)}
+  .dp-dot{width:7px;height:7px;border-radius:50%;background:light-dark(#0d6b45,#3fbf7f);box-shadow:0 0 8px light-dark(#0d6b45,#3fbf7f)}
+  .dp-head select{margin-left:auto;font:inherit;font-size:11px;background:light-dark(#ebe7e0,#161c27);color:light-dark(#575d69,#9aa3b5);
     border:1px solid var(--border-soft);border-radius:6px;padding:2px 6px}
-  .dp-head button{background:transparent;border:0;color:#7c8598;font-size:19px;line-height:1;cursor:pointer;padding:0 2px}
+  .dp-head button{background:transparent;border:0;color:light-dark(#6b7280,#7c8598);font-size:19px;line-height:1;cursor:pointer;padding:0 2px}
   .dp-ask{display:flex;gap:6px;padding:9px 12px 4px}
-  .dp-ask input{flex:1 1 auto;font:inherit;font-size:12.5px;background:#141a24;color:#e7ebf2;
+  .dp-ask input{flex:1 1 auto;font:inherit;font-size:12.5px;background:light-dark(#fffdfa,#141a24);color:light-dark(#16181c,#e7ebf2);
     border:1px solid var(--border-soft);border-radius:7px;padding:6px 9px;min-width:0}
-  .dp-ask input::placeholder{color:#5f6878}
-  .dp-ask button{font:inherit;font-size:12px;background:transparent;border:1px solid #2f6f4f;
-    color:#9fe3bd;border-radius:7px;padding:6px 12px;cursor:pointer}
+  .dp-ask input::placeholder{color:light-dark(#9aa0ab,#5f6878)}
+  .dp-ask button{font:inherit;font-size:12px;background:transparent;border:1px solid light-dark(#8fbfa6,#2f6f4f);
+    color:light-dark(#0d6b45,#9fe3bd);border-radius:7px;padding:6px 12px;cursor:pointer}
   .dp-ask button[disabled]{opacity:.5;cursor:default}
-  .dp-answer{padding:2px 13px 0;font-size:13.5px;line-height:1.5;color:#e7ebf2}
+  .dp-answer{padding:2px 13px 0;font-size:13.5px;line-height:1.5;color:light-dark(#16181c,#e7ebf2)}
   .dp-answer:empty{display:none}
-  .dp-answer .a{border-left:2px solid #2f6f4f;background:rgba(47,111,79,.10);
+  .dp-answer .a{border-left:2px solid light-dark(#8fbfa6,#2f6f4f);background:light-dark(rgba(13,107,69,.10),rgba(47,111,79,.10));
     padding:9px 11px;border-radius:0 7px 7px 0;margin:6px 0 2px}
-  .dp-answer .src{font-size:11px;color:#6d7488;font-family:var(--mono);padding:3px 0 6px}
+  .dp-answer .src{font-size:11px;color:light-dark(#8a8f9a,#6d7488);font-family:var(--mono);padding:3px 0 6px}
   .a-hear{display:flex;gap:8px;align-items:center;margin-top:9px;flex-wrap:wrap}
-  .a-chain{font:inherit;font-size:12px;background:rgba(47,111,79,.2);border:1px solid #2f6f4f;
-    color:#9fe3bd;border-radius:7px;padding:5px 12px;cursor:pointer}
-  .a-chain:hover{background:rgba(47,111,79,.34)}
-  .a-only{font:inherit;font-size:11.5px;background:transparent;border:0;color:#7c8598;cursor:pointer;padding:0}
-  .a-only:hover{color:#cfd6e4}
-  .a-none{margin-top:8px;font-size:11.5px;color:#c8b56a}
-  .dp-read{padding:12px 13px;font-size:13.5px;line-height:1.5;color:#e7ebf2}
-  .dp-read.quiet{color:#9aa3b5}
-  .dp-watch{margin-top:8px;font-size:12px;color:#9fe3bd;line-height:1.9}
-  .w-chip{font:inherit;font-size:12px;background:rgba(47,111,79,.16);border:1px solid #2f6f4f;
-    color:#9fe3bd;border-radius:20px;padding:2px 10px;cursor:pointer;text-align:left}
-  .w-chip:hover{background:rgba(47,111,79,.3)}
+  .a-chain{font:inherit;font-size:12px;background:light-dark(rgba(13,107,69,.2),rgba(47,111,79,.2));border:1px solid light-dark(#8fbfa6,#2f6f4f);
+    color:light-dark(#0d6b45,#9fe3bd);border-radius:7px;padding:5px 12px;cursor:pointer}
+  .a-chain:hover{background:light-dark(rgba(13,107,69,.34),rgba(47,111,79,.34))}
+  .a-only{font:inherit;font-size:11.5px;background:transparent;border:0;color:light-dark(#6b7280,#7c8598);cursor:pointer;padding:0}
+  .a-only:hover{color:light-dark(#2b2f36,#cfd6e4)}
+  .a-none{margin-top:8px;font-size:11.5px;color:light-dark(#8a6d1a,#c8b56a)}
+  .dp-read{padding:12px 13px;font-size:13.5px;line-height:1.5;color:light-dark(#16181c,#e7ebf2)}
+  .dp-read.quiet{color:light-dark(#575d69,#9aa3b5)}
+  .dp-watch{margin-top:8px;font-size:12px;color:light-dark(#0d6b45,#9fe3bd);line-height:1.9}
+  .w-chip{font:inherit;font-size:12px;background:light-dark(rgba(13,107,69,.16),rgba(47,111,79,.16));border:1px solid light-dark(#8fbfa6,#2f6f4f);
+    color:light-dark(#0d6b45,#9fe3bd);border-radius:20px;padding:2px 10px;cursor:pointer;text-align:left}
+  .w-chip:hover{background:light-dark(rgba(13,107,69,.3),rgba(47,111,79,.3))}
   .w-n{opacity:.75;font-size:10.5px;font-family:var(--mono)}
   .w-flat{opacity:.75}
   .dp-focus{display:flex;gap:8px;padding:7px 13px;border-bottom:1px solid var(--border-soft);align-items:center}
-  .dp-back{font:inherit;font-size:11.5px;background:transparent;border:0;color:#7c8598;cursor:pointer;padding:0}
-  .dp-back:hover{color:#cfd6e4}
-  .dp-chain{font:inherit;font-size:11.5px;background:transparent;border:1px solid #2f6f4f;
-    color:#9fe3bd;border-radius:6px;padding:3px 10px;cursor:pointer;margin-left:auto}
+  .dp-back{font:inherit;font-size:11.5px;background:transparent;border:0;color:light-dark(#6b7280,#7c8598);cursor:pointer;padding:0}
+  .dp-back:hover{color:light-dark(#2b2f36,#cfd6e4)}
+  .dp-chain{font:inherit;font-size:11.5px;background:transparent;border:1px solid light-dark(#8fbfa6,#2f6f4f);
+    color:light-dark(#0d6b45,#9fe3bd);border-radius:6px;padding:3px 10px;cursor:pointer;margin-left:auto}
   /* A chip the floor scored a story or better. Not a colour the model can
      ask for: it is set from lib/severity.js, the same arithmetic that decides
      what reaches Situations, so the rail and this panel cannot disagree about
      how big something is. */
-  .w-chip.hot{border-color:#8a5a2a;background:rgba(138,90,42,.16);color:#f0c98a}
+  .w-chip.hot{border-color:light-dark(#d9a870,#8a5a2a);background:light-dark(rgba(217,168,112,.25),rgba(138,90,42,.16));color:light-dark(#7a4a10,#f0c98a)}
   .w-sev{font-family:var(--mono);font-size:9px;letter-spacing:.1em;text-transform:uppercase;
-    color:#f0a95a;border:1px solid #8a5a2a;border-radius:5px;padding:0 4px;margin-right:2px}
-  .dp-unsure{margin-top:6px;font-size:11.5px;color:#c8b56a}
-  .dp-meta{padding:0 13px 9px;font-size:11px;color:#6d7488;font-family:var(--mono)}
+    color:light-dark(#9a5a10,#f0a95a);border:1px solid light-dark(#d9a870,#8a5a2a);border-radius:5px;padding:0 4px;margin-right:2px}
+  .dp-unsure{margin-top:6px;font-size:11.5px;color:light-dark(#8a6d1a,#c8b56a)}
+  .dp-meta{padding:0 13px 9px;font-size:11px;color:light-dark(#8a8f9a,#6d7488);font-family:var(--mono)}
   /* The scroller. min-height:0 is the whole fix: a flex child will not shrink
      below its content without it, so the box grew past the panel and the
      panel's overflow:hidden cut it off rather than letting it scroll. */
-  .a-sample{margin-top:6px;padding:6px 8px;border-left:2px solid var(--road);background:rgba(255,176,0,.07);color:var(--text-dim);font-size:12px;line-height:1.45}
+  .a-sample{margin-top:6px;padding:6px 8px;border-left:2px solid var(--road);background:light-dark(rgba(168,106,0,.08),rgba(255,176,0,.07));color:var(--text-dim);font-size:12px;line-height:1.45}
   .dp-scroll{flex:1 1 auto;min-height:0;overflow-y:auto;overscroll-behavior:contain}
   .dp-scroll::-webkit-scrollbar{width:8px}
-  .dp-scroll::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
-  .dp-scroll::-webkit-scrollbar-thumb:hover{background:#4d5b78}
+  .dp-scroll::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#3b4760);border-radius:8px}
+  .dp-scroll::-webkit-scrollbar-thumb:hover{background:light-dark(#b9b1a2,#4d5b78)}
   /* Inside the scroller now, so a second scrollbar here would trap the wheel
      over the transmission list and look like the panel had stopped again. */
   .dp-tx{border-top:1px solid var(--border-soft);padding:6px 0 10px}
   .dp-line{display:flex;gap:8px;padding:4px 13px;font-size:12px;line-height:1.4;align-items:baseline}
-  .dp-line .t{font-family:var(--mono);font-size:10px;color:#6d7488;flex:0 0 auto}
-  .dp-line .f{font-family:var(--mono);font-size:10px;color:#5f8fbf;flex:0 0 92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-  .dp-line .x{color:#c9d2e0}
-  .dp-line button{background:transparent;border:0;color:#3fbf7f;cursor:pointer;font-size:11px;padding:0}
+  .dp-line .t{font-family:var(--mono);font-size:10px;color:light-dark(#8a8f9a,#6d7488);flex:0 0 auto}
+  .dp-line .f{font-family:var(--mono);font-size:10px;color:light-dark(#2c5f8f,#5f8fbf);flex:0 0 92px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .dp-line .x{color:light-dark(#2b2f36,#c9d2e0)}
+  .dp-line button{background:transparent;border:0;color:light-dark(#0d6b45,#3fbf7f);cursor:pointer;font-size:11px;padding:0}
   .mode-row{display:flex;align-items:center;gap:6px;padding:5px 9px 7px}
   .mode-btn{font:inherit;font-size:11.5px;letter-spacing:.04em;text-transform:uppercase;
-    background:transparent;border:1px solid #2b3242;color:#8b93a7;border-radius:6px;
+    background:transparent;border:1px solid light-dark(#d3ccbf,#2b3242);color:light-dark(#575d69,#8b93a7);border-radius:6px;
     padding:3px 10px;cursor:pointer}
-  .mode-btn.on{border-color:#2f6f4f;color:#9fe3bd;background:rgba(47,111,79,.13)}
-  .mode-note{font-size:11px;color:#6d7488;margin-left:auto}
+  .mode-btn.on{border-color:light-dark(#8fbfa6,#2f6f4f);color:light-dark(#0d6b45,#9fe3bd);background:light-dark(rgba(13,107,69,.13),rgba(47,111,79,.13))}
+  .mode-note{font-size:11px;color:light-dark(#8a8f9a,#6d7488);margin-left:auto}
   /* A held card is visibly provisional wherever it appears. Same information,
      less confidence, and never mistakable for a verified one. */
-  .sit.sit-held{opacity:.82;border-left-color:#7a6a2e}
-  .sit-held-why{font-size:11.5px;color:#c8b56a;padding:3px 0 1px}
-  .sit-sev{font-size:10.5px;color:#8b93a7;margin-left:6px;font-weight:400;letter-spacing:.03em}
-  .thr-drop{font-family:var(--mono);font-size:9px;color:#d6b3ff;margin-top:6px;line-height:1.4}
+  .sit.sit-held{opacity:.82;border-left-color:light-dark(#c9b56a,#7a6a2e)}
+  .sit-held-why{font-size:11.5px;color:light-dark(#8a6d1a,#c8b56a);padding:3px 0 1px}
+  .sit-sev{font-size:10.5px;color:light-dark(#575d69,#8b93a7);margin-left:6px;font-weight:400;letter-spacing:.03em}
+  .thr-drop{font-family:var(--mono);font-size:9px;color:light-dark(#6a35a0,#d6b3ff);margin-top:6px;line-height:1.4}
 
   /* big flashing alert for a new high-priority situation */
   /* Centred on the viewport it reached across the situations rail, and under about
@@ -1201,8 +1255,8 @@
     .be-feed.connecting .fdot,.be-feed.reconnecting .fdot{animation:none}
     /* The breathing halo was the only thing separating a live dot from a dead one
        at 9px, so it stays. It just stops breathing. */
-    .live-badge .dot,.console .rec{box-shadow:0 0 0 3px rgba(255,59,48,.28)}
-    .be-feed.connecting .fdot,.be-feed.reconnecting .fdot{box-shadow:0 0 0 3px rgba(255,176,32,.3)}
+    .live-badge .dot,.console .rec{box-shadow:0 0 0 3px light-dark(rgba(179,38,30,.28),rgba(255,59,48,.28))}
+    .be-feed.connecting .fdot,.be-feed.reconnecting .fdot{box-shadow:0 0 0 3px light-dark(rgba(168,106,0,.3),rgba(255,176,32,.3))}
     /* The expanding ring is the only mark on the map that separates a call running
        right now from one cleared an hour ago, and it expands forever. Held near its
        widest and dimmed, it reads as a halo around the dot instead. */
@@ -1235,14 +1289,24 @@
      because across a newsroom the thing you can read at four feet is a colour.
      Off is dimmed rather than hidden: somebody has to be able to see at a
      glance that the room chose silence, or silence gets mistaken for calm. */
-  .alertbtn{background:#1b2430;color:#c7d4e2;border:1px solid #2c3a4a;
+  .alertbtn{background:light-dark(#ebe7e0,#1b2430);color:light-dark(#2b2f36,#c7d4e2);border:1px solid light-dark(#d3ccbf,#2c3a4a);
     border-radius:6px;padding:4px 9px;font:inherit;font-size:12px;cursor:pointer;
     line-height:1.35;white-space:nowrap}
-  .alertbtn:hover{background:#22303f}
+  .alertbtn:hover{background:light-dark(#dbd5ca,#22303f)}
   .alertbtn:focus-visible{outline:2px solid #4d8fd6;outline-offset:2px}
   .alertbtn[data-mode="off"]{opacity:.55}
   .alertbtn[data-mode="high"]{border-color:#3d6ea5}
   .alertbtn[data-mode="all"]{border-color:#c8912f}
+  /* The theme switch, beside the alert toggle and in the same voice, so the
+     two controls that change how the room looks and sounds read as a pair. A
+     glyph rather than a word because the header is full at laptop widths and
+     the stamp beside the clock already wraps before 1440px; the glyph is the
+     theme you would get by pressing it, the sun in the dark and the moon in
+     the light, and the title and aria-label say so in words. */
+  .themebtn{background:light-dark(#ebe7e0,#1b2430);color:light-dark(#2b2f36,#c7d4e2);border:1px solid light-dark(#d3ccbf,#2c3a4a);
+    border-radius:6px;padding:3px 8px;font:inherit;font-size:13px;cursor:pointer;line-height:1.3;white-space:nowrap;min-width:30px}
+  .themebtn:hover{background:light-dark(#dbd5ca,#22303f)}
+  .themebtn:focus-visible{outline:2px solid #4d8fd6;outline-offset:2px}
 
   /* The state police section. app/statepolice.js decides what belongs in it.
 
@@ -1272,7 +1336,7 @@
      what it was before, minus a head and one line of text, and the cap never
      binds because max-height is a ceiling rather than a height. */
   .sp-head .tag{background:#4d8fd6}
-  .sp-head h2{color:#9ec7f0}
+  .sp-head h2{color:light-dark(#0b52a8,#9ec7f0)}
   .sp-body{max-height:20%;overflow-y:auto;border-bottom:1px solid var(--border)}
   .sp-body .empty{padding:7px 14px;font-size:10.5px}
   .rail.has-sp .sit-body{max-height:40%}
@@ -1281,11 +1345,11 @@
     .rail.has-sp .sit-body{max-height:32%}
   }
   .sp-body::-webkit-scrollbar{width:8px}
-  .sp-body::-webkit-scrollbar-thumb{background:#3b4760;border-radius:8px}
-  .sp-body::-webkit-scrollbar-thumb:hover{background:#4d5b78}
+  .sp-body::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#3b4760);border-radius:8px}
+  .sp-body::-webkit-scrollbar-thumb:hover{background:light-dark(#b9b1a2,#4d5b78)}
   .sp{padding:8px 14px;border-bottom:1px solid var(--border-soft);transition:background .12s}
   .sp[role="button"]{cursor:pointer}
-  .sp:hover{background:rgba(77,143,214,.07)}
+  .sp:hover{background:light-dark(rgba(11,82,168,.06),rgba(77,143,214,.07))}
   .sp-top{display:flex;align-items:center;gap:7px;margin-bottom:3px}
   .sp-chip{font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.5px;
     text-transform:uppercase;padding:1px 6px;border-radius:4px;white-space:nowrap}
@@ -1293,14 +1357,14 @@
      grades of evidence against each other; the column no longer admits the
      other two, so a second colour here would be saying something the data
      cannot say. */
-  .sp-chip.heard{background:#4d8fd6;color:#08131f;border:1px solid #9cc8f5}
+  .sp-chip.heard{background:#4d8fd6;color:#08131f;border:1px solid light-dark(#0b52a8,#9cc8f5)}
   .sp-when{font-family:var(--mono);font-size:9px;color:var(--text-faint);margin-left:auto;text-transform:uppercase}
-  .sp-line{font-size:12px;font-weight:600;line-height:1.3;color:#fff}
+  .sp-line{font-size:12px;font-weight:600;line-height:1.3;color:light-dark(#16181c,#fff)}
   .sp-why{font-size:10.5px;color:var(--text-dim);line-height:1.35;margin-top:2px}
   /* The plain em is a caveat and reads dimmer than the line it qualifies.
      .hit is the opposite job, so it goes the other way. */
-  .sp-why em{font-style:normal;color:#8b98ac}
-  .sp-why em.hit{font-style:normal;color:#9cc8f5;font-weight:600}
+  .sp-why em{font-style:normal;color:light-dark(#575d69,#8b98ac)}
+  .sp-why em.hit{font-style:normal;color:light-dark(#0b52a8,#9cc8f5);font-weight:600}
 
   /* The radio underneath the cards. A divider rather than a second .rail-head,
      because a second head would put another 38px fixed row into a flex column
@@ -1308,19 +1372,19 @@
      when it is the same one seen closer up. */
   .sp-rad-head{display:flex;align-items:center;gap:6px;padding:6px 14px 4px;
     font-family:var(--mono);font-size:8.5px;letter-spacing:.6px;text-transform:uppercase;
-    color:#7d8da3;border-top:1px solid var(--border)}
-  .sp-rad-head b{color:#9ec7f0;font-weight:700}
+    color:light-dark(#8a8f9a,#7d8da3);border-top:1px solid var(--border)}
+  .sp-rad-head b{color:light-dark(#0b52a8,#9ec7f0);font-weight:700}
   .sp-rad-n{margin-left:auto;color:var(--text-faint)}
   .sp-rad{padding:4px 14px 5px;border-bottom:1px solid var(--border-soft);
     font-size:11px;line-height:1.35;display:flex;gap:7px;align-items:baseline}
-  .sp-rad:hover{background:rgba(77,143,214,.07)}
+  .sp-rad:hover{background:light-dark(rgba(11,82,168,.06),rgba(77,143,214,.07))}
   .sp-rad-t{font-family:var(--mono);font-size:9px;color:var(--text-faint);flex:none}
-  .sp-rad-x{color:#c9d3e2;word-break:break-word}
+  .sp-rad-x{color:light-dark(#2b2f36,#c9d3e2);word-break:break-word}
   /* A transmission the desk turned into a card. Same idea as .cline.hit in the
      console: the ones you can press look pressable, the rest are just radio. */
   .sp-rad.hit{cursor:pointer}
-  .sp-rad.hit .sp-rad-x{color:#fff}
-  .sp-rad.hit .sp-rad-t{color:#9cc8f5}
+  .sp-rad.hit .sp-rad-x{color:light-dark(#16181c,#fff)}
+  .sp-rad.hit .sp-rad-t{color:light-dark(#0b52a8,#9cc8f5)}
 </style>
 <!-- Production error monitoring. Every uncaught error and unhandled rejection
      goes to llmlog so the Under the Hood panel shows it next to the model
@@ -1376,6 +1440,7 @@
     <div class="spacer"></div>
     <div class="hud-meta">
       <span id="alertMount"></span>
+      <button class="themebtn" id="themeBtn" type="button" title="Switch to light mode" aria-label="Switch to light mode">&#9728;</button>
       <span class="status-pill" id="status" role="button" tabindex="0" title="Feed health — click for details" onclick="document.querySelector('.tab[data-view=backend]').click()"><span class="sdot"></span><span class="stxt">live</span></span>
       <span id="updated">&nbsp;</span>
       <span class="clock" id="clock">--:--:--</span>
@@ -1383,7 +1448,7 @@
   </div>
 
   <div class="rail">
-    <div class="rail-head sit-head"><span class="tag" style="background:#c07cff"></span><h2>Situations</h2><span class="count" id="sitCount">0</span></div>
+    <div class="rail-head sit-head"><span class="tag" style="background:var(--alert)"></span><h2>Situations</h2><span class="count" id="sitCount">0</span></div>
     <!-- Says whether the last correction landed. It is above the column and not
          floating over it, because the rail is a fixed-height flex column and
          anything floating would cover the bottom line of the live feed. Empty it
@@ -1436,13 +1501,13 @@
     <div class="lyr on" data-layer="transit"><span class="ldot" style="background:var(--transit)"></span><span class="lname">MBTA live</span><span class="lcount" id="c-transit">0</span><span class="sw"></span></div>
     <div class="lyr on" data-layer="scanner"><span class="ldot" style="background:var(--scanner)"></span><span class="lname">Scanner / CAD</span><span class="lcount" id="c-scanner">0</span><span class="sw"></span></div>
     <div class="lyr on" data-layer="alerts"><span class="ldot" style="background:var(--alert)"></span><span class="lname">Weather alerts</span><span class="lcount" id="c-alerts">0</span><span class="sw"></span></div>
-    <div class="lyr" data-layer="quakes"><span class="ldot" style="background:#e8590c"></span><span class="lname">Quakes (M2.5+)</span><span class="lcount" id="c-quakes">0</span><span class="sw"></span></div>
-    <div class="lyr on" data-layer="choppers"><span class="ldot" style="background:#ffd23f"></span><span class="lname">Choppers (ADS-B)</span><span class="lcount" id="c-choppers">0</span><span class="sw"></span></div>
-    <div class="lyr" data-layer="civic311"><span class="ldot" style="background:#38bdf8"></span><span class="lname">311 requests</span><span class="lcount" id="c-311">0</span><span class="sw"></span></div>
+    <div class="lyr" data-layer="quakes"><span class="ldot" style="background:var(--quake)"></span><span class="lname">Quakes (M2.5+)</span><span class="lcount" id="c-quakes">0</span><span class="sw"></span></div>
+    <div class="lyr on" data-layer="choppers"><span class="ldot" style="background:var(--mk-heli)"></span><span class="lname">Choppers (ADS-B)</span><span class="lcount" id="c-choppers">0</span><span class="sw"></span></div>
+    <div class="lyr" data-layer="civic311"><span class="ldot" style="background:var(--t11-trash)"></span><span class="lname">311 requests</span><span class="lcount" id="c-311">0</span><span class="sw"></span></div>
     <div class="lyr" data-layer="pulse"><span class="ldot" style="background:#f97316"></span><span class="lname">Pulse (typical)</span><span class="lcount" id="c-pulse">0</span><span class="sw"></span></div>
-    <div class="lyr" data-layer="cameras"><span class="ldot" style="background:#94a3b8"></span><span class="lname">Traffic cameras</span><span class="lcount" id="c-cameras">0</span><span class="sw"></span></div>
-    <div class="lyr" data-layer="outages"><span class="ldot" style="background:#a78bfa"></span><span class="lname">Power outages</span><span class="lcount" id="c-outages">0</span><span class="sw"></span></div>
-    <div class="lyr" data-layer="webcams"><span class="ldot" style="background:#f472b6"></span><span class="lname">Live webcams</span><span class="lcount" id="c-webcams">0</span><span class="sw"></span></div>
+    <div class="lyr" data-layer="cameras"><span class="ldot" style="background:var(--mk-cam)"></span><span class="lname">Traffic cameras</span><span class="lcount" id="c-cameras">0</span><span class="sw"></span></div>
+    <div class="lyr" data-layer="outages"><span class="ldot" style="background:var(--mk-outage)"></span><span class="lname">Power outages</span><span class="lcount" id="c-outages">0</span><span class="sw"></span></div>
+    <div class="lyr" data-layer="webcams"><span class="ldot" style="background:var(--mk-webcam)"></span><span class="lname">Live webcams</span><span class="lcount" id="c-webcams">0</span><span class="sw"></span></div>
   </div>
 
   <!-- Pulse scrubber. Only visible when the Pulse layer is on. The whole 24h
@@ -1613,7 +1678,7 @@
     </div>
   </div>
 
-  <div id="bezos" title="monitoring the situation" style="position:fixed;right:14px;bottom:150px;z-index:1100;display:flex;align-items:center;gap:10px;background:rgba(14,18,26,.86);border:1px solid var(--border);border-radius:34px;padding:7px 16px 7px 7px;box-shadow:0 8px 24px rgba(0,0,0,.5);backdrop-filter:blur(8px)">
+  <div id="bezos" title="monitoring the situation" style="position:fixed;right:14px;bottom:150px;z-index:1100;display:flex;align-items:center;gap:10px;background:var(--panel);border:1px solid var(--border);border-radius:34px;padding:7px 16px 7px 7px;box-shadow:0 8px 24px light-dark(rgba(20,18,14,.16),rgba(0,0,0,.5));backdrop-filter:blur(8px)">
     <img src="data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAkGBwgHBgkIBwgKCgkLDRYPDQwMDRsUFRAWIB0iIiAdHx8kKDQsJCYxJx8fLT0tMTU3Ojo6Iys/RD84QzQ5Ojf/2wBDAQoKCg0MDRoPDxo3JR8lNzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzf/wAARCABIAEgDASIAAhEBAxEB/8QAHAAAAQUBAQEAAAAAAAAAAAAAAAIDBAUGBwEI/8QANRAAAQMDAwIEBAMIAwAAAAAAAQIDBAAFERIhMQYTQVFhcQciI5EUMjMXJEJSYoHB8IKx0f/EABkBAAIDAQAAAAAAAAAAAAAAAAECAAQFA//EACARAAMAAgMAAgMAAAAAAAAAAAABAgMREiExIkEEMnH/2gAMAwEAAhEDEQA/AKiO1+5uj+sUpDHpUtlsoYcStJSQRkEYpaEA1yANIj7cVJYiKcWltCCpajgAck08hIAFWFoUWZfeQ2HChBIB4Bx/opaelsaI50kSY3TSMhMqWG1+KUN6se5yKj3CzORm3NC0OpaUNZTsQDwrHkasW5MhTfckxew4OfmOk/ekM3Jh+9JZ1pUXWVIdAPAGNj9zVaM1OtMvZPxYU7Rne0PKmJLIOj0NWSkDO24qPKT+X3q0Z7Iva24oqVpGKKhNC+qXiOpJzKcBKUoOBUdtshAX503OnRLze3pEZRBkLbbGfLzq8eZtkKa1BmP9sOflcUcDNM0kFJsgaMAZp5juHKGy7vglLZxn32O29TLrHtsWPqiz23nB/BrBzWbbuSjrU6hTTIBy5nSMe9Lccp0PiycLVE+7dQBoKOg4ScFbqsJz6eKqy9hi3WZeXJrhZZYS6X1uJQe4rORoBPAP+8U1Al26cZUtRWG2nikrdVqGOc6vKmLp1iuK27Cs5b+oE6pJ3wP6QfH1qvjm5vUo0M1Y7xcqf8N75U0/jAyM1C6WnMXayBwSVuTWG8vNkDUSPH1qQ6vIq05aSbMvf0KHFFICtqKBDm3T13VDDst4KWGFoWR481Ovl5k3xEmYYyjGJCWxncH2q2vlmElTqYrbaErQNQzjO9aLo+1WuFce5LKMJbGhGcjV5486etME00uvsxcHp92BZ4d+Q6WVhDipKZBI+UcBI5yaz0y7SLi73ZiipofpsA/Ike3jW/8AjRKnFyPCaguIhFJd7qRkKI5SccY5Oa5cTwhPkBUWn2h2mumWrMCZcHHEs9yREayrXjtNqA2BOcAe53qtDqC6VuAKJOd+K9kTXHYrMUhPaZUop88qxn/qo5SU+O9HQC2h3hyK8hbRCMbfKkJ29xvXaPh8uHNt6JErQtL6cN69yCNiD618/knxq7s9yuCEsxo01bLKCpeAeCeaVyFNL06xdG1RZ7qlNFERSsoWNxiijqm8Gw2SCIKw7GcaCj3Dlbg5xn1JoqKG/AJo0tgttvlQmZZjJy80lRB3xkZxTkn8BCALTLSNKsE4wR7U30G+mR05AUlWcMIB99Iqtu0QyJynULwtpRwlW6Ve9G8VVLlekxVE2nXgXSVDlxXGfxSUJWkpIWM7HwrC/syiuNhbF7PzcfRBGPvU/qGdcGXBGTCjIccSSjURhQGxO25rzp6FMgOLfkXFp150AJZTshv/AIk7mqGrxb70afwy6+x7pToGHZbgZlxkImrSMMoLWEoP8xBJycVZ3rprpq4BZfhstLI/Uj/TVn+2x/uKmvqeTl2W62DpzhPhWP6k6hahMkhOxOEp8VH/AM9aWXkyVvYzjHE+dGG6ns6LNO7LMkSGVgqQojCgM8KFRIrC16EoWkZTlWTxT0NqR1DfmGVq+pJdCcjhKfHHsM109v4cWHOVvTVnz7gH+K04imuzKup29GVdt027RLNHjRnW1lgoSta9Qe3OFD+Ue9FdNFkiN2pm3R5EphppOlKkLGojyJxRTPHbYipD9pukeJH7EQNtp8EkYxVp+AZkshbT6Q6oZVnjNFFLNvY3FMqbl0+qToElhLwScpKF4I9iN64wvqicy6tqUhLqm1FIX+VQwaKKfKlaTaDjqofxYtfXF0VGLCEtAE5ClAqI+9UE2bJnvd2W6XF8AnwoorlMTPiHrJdes0Xw2a19Usq47bTij9sf5rsAXiiirWP9SvfovuetFFFdBNn/2Q==" alt="" style="width:50px;height:50px;border-radius:50%;object-fit:cover;flex:0 0 auto"/>
     <span style="font-family:var(--mono);font-size:10px;color:var(--text-dim);white-space:nowrap" id="bezosSay">monitoring the situation</span>
   </div>
@@ -1668,8 +1733,8 @@
        big button is the radio's power. The words are whatever is speaking,
        and clicking them scrolls the console to that row when it is on screen.
        Painted entirely by dialPaint(); nothing here is static but the shell. -->
-  <div id="dial" style="position:fixed;right:286px;bottom:150px;z-index:1600;display:flex;align-items:center;gap:11px;background:rgba(14,18,26,.92);border:1px solid var(--border);border-radius:34px;padding:7px 16px 7px 8px;box-shadow:0 10px 32px rgba(0,0,0,.6);backdrop-filter:blur(8px);cursor:default">
-    <span id="dialBtn" role="button" tabindex="0" aria-label="Play or stop" onclick="dialToggle()" style="position:relative;width:40px;height:40px;border-radius:50%;background:#0b0f16;border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:13px;cursor:pointer;flex:0 0 auto">&#9654;</span>
+  <div id="dial" style="position:fixed;right:286px;bottom:150px;z-index:1600;display:flex;align-items:center;gap:11px;background:light-dark(rgba(255,253,250,.92),rgba(14,18,26,.92));border:1px solid var(--border);border-radius:34px;padding:7px 16px 7px 8px;box-shadow:0 10px 32px light-dark(rgba(20,18,14,.18),rgba(0,0,0,.6));backdrop-filter:blur(8px);cursor:default">
+    <span id="dialBtn" role="button" tabindex="0" aria-label="Play or stop" onclick="dialToggle()" style="position:relative;width:40px;height:40px;border-radius:50%;background:light-dark(#ebe7e0,#0b0f16);border:1px solid var(--border);display:inline-flex;align-items:center;justify-content:center;color:var(--text-dim);font-size:13px;cursor:pointer;flex:0 0 auto">&#9654;</span>
     <span id="dialBody" style="min-width:0">
       <span id="dialTop" style="display:flex;align-items:center;gap:8px;font-family:var(--mono);white-space:nowrap">
         <span id="dialState" style="font-size:9.5px;color:var(--text-faint);font-weight:700;letter-spacing:.12em">RADIO OFF</span>
@@ -1678,7 +1743,7 @@
       </span>
       <span id="dialLine" onclick="dialJump()" style="display:block;font-size:11px;color:var(--text-dim);max-width:300px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;cursor:pointer">press play, hear the radio</span>
     </span>
-    <span id="dialQ" style="display:none;font-family:var(--mono);font-size:9.5px;color:var(--road);border:1px solid #4d3a10;background:#1d1608;border-radius:10px;padding:1px 8px"></span>
+    <span id="dialQ" style="display:none;font-family:var(--mono);font-size:9.5px;color:var(--road);border:1px solid light-dark(#e6c98a,#4d3a10);background:light-dark(#fbeed4,#1d1608);border-radius:10px;padding:1px 8px"></span>
     <span id="dialSkip" role="button" tabindex="0" aria-label="Skip to the next clip" onclick="dialSkip()" style="display:none;width:24px;height:24px;border:1px solid var(--border);border-radius:50%;align-items:center;justify-content:center;color:var(--text-dim);font-size:10px;cursor:pointer">&#8677;</span>
   </div>
 
@@ -1708,7 +1773,93 @@ const CONFIG = {
   refresh:{ vehicles:20000, civic:60000, scanner:2500, console:1500, health:15000 },
 };
 const LINE_COLORS={Red:'#DA291C',Orange:'#ED8B00',Blue:'#003DA5','Green-B':'#00843D','Green-C':'#00843D','Green-D':'#00843D','Green-E':'#00843D',Mattapan:'#DA291C'};
-const CAT_COLORS={crash:'#ff4d4d',road:'#ffb020',scanner:'#34d399',alert:'#c07cff',quake:'#e8590c'};
+
+/* ===================== Theme ===================== */
+/* The stylesheet switches on data-theme by itself. What lives here is the one
+   thing CSS cannot reach: the colours Leaflet writes into SVG as presentation
+   attributes, which take a hex and not a variable. Every vector layer draws
+   from PAL for the theme in force, and restyleVectors() walks what is already
+   on the map when the theme changes, so a flip is instant rather than waiting
+   on the next poll of every layer. The dark column is exactly what the layers
+   drew before there was a light theme. Anything drawn as HTML, the incident
+   dots, the 311 diamonds, the camera and webcam glyphs, the popup titles,
+   uses the CSS tokens and needs no help. */
+const THEME_KEY='bcc.theme';
+const PAL={
+  dark:{stroke:'#06090f',crash:'#ff4d4d',road:'#ffb020',scanner:'#34d399',alert:'#c07cff',quake:'#e8590c',transit:'#4da3ff',
+        outage:'#a78bfa',cleared:'#6b7280',
+        police:'#4da3ff',federal:'#7d8cff',medevac:'#2ee6a6',news:'#ffb020',fire:'#ff6b3d',heli:'#ffd23f'},
+  light:{stroke:'#fff',crash:'#c8102e',road:'#a86a00',scanner:'#0d6b45',alert:'#6a35a0',quake:'#b8430a',transit:'#0b52a8',
+        outage:'#6a35a0',cleared:'#9aa0ab',
+        police:'#0b52a8',federal:'#3949ab',medevac:'#0d6b45',news:'#a86a00',fire:'#c2410c',heli:'#a67c00'},
+};
+function themeSetting(){return document.documentElement.getAttribute('data-theme')||'dark';}
+/* light or dark, after 'auto' has asked the operating system. */
+function themeNow(){
+  const t=themeSetting();
+  if(t==='auto')return (window.matchMedia&&matchMedia('(prefers-color-scheme: light)').matches)?'light':'dark';
+  return t==='light'?'light':'dark';
+}
+function C(k){return PAL[themeNow()][k];}
+/* CAT_COLORS keeps its name and its callers; it just answers for the theme in
+   force instead of holding four numbers that were only ever true in the dark. */
+const CAT_COLORS={get crash(){return C('crash');},get road(){return C('road');},get scanner(){return C('scanner');},get alert(){return C('alert');},get quake(){return C('quake');}};
+/* A colour drawn under the other theme, translated. Anything not in PAL, the
+   MBTA line colours for one, comes back as it went in. */
+function recolour(hex){
+  const now=themeNow(), from=PAL[now==='light'?'dark':'light'], to=PAL[now];
+  const h=String(hex||'').toLowerCase();
+  for(const k in from){if(from[k].toLowerCase()===h)return to[k];}
+  return hex;
+}
+function restyleVectors(){
+  const sets=[];
+  if(typeof groups!=='undefined')for(const k in groups)sets.push(groups[k]);
+  if(typeof sitLayer!=='undefined')sets.push(sitLayer);
+  sets.forEach(g=>{ if(!g||!g.eachLayer)return; g.eachLayer(l=>{
+    if(!l.setStyle||!l.options)return;
+    const o=l.options, p={};
+    /* A layer that knows what it is asks PAL by name. Two names can share a
+       hex in one theme (alert and outage are the same purple in the light),
+       so a value-only translation can hand a marker back the wrong colour on
+       the way home; the name cannot. Layers drawn from a bare hex, the
+       chopper trails, are translated by value and redraw within seconds anyway. */
+    if(o.mkKey&&PAL.dark[o.mkKey]){p.color=C('stroke');p.fillColor=C(o.mkKey);}
+    else{
+      if(o.color)p.color=recolour(o.color);
+      if(o.fillColor)p.fillColor=recolour(o.fillColor);
+    }
+    if(p.color!==o.color||p.fillColor!==o.fillColor)l.setStyle(p);
+  });});
+}
+function paintThemeBtn(){
+  const b=document.getElementById('themeBtn'); if(!b)return;
+  const light=themeNow()==='light';
+  b.textContent=light?'☾':'☀';      /* the moon in the light, the sun in the dark: what pressing it gets you */
+  const say=light?'Switch to dark mode':'Switch to light mode';
+  b.title=say; b.setAttribute('aria-label',say);
+  b.setAttribute('aria-pressed',light?'true':'false');
+}
+function applyTheme(t){
+  t=(t==='light'||t==='auto')?t:'dark';
+  document.documentElement.setAttribute('data-theme',t);
+  try{localStorage.setItem(THEME_KEY,t);}catch(e){}
+  themeChanged();
+}
+/* Everything that has to move when the effective theme moves, whether by the
+   switch, by a bookmark, or by the OS under 'auto'. */
+function themeChanged(){
+  const eff=themeNow();
+  if(typeof baseMapTheme==='function')baseMapTheme(eff);
+  restyleVectors();
+  if(typeof pulseHeat!=='undefined'&&pulseHeat&&typeof renderPulse==='function')renderPulse();
+  paintThemeBtn();
+  if(window.BCCDesk&&BCCDesk.sync)BCCDesk.sync();
+  try{document.dispatchEvent(new CustomEvent('bcc:theme',{detail:{theme:eff,setting:themeSetting()}}));}catch(e){}
+}
+window.BCCTheme={get:themeNow,setting:themeSetting,set:applyTheme,
+  toggle:function(){applyTheme(themeNow()==='light'?'dark':'light');}};
+if(window.matchMedia){try{matchMedia('(prefers-color-scheme: light)').addEventListener('change',()=>{if(themeSetting()==='auto')themeChanged();});}catch(e){}}
 
 /* ===================== FETCH HELPERS ===================== */
 const PUBLIC_PROXIES=[u=>'https://api.allorigins.win/raw?url='+encodeURIComponent(u),u=>'https://api.codetabs.com/v1/proxy/?quest='+encodeURIComponent(u)];
@@ -1796,8 +1947,8 @@ const BASE_TILES={
   dark:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
   light:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
 };
-const baseLayer=L.tileLayer(BASE_TILES.dark,{subdomains:'abcd',maxZoom:19,attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
-let baseTheme='dark';
+const baseLayer=L.tileLayer(BASE_TILES[themeNow()],{subdomains:'abcd',maxZoom:19,attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+let baseTheme=themeNow();
 window.baseMapTheme=function(t){
   const want=(t==='light')?'light':'dark';
   if(want===baseTheme)return;
@@ -1847,14 +1998,16 @@ document.querySelectorAll('.lyr').forEach(el=>{
     if(enabled[k])groups[k].addTo(map);else map.removeLayer(groups[k]);};
 });
 
-function circle(lat,lon,color,r,dashed){return L.circleMarker([lat,lon],{radius:r,color:'#06090f',weight:1.4,fillColor:color,fillOpacity:.92,dashArray:dashed?'3':null});}
+/* `color` is a PAL name where the caller has one, so the marker can be recoloured
+   by name when the theme changes; a bare hex still works and is drawn as given. */
+function circle(lat,lon,color,r,dashed){const key=PAL.dark[color]?color:null;return L.circleMarker([lat,lon],{radius:r,color:C('stroke'),weight:1.4,fillColor:key?C(key):color,fillOpacity:.92,dashArray:dashed?'3':null,className:'mk',mkKey:key});}
 function trainIcon(color,bearing){
   const rot=(typeof bearing==='number')?bearing:0;
   const html='<svg width="24" height="24" viewBox="0 0 24 24" style="transform:rotate('+rot+'deg);transform-origin:12px 12px">'
-    +'<rect x="8" y="3" width="8" height="18" rx="3.4" fill="'+color+'" stroke="#06090f" stroke-width="1.3"/>'
+    +'<rect x="8" y="3" width="8" height="18" rx="3.4" fill="'+color+'" style="stroke:var(--mk-stroke)" stroke-width="1.3"/>'
     +'<rect x="9.4" y="4.9" width="5.2" height="2.4" rx="1" fill="#fff" opacity="0.85"/>'
     +'<circle cx="9.7" cy="3.7" r="0.9" fill="#ffe08a"/><circle cx="14.3" cy="3.7" r="0.9" fill="#ffe08a"/>'
-    +'<line x1="12" y1="8.5" x2="12" y2="19" stroke="#06090f" stroke-width="0.5" opacity="0.4"/></svg>';
+    +'<line x1="12" y1="8.5" x2="12" y2="19" style="stroke:var(--mk-stroke)" stroke-width="0.5" opacity="0.4"/></svg>';
   return L.divIcon({html:html,className:'train-ico',iconSize:[24,24],iconAnchor:[12,12]});
 }
 
@@ -1888,7 +2041,9 @@ function renderFeed(){
   const keep=roveKeep();
   if(!feedItems.length){el.innerHTML='<div class="empty">Listening for calls&hellip;</div>';keep();return;}
   el.innerHTML=feedItems.map(it=>{
-    const color=it.status==='cleared'?'#6b7280':((it.isScanner&&it.priority==='high')?'#ff4d4d':(CAT_COLORS[it.cat]||'#7C878E'));
+    /* Tokens rather than hexes: the pill is HTML, so it follows the theme on its own. */
+    const CAT_VAR={crash:'var(--crash)',road:'var(--road)',scanner:'var(--scanner)',alert:'var(--alert)',quake:'var(--quake)'};
+    const color=it.status==='cleared'?'var(--mk-cleared)':((it.isScanner&&it.priority==='high')?'var(--crash)':(CAT_VAR[it.cat]||'var(--mk-other)'));
     const fresh=!firstLoad&&!seen.has(it.id); seen.add(it.id);
     const label=it.isScanner?(it.status==='cleared'?'cleared':(it.priority==='high'?'priority':'active')):it.cat;
     /* role and tabindex go in the template rather than in a pass over the rows
@@ -1929,7 +2084,7 @@ async function loadTraffic(){
     groups.traffic.clearLayers();
     feedItems=feedItems.filter(f=>f.cat!=='crash'&&f.cat!=='road');
     evs.forEach(e=>{
-      const color=CAT_COLORS[e.cat];const mk=circle(e.lat,e.lon,color,e.cat==='crash'?9:7,false);
+      const color=CAT_COLORS[e.cat];const mk=circle(e.lat,e.lon,PAL.dark[e.cat]?e.cat:color,e.cat==='crash'?9:7,false);
       mk.bindPopup('<div class="pop-t" style="color:'+color+'">'+esc(e.type)+'</div><div class="pop-r"><b>'+esc(e.title)+'</b></div><div class="pop-r">'+esc(e.location)+'</div>'+(e.detail?'<div class="pop-r" style="color:var(--text-faint)">'+esc(e.detail)+'</div>':'')+'<div class="pop-src">MassDOT &middot; '+(e.time?ago(e.time):'')+'</div>');
       mk.addTo(groups.traffic);markerIndex[e.id]=mk;feedItems.push(e);
     });
@@ -1946,7 +2101,7 @@ async function loadVehicles(){
     (d.data||[]).forEach(v=>{
       const a=v.attributes;const rid=(v.relationships&&v.relationships.route&&v.relationships.route.data&&v.relationships.route.data.id)||'';
       if(a.latitude==null||a.longitude==null)return;
-      const color=LINE_COLORS[rid]||'#4da3ff';
+      const color=LINE_COLORS[rid]||C('transit');
       const mk=L.marker([a.latitude,a.longitude],{icon:trainIcon(color,a.bearing),keyboard:false});
       mk.bindPopup('<div class="pop-t" style="color:'+color+'">'+esc(rid||'MBTA')+' train</div><div class="veh-pop">'+esc((a.current_status||'').replace(/_/g,' ').toLowerCase())+(a.bearing!=null?' &middot; '+Math.round(a.bearing)+'&deg;':'')+'</div>');
       mk.addTo(groups.transit);
@@ -1958,7 +2113,8 @@ async function loadVehicles(){
 
 /* ===================== Scanner incidents (live, with timelines) ===================== */
 const scan={known:{},firstSeen:{},byId:{},selected:null};
-function incColor(inc){return inc.status!=='active'?'#6b7280':(inc.priority==='high'?'#ff4d4d':'#34d399');}
+/* A token, not a hex: the dot is HTML and its --c is read by the stylesheet. */
+function incColor(inc){return inc.status!=='active'?'var(--mk-cleared)':(inc.priority==='high'?'var(--crash)':'var(--scanner)');}
 function incIcon(inc){
   const c=incColor(inc);
   const pulsing=inc.status==='active'&&(Date.now()-(scan.firstSeen[inc.id]||0)<12000);
@@ -2078,16 +2234,18 @@ function incPopupHTML(inc){
 }
 /* Boston 311 live service requests (Open311 real-time feed). */
 function threeIcon(color){
-  return L.divIcon({html:'<div style="width:11px;height:11px;background:'+color+';border:1.5px solid #06090f;box-shadow:0 0 5px '+color+'99;transform:rotate(45deg)"></div>',className:'t11-ico',iconSize:[11,11],iconAnchor:[6,6]});
+  /* color is a token. The glow used to be the hex with 99 appended, which is 60%
+     alpha; color-mix says the same thing about a variable. */
+  return L.divIcon({html:'<div style="width:11px;height:11px;background:'+color+';border:1.5px solid var(--mk-stroke);box-shadow:0 0 5px color-mix(in srgb,'+color+' 60%,transparent);transform:rotate(45deg)"></div>',className:'t11-ico',iconSize:[11,11],iconAnchor:[6,6]});
 }
 function t11Color(svc){
   const s=(svc||'').toLowerCase();
-  if(/pothole|street|sign|light|road|sidewalk|crosswalk|traffic|parking/.test(s)) return '#f59e0b';
-  if(/trash|rubbish|recycl|dumpster|litter|graffiti|needle|clean/.test(s)) return '#38bdf8';
-  if(/tree|park|grass|leaf/.test(s)) return '#34d399';
-  if(/water|sewer|flood|hydrant|drain/.test(s)) return '#60a5fa';
-  if(/rodent|animal|pest|dead/.test(s)) return '#c084fc';
-  return '#94a3b8';
+  if(/pothole|street|sign|light|road|sidewalk|crosswalk|traffic|parking/.test(s)) return 'var(--t11-road)';
+  if(/trash|rubbish|recycl|dumpster|litter|graffiti|needle|clean/.test(s)) return 'var(--t11-trash)';
+  if(/tree|park|grass|leaf/.test(s)) return 'var(--t11-tree)';
+  if(/water|sewer|flood|hydrant|drain/.test(s)) return 'var(--t11-water)';
+  if(/rodent|animal|pest|dead/.test(s)) return 'var(--t11-pest)';
+  return 'var(--t11-other)';
 }
 async function load311(){
   try{
@@ -2172,7 +2330,7 @@ async function loadAlerts(){
       const p=f.properties;let lat=null,lon=null;
       if(f.geometry){const gl=L.geoJSON(f.geometry,{style:{color:CAT_COLORS.alert,weight:1.5,fillColor:CAT_COLORS.alert,fillOpacity:.12}});gl.addTo(groups.alerts);const c=gl.getBounds().getCenter();lat=c.lat;lon=c.lng;}
       const item={id:'nws-'+(p.id||i),cat:'alert',type:p.event,title:(p.severity||''),location:(p.areaDesc||'').split(';').slice(0,3).join('; '),time:pDate(p.sent||p.effective),source:'NWS',verified:true,lat,lon};
-      if(lat!=null){const mk=circle(lat,lon,CAT_COLORS.alert,7,false);mk.bindPopup('<div class="pop-t" style="color:var(--alert)">'+esc(p.event)+'</div><div class="pop-r">'+esc(item.location)+'</div><div class="pop-src">NWS &middot; '+esc(p.severity||'')+'</div>');mk.addTo(groups.alerts);markerIndex[item.id]=mk;}
+      if(lat!=null){const mk=circle(lat,lon,'alert',7,false);mk.bindPopup('<div class="pop-t" style="color:var(--alert)">'+esc(p.event)+'</div><div class="pop-r">'+esc(item.location)+'</div><div class="pop-src">NWS &middot; '+esc(p.severity||'')+'</div>');mk.addTo(groups.alerts);markerIndex[item.id]=mk;}
       feedItems.push(item);
     });
     layerCount('c-alerts',(d.features||[]).length);
@@ -2187,7 +2345,7 @@ async function loadQuakes(){
     groups.quakes.clearLayers();
     (d.features||[]).forEach(f=>{
       const c=f.geometry.coordinates;const m=f.properties.mag;
-      const mk=circle(c[1],c[0],m>=5?'#ff4d4d':CAT_COLORS.quake,Math.max(4,Math.min(14,m*2)),false);
+      const mk=circle(c[1],c[0],m>=5?'crash':'quake',Math.max(4,Math.min(14,m*2)),false);
       mk.bindPopup('<div class="pop-t" style="color:var(--quake)">M'+m.toFixed(1)+'</div><div class="pop-r">'+esc(f.properties.place||'')+'</div><div class="pop-src">USGS &middot; '+ago(new Date(f.properties.time))+'</div>');
       mk.addTo(groups.quakes);
     });
@@ -2206,16 +2364,16 @@ const chopperTrail={};
 function titleCase(s){return(s||'').toLowerCase().replace(/\b([a-z])/g,(m,c)=>c.toUpperCase()).replace(/\b(Llc|Inc|Ii|Iii|Pd|Ems|Usa|Uscg|Msp|Bpd|Nypd)\b/gi,x=>x.toUpperCase());}
 function classifyChopper(owner,t,desc,flight){
   const o=(owner||'').toUpperCase();
-  if(/STATE POLICE/.test(o)||/MASS(ACHUSETTS)?\b.*POLICE/.test(o)||/\bMSP\b/.test(o))return{label:'MSP Air Wing',color:'#4da3ff',emoji:'👮'};
-  if(/POLICE|SHERIFF|TROOPER|LAW ENFORCE/.test(o))return{label:titleCase(owner)||'Police',color:'#4da3ff',emoji:'👮'};
-  if(/COAST GUARD|USCG/.test(o))return{label:'US Coast Guard',color:'#7d8cff',emoji:'⚓'};
-  if(/ARMY|NAVY|AIR FORCE|MARINE CORPS|NATIONAL GUARD|MILITARY|DEFENSE|CUSTOMS|BORDER PROT|HOMELAND/.test(o))return{label:'Military / Federal',color:'#7d8cff',emoji:'🪖'};
-  if(/MEDFLIGHT|MED FLIGHT|NEW ENGLAND LIFE/.test(o))return{label:'Boston MedFlight',color:'#2ee6a6',emoji:'🚑'};
-  if(/LIFE ?FLIGHT|MEDEVAC|AIR METHODS|AIR MED|LIFENET|MEDICAL|HOSPITAL|\bEMS\b|HEALTH/.test(o))return{label:'Medevac',color:'#2ee6a6',emoji:'🚑'};
-  if(/HELICOPTERS? INC|US HELICORP|BROADCAST|TELEVISION|\bMEDIA\b|\bNEWS\b|WCVB|WHDH|WBZ|WFXT|SINCLAIR|HEARST/.test(o))return{label:'News chopper',color:'#ffb020',emoji:'📺'};
-  if(/FIRE DEPT|FIRE DEPARTMENT|FIRE RESCUE|\bFIRE\b/.test(o))return{label:titleCase(owner)||'Fire',color:'#ff6b3d',emoji:'🚒'};
-  if(owner)return{label:titleCase(owner),color:'#ffd23f',emoji:'🚁'};
-  return{label:'Unidentified',color:'#ffd23f',emoji:'🚁'};
+  if(/STATE POLICE/.test(o)||/MASS(ACHUSETTS)?\b.*POLICE/.test(o)||/\bMSP\b/.test(o))return{label:'MSP Air Wing',color:C('police'),emoji:'👮'};
+  if(/POLICE|SHERIFF|TROOPER|LAW ENFORCE/.test(o))return{label:titleCase(owner)||'Police',color:C('police'),emoji:'👮'};
+  if(/COAST GUARD|USCG/.test(o))return{label:'US Coast Guard',color:C('federal'),emoji:'⚓'};
+  if(/ARMY|NAVY|AIR FORCE|MARINE CORPS|NATIONAL GUARD|MILITARY|DEFENSE|CUSTOMS|BORDER PROT|HOMELAND/.test(o))return{label:'Military / Federal',color:C('federal'),emoji:'🪖'};
+  if(/MEDFLIGHT|MED FLIGHT|NEW ENGLAND LIFE/.test(o))return{label:'Boston MedFlight',color:C('medevac'),emoji:'🚑'};
+  if(/LIFE ?FLIGHT|MEDEVAC|AIR METHODS|AIR MED|LIFENET|MEDICAL|HOSPITAL|\bEMS\b|HEALTH/.test(o))return{label:'Medevac',color:C('medevac'),emoji:'🚑'};
+  if(/HELICOPTERS? INC|US HELICORP|BROADCAST|TELEVISION|\bMEDIA\b|\bNEWS\b|WCVB|WHDH|WBZ|WFXT|SINCLAIR|HEARST/.test(o))return{label:'News chopper',color:C('news'),emoji:'📺'};
+  if(/FIRE DEPT|FIRE DEPARTMENT|FIRE RESCUE|\bFIRE\b/.test(o))return{label:titleCase(owner)||'Fire',color:C('fire'),emoji:'🚒'};
+  if(owner)return{label:titleCase(owner),color:C('heli'),emoji:'🚁'};
+  return{label:'Unidentified',color:C('heli'),emoji:'🚁'};
 }
 const chopperDB={}; // hex -> {owner,type,photo} | 'pending' | 'none'
 async function enrichChopper(hex,reg){
@@ -2233,11 +2391,11 @@ async function enrichChopper(hex,reg){
    and a half minutes anyway, so the floor is only ever a rounding guard. */
 function heldFor(msSpan){const m=Math.floor((msSpan||0)/60000);return (m<1?1:m)+'m';}
 function heliIcon(track,loiter,color){
-  const rot=(typeof track==='number')?track:0, c=loiter?'#ff4d4d':(color||'#ffd23f');
+  const rot=(typeof track==='number')?track:0, c=loiter?C('crash'):(color||C('heli'));
   const html='<svg width="28" height="28" viewBox="0 0 24 24" style="transform:rotate('+rot+'deg);transform-origin:12px 12px;filter:drop-shadow(0 1px 2px rgba(0,0,0,.75))">'
     +'<line x1="3" y1="6" x2="21" y2="18" stroke="'+c+'" stroke-width="1.3" opacity="0.8"/>'
     +'<line x1="21" y1="6" x2="3" y2="18" stroke="'+c+'" stroke-width="1.3" opacity="0.8"/>'
-    +'<circle cx="12" cy="12" r="3.4" fill="'+c+'" stroke="#06090f" stroke-width="1.2"/>'
+    +'<circle cx="12" cy="12" r="3.4" fill="'+c+'" style="stroke:var(--mk-stroke)" stroke-width="1.2"/>'
     +'<line x1="12" y1="12" x2="12" y2="23" stroke="'+c+'" stroke-width="1.5"/>'
     +'<line x1="9" y1="23" x2="15" y2="23" stroke="'+c+'" stroke-width="1.5"/></svg>';
   return L.divIcon({html:html,className:'train-ico',iconSize:[28,28],iconAnchor:[14,14]});
@@ -2264,7 +2422,7 @@ async function loadAircraft(){
        the order layers were added, so a trail drawn after its own marker lies
        across the icon somebody is trying to click. */
     if(TR)seen.forEach(s=>{
-      const col=s.held.yes?'#ff4d4d':s.id.color;
+      const col=s.held.yes?C('crash'):s.id.color;
       TR.legs(chopperTrail,s.key,now).forEach(leg=>{
         L.polyline(TR.latlngs(leg),{color:col,weight:2,opacity:.35,interactive:false,smoothFactor:1.4}).addTo(groups.choppers);
         const tip=TR.tip(leg);
@@ -2272,7 +2430,7 @@ async function loadAircraft(){
       });
     });
     seen.forEach(s=>{
-      const a=s.a, id=s.id, loiter=s.held.yes, col=loiter?'#ff4d4d':id.color;
+      const a=s.a, id=s.id, loiter=s.held.yes, col=loiter?C('crash'):id.color;
       const alt=(typeof a.alt_baro==='number')?a.alt_baro:99999;
       const mk=L.marker([a.lat,a.lon],{icon:heliIcon(a.track,loiter,id.color),keyboard:false,zIndexOffset:1600});
       const tail=esc(a.r||a.hex||''), typ=esc(a.desc||a.t||'Helicopter');
@@ -2411,7 +2569,7 @@ function dialPaint(){
   btn.title=playing?'Stop':(RADIO_ON?'Radio off':'Radio on');
   btn.style.borderColor=RADIO_ON||playing?'var(--scanner)':'var(--border)';
   btn.style.color=RADIO_ON||playing?'var(--scanner)':'var(--text-dim)';
-  btn.style.background=RADIO_ON||playing?'#0d1f19':'#0b0f16';
+  btn.style.background=RADIO_ON||playing?'light-dark(#e3f2ea,#0d1f19)':'light-dark(#ebe7e0,#0b0f16)';
   dial.style.borderColor=playing?'var(--scanner)':'var(--border)';
   if(playing){
     const meta=clipMeta(CLIP_NOW);
@@ -3648,7 +3806,8 @@ function deskToggle(force){
 /* ===================== Desk-editor SITUATIONS (smart layer) ===================== */
 const sitLayer=L.layerGroup().addTo(map);
 const sitState={list:[],byId:{},seenHigh:new Set(),open:new Set(),merge:null};
-function sitColor(s){return s.priority==='high'?'#ff4d4d':'#c07cff';}
+function sitColor(s){return s.priority==='high'?C('crash'):C('alert');}
+function sitVar(s){return s.priority==='high'?'var(--crash)':'var(--alert)';}
 async function pollSituations(){
   /* meta.ok is "we are holding a board the server actually served", which is a
      different question from "the fetch did not throw". The old version only
@@ -3710,7 +3869,7 @@ function paintBoard(list){
     const clips=sitClips(s);
     const listen=clips.length?'<button class="dchain" style="margin-top:6px" data-chain="'+esc(JSON.stringify(clips))+'" title="Play this story\'s transmissions in order">&#9654; hear it unfold ('+clips.length+')</button>':'';
     const circ=L.circle([s.lat,s.lon],{radius:s.priority==='high'?1150:700,color:c,weight:1.5,opacity:.6,fillColor:c,fillOpacity:.12});
-    circ.bindPopup('<div class="pop-t" style="color:'+c+'">'+esc(s.headline||'')+'</div><div class="pop-r">'+esc(s.summary||'')+'</div><div class="pop-src">approx &middot; '+esc(s.location||'')+'</div>'+listen);
+    circ.bindPopup('<div class="pop-t" style="color:'+sitVar(s)+'">'+esc(s.headline||'')+'</div><div class="pop-r">'+esc(s.summary||'')+'</div><div class="pop-src">approx &middot; '+esc(s.location||'')+'</div>'+listen);
     circ.addTo(sitLayer);}});
   renderStatePolice(list);
   bannerCheck(list);
@@ -4557,7 +4716,11 @@ function renderPulse(){
   // maxZoom is pinned to the CURRENT zoom on purpose. leaflet.heat otherwise divides
   // intensity by 2^(maxZoom-zoom), which silently blanks the whole layer when you zoom out.
   const opts={radius:r,blur:Math.round(r*0.8),max:pulseMax,maxZoom:z,minOpacity:0.05,
-    gradient:{0.08:'#1e1b4b',0.25:'#4c1d95',0.45:'#9d174d',0.62:'#c2410c',0.78:'#f97316',0.90:'#fbbf24',1.0:'#fffbeb'}};
+    /* Cool-to-hot on a dark ground, cream-to-hot on a light one: the low end of the
+       ramp has to disappear into the basemap or the whole city reads as a blob. */
+    gradient:themeNow()==='light'
+      ?{0.08:'#fef3c7',0.25:'#fbbf24',0.45:'#f97316',0.62:'#dc2626',0.78:'#9d174d',0.90:'#4c1d95',1.0:'#1e1b4b'}
+      :{0.08:'#1e1b4b',0.25:'#4c1d95',0.45:'#9d174d',0.62:'#c2410c',0.78:'#f97316',0.90:'#fbbf24',1.0:'#fffbeb'}};
   if(!pulseHeat){pulseHeat=L.heatLayer(pts,opts);groups.pulse.addLayer(pulseHeat);}
   else{pulseHeat.setOptions(opts);pulseHeat.setLatLngs(pts);}
   layerCount('c-pulse',pts.length);
@@ -4899,14 +5062,14 @@ function camBust(url){return url+(url.indexOf('?')>=0?'&':'?')+'t='+Date.now();}
 function camIcon(){
   return L.divIcon({className:'cam-ico',iconSize:[18,18],iconAnchor:[9,9],
     html:'<svg width="18" height="18" viewBox="0 0 18 18">'
-      +'<rect x="1" y="4.6" width="11.6" height="8.8" rx="2" fill="#94a3b8" stroke="#06090f" stroke-width="1.2"/>'
-      +'<path d="M12.6 8 L16.8 5.7 L16.8 12.3 L12.6 10 Z" fill="#94a3b8" stroke="#06090f" stroke-width="1.2" stroke-linejoin="round"/>'
-      +'<circle cx="4.3" cy="7.3" r="1" fill="#06090f" opacity=".5"/></svg>'});
+      +'<rect x="1" y="4.6" width="11.6" height="8.8" rx="2" style="fill:var(--mk-cam);stroke:var(--mk-stroke)" stroke-width="1.2"/>'
+      +'<path d="M12.6 8 L16.8 5.7 L16.8 12.3 L12.6 10 Z" style="fill:var(--mk-cam);stroke:var(--mk-stroke)" stroke-width="1.2" stroke-linejoin="round"/>'
+      +'<circle cx="4.3" cy="7.3" r="1" style="fill:var(--mk-stroke)" opacity=".5"/></svg>'});
 }
 
 function camPopupHTML(c){
   const sub=[c.mm,c.place].filter(Boolean).join(' · ');
-  return '<div class="pop-t" style="color:#cbd5e1">'+esc(c.label)+'</div>'
+  return '<div class="pop-t" style="color:var(--pop-cam)">'+esc(c.label)+'</div>'
     +(sub?'<div class="pop-r">'+esc(sub)+'</div>':'')
     /* src is left empty and the real URL parked in data-cam. The popupopen handler
        fills it. Putting the URL in src here would start a download for every popup
@@ -4982,8 +5145,8 @@ map.on('popupclose',()=>{if(camTimer){clearInterval(camTimer);camTimer=null;}});
 function wcIcon(){
   return L.divIcon({className:'wc-ico',iconSize:[18,18],iconAnchor:[9,9],
     html:'<svg width="18" height="18" viewBox="0 0 18 18">'
-      +'<rect x="1.1" y="3" width="15.8" height="12" rx="2.6" fill="#f472b6" stroke="#06090f" stroke-width="1.3"/>'
-      +'<path d="M7.1 6.2 L12.3 9 L7.1 11.8 Z" fill="#06090f"/></svg>'});
+      +'<rect x="1.1" y="3" width="15.8" height="12" rx="2.6" style="fill:var(--mk-webcam);stroke:var(--mk-stroke)" stroke-width="1.3"/>'
+      +'<path d="M7.1 6.2 L12.3 9 L7.1 11.8 Z" style="fill:var(--mk-stroke)"/></svg>'});
 }
 
 /* "Museum of Science, southwest" becomes "southwest" when it is sitting in a row
@@ -4998,7 +5161,7 @@ function wcPopupHTML(p){
   const face=BCCWebcams.facing(p.bearing);
   const sub=[p.place,p.note].filter(Boolean).join(' · ');
   const sibs=BCCWebcams.siblings(p.cam);
-  return '<div class="pop-t" style="color:#f9a8d4">'+esc(p.name)+'</div>'
+  return '<div class="pop-t" style="color:var(--pop-webcam)">'+esc(p.name)+'</div>'
     +(sub?'<div class="pop-r">'+esc(sub)+'</div>':'')
     /* src is left empty and the real url parked in data-wc, for the same reason
        .cam-img is: Leaflet builds every popup at bind time. Twelve YouTube players
@@ -5159,7 +5322,7 @@ function nfmt(n){return (+n||0).toLocaleString('en-US');}
 function outPopupHTML(t,rank,total){
   const share=(t.pct!=null)?nfmt(Math.round(t.pct*10)/10)+'% of the town':'';
   const of=(t.total!=null)?' of '+nfmt(t.total):'';
-  return '<div class="pop-t" style="color:#c4b5fd">'+esc(t.town)+'</div>'
+  return '<div class="pop-t" style="color:var(--pop-outage)">'+esc(t.town)+'</div>'
     +'<div class="pop-r"><b>'+nfmt(t.out)+'</b>'+of+' customers without power</div>'
     +((share||t.utility)?'<div class="pop-r">'+[share,esc(t.utility||'')].filter(Boolean).join(' · ')+'</div>':'')
     +(t.notes?'<div class="pop-r" style="color:var(--text-faint)">'+esc(t.notes)+'</div>':'')
@@ -5173,8 +5336,8 @@ async function loadOutages(){
     outDoc=j;
     groups.outages.clearLayers();
     j.towns.forEach((t,i)=>{
-      const mk=L.circleMarker([t.lat,t.lon],{radius:outRadius(t.out),color:'#06090f',weight:1.2,
-        fillColor:'#a78bfa',fillOpacity:outOpacity(t.pct)});
+      const mk=L.circleMarker([t.lat,t.lon],{radius:outRadius(t.out),color:C('stroke'),weight:1.2,
+        fillColor:C('outage'),fillOpacity:outOpacity(t.pct),className:'mk',mkKey:'outage'});
       mk.bindPopup(outPopupHTML(t,i+1,j.towns.length),{maxWidth:300,autoPanPadding:[24,24]});
       mk.addTo(groups.outages);
     });
@@ -5189,6 +5352,9 @@ async function loadOutages(){
 
 function init(){
   keyboardSetup();
+  const tb=document.getElementById('themeBtn');
+  if(tb)tb.onclick=()=>BCCTheme.toggle();
+  paintThemeBtn();
   /* Every control the situations column draws is delegated to one listener bound
      here. Without this line the chips, the pull controls and the three desk
      buttons are all inert, and a plain click on a card stops panning the map as

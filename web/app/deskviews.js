@@ -14,7 +14,12 @@
   'use strict';
 
   var MOUNTED = false;
+  /* The theme. index.html owns it now (window.BCCTheme): one switch for the
+     board, the Desk and the Story together, remembered under bcc.theme. This
+     file keeps a fallback of its own for the harness, which loads it without
+     the page, and for a page that has not defined BCCTheme yet. */
   var theme = 'light';
+  function cur() { return (root.BCCTheme && root.BCCTheme.get) ? root.BCCTheme.get() : theme; }
   var routineOpen = false;
   var pick = null;                  /* selected situation id, Story view */
   var picked = false;               /* whether the user has chosen one */
@@ -133,14 +138,12 @@
     if (!d || !s) return;
     d.innerHTML = DESK_SKEL;
     s.innerHTML = STORY_SKEL;
-    d.setAttribute('data-theme', theme);
-    s.setAttribute('data-theme', theme);
     d.addEventListener('click', onClick);
     s.addEventListener('click', onClick);
     root.addEventListener('resize', measure);
     MOUNTED = true;
     measure();
-    setTheme(theme);
+    sync();
   }
 
   function closed(s) { return /clos|clear|resolv|over/i.test(s && s.status || ''); }
@@ -463,22 +466,33 @@
     if (b) b.click();
   }
 
-  function setTheme(t) {
-    theme = (t === 'dark') ? 'dark' : 'light';
+  /* Paint the theme in force onto what this file owns: the two view roots,
+     the header class, and the label on the switch. Decides nothing and stores
+     nothing; BCCTheme calls this after every change. */
+  function sync() {
+    theme = cur();
     ['deskview', 'storyview'].forEach(function (id) {
       var e = byId(id);
       if (e) e.setAttribute('data-theme', theme);
     });
     var alt = document.body.classList.contains('altview');
     document.body.classList.toggle('lightview', alt && theme === 'light');
-    /* The basemap is the one piece of these views that lives outside them. A
-       light sheet with a dark map in the middle of it is not a design, it is a
-       hole, so the tiles follow the theme and go back to dark on the way out. */
-    if (alt && root.baseMapTheme) root.baseMapTheme(theme);
     var lbl = theme === 'light' ? 'Dark' : 'Light';
     Array.prototype.forEach.call(
       document.querySelectorAll('#deskview [data-act="theme"],#storyview [data-act="theme"]'),
       function (b) { b.textContent = lbl; });
+  }
+
+  function setTheme(t) {
+    /* The switch on these views is the same switch as the one in the header. */
+    if (root.BCCTheme && root.BCCTheme.set) { root.BCCTheme.set(t); return; }
+    theme = (t === 'dark') ? 'dark' : 'light';
+    sync();
+    /* The basemap is the one piece of these views that lives outside them. A
+       light sheet with a dark map in the middle of it is not a design, it is a
+       hole, so the tiles follow the theme and go back to dark on the way out. */
+    var alt = document.body.classList.contains('altview');
+    if (alt && root.baseMapTheme) root.baseMapTheme(theme);
     try { localStorage.setItem('bcc.deskTheme', theme); } catch (e) {}
   }
 
@@ -486,8 +500,10 @@
     if (!MOUNTED) mount();
     var alt = (v === 'desk' || v === 'story');
     document.body.classList.toggle('altview', alt);
-    document.body.classList.toggle('lightview', alt && theme === 'light');
-    if (root.baseMapTheme) root.baseMapTheme(alt ? theme : 'dark');
+    sync();
+    /* With one theme for the whole page the tiles never have to change on the
+       way in or out of these views; that is only true of the standalone fallback. */
+    if (!root.BCCTheme && root.baseMapTheme) root.baseMapTheme(alt ? theme : 'dark');
     measure();
     if (!alt) return;
     paint(null);
@@ -560,11 +576,12 @@
   });
 
   try {
+    /* Only the fallback reads this; with BCCTheme present the page's setting wins. */
     var saved = localStorage.getItem('bcc.deskTheme');
     if (saved === 'dark' || saved === 'light') theme = saved;
   } catch (e) {}
 
-  var api = { mount: mount, paint: paint, changed: changed, theme: setTheme, measure: measure };
+  var api = { mount: mount, paint: paint, changed: changed, theme: setTheme, sync: sync, measure: measure };
   root.BCCDesk = api;
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 }(typeof window !== 'undefined' ? window : this));

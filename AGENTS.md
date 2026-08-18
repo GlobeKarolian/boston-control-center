@@ -107,6 +107,21 @@ calls sink to the bottom. Consequences:
 **Known dead weight.** `#bezos` is a gag portrait pinned bottom right, hidden
 under 820px. It is deliberate. Leave it.
 
+**Every colour is a light-dark() pair, and the second value is the one that
+shipped.** The page has two themes, switched by `data-theme` on `<html>` and
+remembered under `bcc.theme` (`?theme=light|dark|auto` in the URL pins one).
+There is no second stylesheet: every literal in the CSS reads
+`light-dark(<light>, <dark>)`, and the dark side of every pair is the value the
+board had before the light theme existed, so dark is unchanged by construction.
+When you add a colour, add it as a pair; a bare hex is a rule that ignores the
+theme, and it will look right on whichever theme you happen to be testing in.
+The one place CSS cannot reach is what Leaflet writes into SVG as presentation
+attributes, so the vector layers take their colours from `PAL` in the script
+and `restyleVectors()` walks them on a switch. `PAL.dark` must agree with the
+dark side of the tokens in `:root`. Anything drawn as HTML uses the tokens
+directly and needs no help. The Desk and the Story follow the same setting
+through `BCCTheme`; `deskviews.js` no longer decides a theme of its own.
+
 ## Open work
 
 Numbered from the previous session's queue. Nothing here is started.
