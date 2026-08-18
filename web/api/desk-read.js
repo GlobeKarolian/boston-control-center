@@ -92,27 +92,25 @@ module.exports = async (req, res) => {
   const from = new Date(+to - minutes * 60000);
 
   let got;
+  let rows = [];
+  /* The buffer first, because the vault scan across thousands of Blob objects
+     is what makes this panel hang on a busy night. bcc:out:transcripts is the
+     same buffer the live board renders, and a twenty-minute window almost
+     always fits in it. Only when the buffer is empty does the archive get
+     asked. */
   try {
-    got = await stream.since(from.toISOString(), to.toISOString());
-  } catch (e) {
-    return json(res, { ok: false, why: 'could not read the radio: ' + String(e.message || e).slice(0, 160) }, { status: 503 });
+    rows = await stream.bufferSince(from.toISOString());
+  } catch (e) { /* buffer miss is a vault attempt, never a failure */ }
+
+  if (!rows.length) {
+    try {
+      got = await stream.since(from.toISOString(), to.toISOString());
+      rows = got.rows || [];
+    } catch (e) {
+      return json(res, { ok: false, why: 'could not read the radio: ' + String(e.message || e).slice(0, 160) }, { status: 503 });
+    }
   }
 
-  const rows = got.rows || [];
-  /* The vault is eventually consistent: a write lands, the list lags a few
-     seconds behind it, and for those seconds the archive reads empty while
-     the radio is plainly talking. Redis holds the same window in
-     bcc:out:transcripts, so when the vault comes back empty on a fresh
-     deployment, read the buffer the live board is already reading. */
-  if (!rows.length) {
-    /* Vault empty for this window, which on a busy night usually means it is
-       lagging, not that the city is quiet. Read the live board's buffer, which
-       carries the exact minutes the vault has not caught up on. The earlier
-       inline version of this filtered on `t.at`; the buffer field is `time`,
-       so it dropped every row and the desk still said silence. */
-    const live = await stream.bufferSince(from.toISOString());
-    if (live.length) { rows.push(...live); got.complete = false; got.sampled = true; }
-  }
   /* The transmissions go back with the read, always, so the answer is
      checkable without a second request. This is the whole difference between
      a summary and a claim. */
@@ -132,7 +130,7 @@ module.exports = async (req, res) => {
       watching: [], quiet: true, unsure: [],
       heard: {}, window: { from: from.toISOString(), to: to.toISOString(), minutes },
       vault: vaultOff ? { ok: false, why: blob.reason() } : { ok: true },
-      complete: got.complete, tx: [], ms: Date.now() - t0,
+      complete: got ? got.complete : false, tx: [], ms: Date.now() - t0,
     }, { priv: 0 });
   }
 
@@ -146,7 +144,7 @@ module.exports = async (req, res) => {
       read: rows.length + ' transmissions in ' + minutes + ' minutes, busiest on ' + busiest.join(', ') + '. No model configured, so this is a count rather than a read.',
       watching: [], quiet: null, unsure: [],
       heard, window: { from: from.toISOString(), to: to.toISOString(), minutes },
-      complete: got.complete, tx, ms: Date.now() - t0,
+      complete: got ? got.complete : false, tx, ms: Date.now() - t0,
     }, { priv: 0 });
   }
 
@@ -221,7 +219,7 @@ module.exports = async (req, res) => {
       why: String(e.message || e).slice(0, 200),
       watching: [], quiet: null, unsure: [],
       heard, window: { from: from.toISOString(), to: to.toISOString(), minutes },
-      complete: got.complete, tx, ms: Date.now() - t0,
+      complete: got ? got.complete : false, tx, ms: Date.now() - t0,
     }, { priv: 0 });
   }
 };
