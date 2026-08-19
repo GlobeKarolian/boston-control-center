@@ -253,6 +253,8 @@ module.exports = async (req, res) => {
 
     const geos = await geocodeBatch(fresh.map((it, i) => ({
       ex: exs[i], city: it.city, towns: it.towns, text: it.text,
+      /* The feed, so a venue radio is placed at its venue. */
+      src: it.src,
     })));
 
     // Severity and category, straight off the raw transcript. Pure regex, so

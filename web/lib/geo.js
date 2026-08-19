@@ -26,6 +26,7 @@
 
 const kv = require('./kv');
 const places = require('./places');
+const venues = require('./venues.js');
 
 // A missing or broken street index must degrade the cascade, never take ingest
 // down with it.
@@ -647,6 +648,12 @@ function decideTown(ex, text, city, towns) {
 async function geocodeEx(rawEx, city, opts = {}) {
   const towns = Array.isArray(opts.towns) ? opts.towns.filter(Boolean) : (city ? [city] : []);
   const text = opts.text || '';
+  /* A venue feed is at the venue. Decided before the cascade because the
+     cascade can only make it worse: "Section 24" is nothing to any geocoder,
+     "Boylston" is two miles long, and the hospital a patient is going to is
+     not where the call is. No network, no cache, no guess. */
+  const venue = venues.forFeed(opts.src, towns);
+  if (venue) return venues.fix(venue, text);
   const ex = repairFields(rawEx, text);
   const town = decideTown(ex, text, city, towns);
   const ambiguous = !town;          // multi-town feed that never named a town
@@ -714,7 +721,7 @@ async function geocodeBatch(items, { concurrency = 6 } = {}) {
     for (;;) {
       const i = cursor++;
       if (i >= items.length) return;
-      try { out[i] = await geocodeEx(items[i].ex, items[i].city, { towns: items[i].towns, text: items[i].text }); }
+      try { out[i] = await geocodeEx(items[i].ex, items[i].city, { towns: items[i].towns, text: items[i].text, src: items[i].src }); }
       catch (e) { out[i] = null; }
     }
   };

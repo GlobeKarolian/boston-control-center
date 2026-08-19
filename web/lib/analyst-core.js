@@ -108,7 +108,11 @@ const ANALYST_SYSTEM = [
   "Use 'reported' for a call taken or a dispatch sent, which is most traffic.",
   "Use 'unclear' when the radio is too broken to be sure the event happened at all, and be willing to use it: an unclear situation sits on the board quietly and never raises an alarm, so honesty is free.",
   'Return an empty list if it is all noise.',
-].join(' ');
+  /* Which feeds are one building's own radio, and what a normal night on
+     them sounds like. Built from lib/venues.js so a new venue teaches the
+     model without a prompt edit. */
+  require('./venues.js').analystNote(),
+].filter(Boolean).join(' ');
 
 function hhmm(iso) {
   const d = new Date(iso || 0);

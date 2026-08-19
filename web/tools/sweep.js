@@ -26,6 +26,7 @@ var STEPS = [
   'tools/test-sitlink.js',
   'tools/test-statepolice.js',
   'tools/test-threads.js',
+  'tools/test-venue.js',
   'tools/test-threadui.js',
   'tools/test-track.js',
   'tools/test-webcams.js',

@@ -480,6 +480,17 @@
   .inc-ico.high .dot{width:12px;height:12px}
   .inc-ico.pulse::before{content:'';position:absolute;width:9px;height:9px;border-radius:50%;background:var(--c);opacity:.55;animation:ring 1.5s ease-out infinite}
   @keyframes ring{0%{transform:scale(1);opacity:.55}100%{transform:scale(3.6);opacity:0}}
+  /* A call off a venue radio. The pin is the building's, not the call's (see
+     lib/venues.js), so the glyph is squared off to read as "placed by feed"
+     next to the round dots the geocoder earned. Same colour on purpose: it is
+     still a scanner call, it just did not have to be found. */
+  .inc-ico.venue .dot{border-radius:3px}
+  .inc-ico.venue.pulse::before{border-radius:3px}
+  /* The building itself, drawn only while its radio has an open call, and the
+     name over it. Everything the venue radio says sits inside this ring. */
+  .venue-lbl{background:light-dark(rgba(255,253,250,.9),rgba(6,9,15,.78))!important;border:1px solid light-dark(rgba(13,107,69,.35),rgba(52,211,153,.35))!important;color:var(--scanner)!important;font-family:var(--mono);font-size:9.5px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:1px 6px;border-radius:4px;box-shadow:none;white-space:nowrap}
+  .venue-lbl:before{display:none!important}
+  .pop-venue,.detail .dvenue{font-size:10.5px;color:var(--text-faint);font-style:italic;margin-top:2px}
   /* Docked beside the feed rail rather than on top of the layer panel. On the
      right it covered all nine layer switches, so clicking an incident, which is
      the whole point of the rail, silently took the layer controls away. Here the
@@ -2115,11 +2126,63 @@ async function loadVehicles(){
 const scan={known:{},firstSeen:{},byId:{},selected:null};
 /* A token, not a hex: the dot is HTML and its --c is read by the stylesheet. */
 function incColor(inc){return inc.status!=='active'?'var(--mk-cleared)':(inc.priority==='high'?'var(--crash)':'var(--scanner)');}
-function incIcon(inc){
+function incIcon(inc,off){
   const c=incColor(inc);
   const pulsing=inc.status==='active'&&(Date.now()-(scan.firstSeen[inc.id]||0)<12000);
-  const cls='inc-ico'+(inc.status!=='active'?' cleared':'')+(pulsing?' pulse':'')+(inc.priority==='high'?' high':'');
-  return L.divIcon({html:'<div class="'+cls+'" style="--c:'+c+'"><span class="dot"></span></div>',className:'inc-wrap',iconSize:[18,18],iconAnchor:[9,9]});
+  const cls='inc-ico'+(inc.status!=='active'?' cleared':'')+(pulsing?' pulse':'')+(inc.priority==='high'?' high':'')+(inc.venue?' venue':'');
+  /* off is a pixel nudge for pins that share one point, and it moves the glyph,
+     not the marker: the latlng stays true, so setView and the archive agree
+     with the pin, and the nudge is the same at every zoom because it is in
+     screen space. The popup anchor follows the glyph or the tip points at
+     empty map. */
+  const dx=off?off[0]:0, dy=off?off[1]:0;
+  return L.divIcon({html:'<div class="'+cls+'" style="--c:'+c+'"><span class="dot"></span></div>',className:'inc-wrap',iconSize:[18,18],iconAnchor:[9-dx,9-dy],popupAnchor:[dx,dy]});
+}
+/* Pins that would land on the same pixel, spread into a ring so each one can be
+   read and tapped. Every call on a venue radio is placed at the venue (see
+   lib/venues.js), so on a game night Fenway has six open calls at one point and,
+   without this, five of them are under the sixth. Screen space, not metres: a
+   ring of metres is right at one zoom and either invisible or a block wide at
+   the others. Ordered by first heard, so a pin keeps its place in the ring as
+   the night goes on rather than shuffling on every poll. Radius grows with the
+   count so neighbours stay about a glyph apart. Returns id -> [dx,dy]. */
+function stackKey(i){return (+i.lat).toFixed(5)+','+(+i.lon).toFixed(5);}
+function ringRadius(n){return n<2?0:Math.min(40,Math.max(13,Math.round(3.4*n)));}
+function stackOffsets(list){
+  const at={};
+  list.forEach(i=>{ if(i.lat==null||i.lon==null)return; const k=stackKey(i); (at[k]=at[k]||[]).push(i); });
+  const out={};
+  Object.values(at).forEach(g=>{
+    if(g.length<2)return;
+    g.sort((a,b)=>String(a.firstHeard||'').localeCompare(String(b.firstHeard||''))||String(a.id).localeCompare(String(b.id)));
+    const n=g.length, r=ringRadius(n);
+    g.forEach((i,k)=>{ const a=-Math.PI/2+2*Math.PI*k/n; out[i.id]=[Math.round(r*Math.cos(a)),Math.round(r*Math.sin(a))]; });
+  });
+  return out;
+}
+/* The buildings whose own radios have an open call: one dashed ring at the
+   footprint and the name over it, so a cluster of squared-off pins reads as
+   "inside the ballpark" and not as six things that happened to land on one
+   spot. Drawn into the scanner group so it toggles with the layer, and drawn
+   from the incidents themselves rather than a table of venues, so a venue added
+   on the server appears here with its first call. The stroke is the scanner
+   colour by value rather than by mkKey: the by-name path in restyleVectors()
+   reserves the stroke for the outline colour, and this ring is nothing but
+   stroke. Both themes have one scanner hex, so the by-value translation is
+   exact for it. */
+function drawVenues(list){
+  const seen={};
+  list.forEach(i=>{ if(!i.venue||i.status!=='active'||i.lat==null||i.lon==null||seen[i.venue])return; seen[i.venue]=i; });
+  Object.keys(seen).forEach(name=>{
+    const i=seen[name];
+    /* The name sits clear of the ring of pins, whatever size that ring is
+       tonight, or the label lands on the very pins it is naming. */
+    const stacked=list.filter(x=>x.lat!=null&&x.lon!=null&&stackKey(x)===stackKey(i)).length;
+    const lift=ringRadius(stacked)+16;
+    const ring=L.circle([i.lat,i.lon],{radius:140,color:C('scanner'),weight:1.2,opacity:.55,dashArray:'5 4',fill:true,fillColor:C('scanner'),fillOpacity:.05,interactive:false,className:'mk venue-fp'});
+    ring.bindTooltip(esc(name),{permanent:true,direction:'top',offset:[0,-lift],className:'venue-lbl',interactive:false});
+    ring.addTo(groups.scanner);
+  });
 }
 async function pollScanner(){
   let list=[];
@@ -2143,13 +2206,14 @@ async function pollScanner(){
   const openWas=rebuild?scan.popupOpen:null;
   const popupHadFocus=!!openWas&&!!document.activeElement&&!!document.activeElement.closest&&
     !!document.activeElement.closest('.leaflet-popup');
-  if(rebuild){ scan._mSig=mSig; groups.scanner.clearLayers(); }
+  if(rebuild){ scan._mSig=mSig; groups.scanner.clearLayers(); drawVenues(scanner); }
+  const nudge=rebuild?stackOffsets(scanner):{};
   scanner.forEach(inc=>{
     nowIds.add(inc.id); scan.byId[inc.id]=inc;
     const isNew=!(inc.id in scan.known);
     if(isNew) scan.firstSeen[inc.id]=Date.now();
     if(rebuild&&inc.lat!=null&&inc.lon!=null){
-      const mk=L.marker([inc.lat,inc.lon],{icon:incIcon(inc),keyboard:false,zIndexOffset:inc.status==='active'?1000:0});
+      const mk=L.marker([inc.lat,inc.lon],{icon:incIcon(inc,nudge[inc.id]),keyboard:false,zIndexOffset:inc.status==='active'?1000:0});
       mk.bindPopup(incPopupHTML(inc),{maxWidth:320,minWidth:230,className:'inc-pop',autoPanPadding:[24,24]});
       mk.on('popupopen',()=>{scan.popupOpen=inc.id;});
       mk.on('popupclose',()=>{if(scan.popupOpen===inc.id)scan.popupOpen=null;});
@@ -2210,8 +2274,12 @@ function incPopupHTML(inc){
      everything this call has audio for, oldest first, one press. */
   const chain=(inc.timeline||[]).map(e=>e.clip).filter(u=>u&&window.BCCClips&&BCCClips.ok(u));
   const listen=chain.length?'<button class="dchain" style="margin-top:6px" data-chain="'+esc(JSON.stringify(chain))+'" title="Play every transmission this call has audio for, in order">&#9654; listen ('+chain.length+')</button>':'';
+  /* Provenance, on the pin. A venue call was placed by its feed and not by
+     anything anyone said, and the header's "unverified" is not enough to say
+     so for one pin among forty the geocoder actually found. */
+  const venue=inc.venue?'<div class="pop-venue">'+esc(inc.venue)+' radio &middot; pin is the building, not the call</div>':'';
   return '<div class="pop-t" style="color:var(--scanner)">'+esc(inc.type)+'</div>'+
-    '<div class="pop-r">'+esc(inc.location||'')+'</div>'+
+    '<div class="pop-r">'+esc(inc.location||'')+'</div>'+venue+
     '<div class="pop-meta">'+badge+hi+'</div>'+units+
     '<div class="pop-tls">'+tl+'</div>'+listen+
     /* role="button" and tabindex="0" put this on the same footing as every other div
@@ -2309,7 +2377,7 @@ function renderDetail(inc){
      the old one, so there is nothing to compare it to. */
   const keepClose=el.contains(document.activeElement)&&
     document.activeElement.classList.contains('dclose');
-  el.innerHTML='<div class="dh"><span class="dclose" role="button" tabindex="0" aria-label="Close call detail" onclick="closeDetail()">&times;</span><div class="dtype">'+esc(inc.type)+'</div><div class="dloc">'+esc(inc.location||'')+'</div><div class="dmeta">'+badge+hi+'<span class="dunits">'+esc((inc.units||[]).join(', '))+'</span></div>'+cl+chainBtn+'</div><div class="dtl">'+(tl||'<div class="dunits" style="padding:10px 14px">no transmissions yet</div>')+'</div>';
+  el.innerHTML='<div class="dh"><span class="dclose" role="button" tabindex="0" aria-label="Close call detail" onclick="closeDetail()">&times;</span><div class="dtype">'+esc(inc.type)+'</div><div class="dloc">'+esc(inc.location||'')+'</div>'+(inc.venue?'<div class="dvenue">'+esc(inc.venue)+' radio &middot; every call on it is placed at the building; the section, gate or stand is what was said</div>':'')+'<div class="dmeta">'+badge+hi+'<span class="dunits">'+esc((inc.units||[]).join(', '))+'</span></div>'+cl+chainBtn+'</div><div class="dtl">'+(tl||'<div class="dunits" style="padding:10px 14px">no transmissions yet</div>')+'</div>';
   if(keepClose){const c=el.querySelector('.dclose');if(c)c.focus();}
 }
 function showToast(inc){

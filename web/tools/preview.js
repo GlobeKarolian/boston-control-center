@@ -22,9 +22,10 @@
 //   node tools/preview.js 8787 dark
 //
 // The third argument seeds nothing but a mood: pass "quiet" for an empty
-// board, "dark" for a relay that stopped talking forty minutes ago. Both are
-// states the views have to have an answer for and neither is easy to catch in
-// the wild, because you cannot ask the scanners to stop.
+// board, "dark" for a relay that stopped talking forty minutes ago, "game" for
+// a night the Fenway Park radio has six calls open at once. All are states
+// the views have to have an answer for and none is easy to catch in the wild,
+// because you cannot ask the scanners to stop, or the Red Sox to play.
 //
 // Not registered in tools/sweep.js. This is a thing you look at, not a thing
 // that passes or fails.
@@ -189,8 +190,50 @@ function transcripts() {
    the Desk makes between a routine call and something worth a row, so the
    preview has to produce both kinds out of this one file or the routine
    counter is always zero and the finding it demonstrates goes untested. */
+/* A game night on the ballpark's own radio (lib/venues.js). Every one of these
+   is at the same point, because the feed puts it there, and that is the case
+   the map has to answer for: six pins on one pixel with the building drawn
+   under them, each one readable, each one tappable, and a Boston Police call
+   from the street outside standing apart at the same coordinates. */
+var GAME = [
+  [1, 0, 'active', 'medical', 'Fenway Park \u00b7 Section 24', 'Section 24', ['Medic 1'],
+    ['Medical, section 24, patient fainted, Medic 1 respond.', 'Copy, en route.', 'Patient conscious now, EMS on the way.']],
+  [4, 2, 'active', 'disturbance', 'Fenway Park \u00b7 Section 12', 'Section 12', ['Sup 2'],
+    ['Ejection, section 12, two males fighting, Sup 2 respond.', 'Sup 2 on scene, both parties separated.']],
+  [7, 5, 'active', 'medical', 'Fenway Park \u00b7 Gate E', 'Gate E', ['Medic 3'],
+    ['Medical, gate E, elderly female fell.', 'Medic 3 arriving gate E.']],
+  [11, 9, 'active', 'missing person', 'Fenway Park \u00b7 Gate B', 'Gate B', ['Gate 5'],
+    ['Lost child at gate B, blue shirt, about six.', 'Parent located, reunited at gate B.']],
+  [15, 15, 'active', 'unclassified', 'Fenway Park \u00b7 Bleachers', 'Bleachers', ['Medic 2'],
+    ['Medic 2 to the bleachers, intox.']],
+  [30, 20, 'cleared', 'medical', 'Fenway Park \u00b7 Section 30', 'Section 30', ['Medic 1'],
+    ['Medic 1, second medical, section 30.', 'Section 30 refused transport, Medic 1 clear.']],
+];
+
 function incidents() {
   var out = [];
+  if (MOOD === 'game') {
+    GAME.forEach(function (g, i) {
+      out.push({
+        id: id('fen' + i), cat: 'scanner', type: g[3], title: g[6].join(', '),
+        units: g[6], location: g[4], matched: 'Fenway Park', lat: 42.34655, lon: -71.09731,
+        located: true, precision: 'exact', geoVia: 'venue', town: 'Boston',
+        venue: 'Fenway Park', detail: g[5], feed: 'fenway-security',
+        source: 'Scanner (Boston)', status: g[2], priority: 'normal',
+        firstHeard: ago(g[0]), lastUpdate: ago(g[1]),
+        timeline: g[7].map(function (t, n) { return { t: ago(g[0] - n * 1.5), source: 'fenway-security', text: t, role: n ? 'field' : 'dispatch' }; }),
+      });
+    });
+    /* The street outside, at the same coordinates by way of the gazetteer. */
+    out.push({
+      id: id('bpd-fen'), cat: 'scanner', type: 'disturbance', title: 'Car 401',
+      units: ['Car 401'], location: 'Fenway Park', matched: 'Fenway Park', lat: 42.34655, lon: -71.09731,
+      located: true, precision: 'approx', geoVia: 'gazetteer', town: 'Boston', feed: 'boston-police',
+      source: 'Scanner (Boston)', status: 'active', priority: 'normal',
+      firstHeard: ago(3), lastUpdate: ago(1),
+      timeline: [{ t: ago(3), source: 'boston-police', text: 'Units respond to Fenway Park, fight at the gate on Lansdowne.', role: 'dispatch' }],
+    });
+  }
   cast().forEach(function (c, i) {
     out.push({
       id: id('inc' + i), cat: 'scanner', type: c.type, title: c.head,
@@ -291,5 +334,5 @@ http.createServer(function (req, res) {
 }).listen(PORT, '127.0.0.1', function () {
   console.log('preview  http://127.0.0.1:' + PORT + '   mood: ' + MOOD +
     '   (' + cast().length + ' situations, ' + incidents().length + ' scanner records)');
-  console.log('moods    busy | quiet | dark        stop with ctrl-c');
+  console.log('moods    busy | quiet | dark | game        stop with ctrl-c');
 });

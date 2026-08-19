@@ -122,6 +122,36 @@ dark side of the tokens in `:root`. Anything drawn as HTML uses the tokens
 directly and needs no help. The Desk and the Story follow the same setting
 through `BCCTheme`; `deskviews.js` no longer decides a theme of its own.
 
+## Venue feeds
+
+Some radios never leave one building. Fenway Park's security and operations
+channel was the first (18 August 2026), and it inverts the pipeline's usual
+job: every call on it is at the ballpark before a word is transcribed, and
+reading the transcript for a place only makes things worse. "Section 24"
+resolves to nothing and falls to the town centroid, which is City Hall;
+"transport to Mass General" is where the patient is going. So `lib/venues.js`
+is a table, and four things read it:
+
+- `lib/geo.js` places any transmission from a venue feed at the venue before
+  the cascade runs, with `venue`, `detail` ("Section 24", "Gate E") and
+  `src: 'venue'` on the fix. `matched` is the venue name alone.
+- `lib/incident-store.js` threads venue calls by kind, spot and time instead of
+  by distance, because at a venue every call is zero metres from every other.
+  Two calls naming different spots are two calls, and that undoes a unit join.
+  A venue line with no call type and no unit-at-a-spot is chatter, not a pin.
+- `lib/extractor.js` files the feed under the venue's town, not under the
+  building's name.
+- `lib/analyst-core.js` tells the model which feed tags are venues and what a
+  normal night on each one sounds like, from the same table.
+
+A feed becomes a venue feed when the relay's Covers box names the venue, or
+when its slug carries the marker and does not name a public agency ("BPD D-4
+Fenway/Kenmore" is a district, not the park). The dashboard squares off the
+glyph, spreads pins that share one point into a ring, draws the building under
+them, and says on the pin that the pin is the building's and not the call's.
+`node tools/preview.js 8787 game` puts a game night on the board.
+`tools/test-venue.js` is the contract; add a venue by adding a row.
+
 ## Open work
 
 Numbered from the previous session's queue. Nothing here is started.

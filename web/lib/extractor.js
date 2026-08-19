@@ -51,6 +51,7 @@ const KEY = () => (process.env.ANTHROPIC_API_KEY || '').trim();
    bad slug, a deprecation, or one provider's outage degrades to the second
    opinion instead of to regex. */
 const llmlog = require('./llmlog');
+const venues = require('./venues.js');
 const OR_KEY = () => (process.env.OPENROUTER_API_KEY || '').trim();
 /* Ling first, DeepSeek second, decided by a stopwatch rather than a brand:
    in live testing DeepSeek's flash burned the whole 20-second budget without
@@ -265,6 +266,12 @@ const FEED_TOWN = [
 ];
 
 function townFromFeed(feedSrc, declared) {
+  /* A venue feed first. Its declared coverage is a building, not a town, and
+     without this line "Fenway Park" would come back as the municipality and
+     nothing downstream would recognise it as one. lib/venues.js knows the
+     town the building stands in. */
+  const venue = venues.forFeed(feedSrc, declared);
+  if (venue) return venue.town;
   const f = String(feedSrc || '').toLowerCase();
   /* The channel's own name first. `declared` looks like configuration and is
      often just a default: the relay's City box starts at "Boston" and
@@ -424,8 +431,11 @@ function mapFields(o, by, text, feedSrc, declared) {
   if (landmark && !heardIn(landmark, src)) { hallucinated = true; landmark = null; }
   /* The model does not know which feed it is reading. The town it names is a
      guess from the transcript alone; the feed source is a fact. When the two
-     disagree, the feed wins. */
-  let town = clean(o.town) || townFromFeed(feedSrc, declared);
+     disagree, the feed wins. On a venue feed the town is not even a guess:
+     the building stands where it stands, and "Fenway Park" is what the model
+     hands back when the coverage it was shown was the building's name. */
+  const venue = venues.forFeed(feedSrc, declared);
+  let town = venue ? venue.town : (clean(o.town) || townFromFeed(feedSrc, declared));
   return {
     units: Array.isArray(o.units) ? o.units.map(u => String(u).toUpperCase().replace(/[\s-]/g, '')).filter(Boolean) : [],
     callType: clean(o.call_type),

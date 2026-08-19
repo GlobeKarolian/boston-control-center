@@ -90,6 +90,26 @@ const SAME_SCENE_METERS       = 200;             // a city block plus the corner
    same address, not near enough to hoover up the next call down the street. */
 const NEAR_SCENE_METERS       = 90;
 
+/* VENUES. A feed that never leaves one building (lib/venues.js) puts every
+   call at the same point, so the two distance rules above cannot separate one
+   incident from the next; a game night would be one card. Venue calls are
+   threaded by kind, spot and time instead. A call that names its type joins
+   an open scene of the same type at the venue inside this window, and a line
+   that names no type at all, "copy, en route", joins whatever the same feed
+   opened moments before. Both windows are short on purpose: two medicals an
+   hour apart at a ballpark are two medicals.
+
+   The spot is the one thing a venue line can say about place, "Section 24",
+   "Gate E", and it cuts the other way: two calls that name different spots
+   are two calls, however alike they sound and however close in time. A line
+   that names no spot may join a scene that has one, because the first call
+   is usually the one that said where. */
+const VENUE_SAME_TYPE_WINDOW_MS = 25 * 60 * 1000;
+const VENUE_FOLLOWUP_WINDOW_MS  = 4 * 60 * 1000;
+
+/* "Fenway Park · Section 24". The pin says the venue; the label says where in it. */
+function venueLabel(venue, detail) { return detail ? venue + ' \u00b7 ' + detail : venue; }
+
 /* The alerting bar, and the ceiling that makes it safe to have one.
 
    Heat used to be built entirely out of volume: units, transmissions, and how
@@ -486,11 +506,48 @@ function createStore(geocode, extractFn, opt) {
           join is tighter than the block-and-corner used between two exact
           fixes. */
     const joinable = geo && !geo.wide && (precision === 'exact' || precision === 'approx');
-    if (!inc && joinable) {
+    const venue = (geo && geo.venue) ? geo.venue : null;
+    /* Where inside the venue this line says it is, when it says. A scene that
+       names one spot and a line that names another are not the same call,
+       and that holds even when a unit ties them: the medic cart that just
+       cleared Section 24 and is now sent to Section 30 has not gone back to
+       the first patient. The unit join above is undone for that one case
+       and the venue rule below decides instead. */
+    const spot = venue ? (geo.detail || null) : null;
+    const spotClash = (c) => !!(spot && c && c.detail && c.detail !== spot);
+    if (inc && venue && inc.venue === venue && spotClash(inc)) { inc = null; joinedBy = null; }
+    if (!inc && joinable && venue) {
+      /* At a venue every call is zero metres from every other, so what a call
+         IS, WHERE IN THE BUILDING and WHEN it came are the only things that
+         can thread it. A city scene a block away is left alone in both
+         directions: on a game night Boston Police work the streets outside,
+         and a fight spilling out of a gate is a connection the desk should
+         make, not one the store should assume from geometry. */
+      const type = (ex.callType && ex.callType !== 'unclassified') ? ex.callType : null;
+      let best = null, bestScore = -1;
+      for (const id in incidents) {
+        const c = incidents[id];
+        if (c.status !== 'active' || c.venue !== venue) continue;
+        const age = time - new Date(c.lastUpdate);
+        if (type) {
+          if (age >= VENUE_SAME_TYPE_WINDOW_MS) continue;
+          if (c.type && c.type !== 'unclassified' && c.type !== type) continue;
+        } else if (c.feed !== source || age >= VENUE_FOLLOWUP_WINDOW_MS) continue;
+        if (spotClash(c)) continue;
+        /* A scene at the spot this line names beats a scene that never said
+           where; among equals the one talked to most recently wins. */
+        const score = (spot && c.detail === spot) ? 1 : 0;
+        if (score > bestScore || (score === bestScore && +new Date(c.lastUpdate) > +new Date(best.lastUpdate))) { best = c; bestScore = score; }
+      }
+      if (best) { inc = best; joinedBy = 'venue'; }
+    } else if (!inc && joinable) {
       let best = null, bestD = Infinity;
       for (const id in incidents) {
         const c = incidents[id];
         if (c.status !== 'active' || !c.located || c.precision !== 'exact') continue;
+        /* A venue scene sits on a real point too, and a city call at that point
+           is still not part of it: see above. */
+        if (c.venue) continue;
         if ((time - new Date(c.lastUpdate)) >= ADDRESS_MATCH_WINDOW_MS) continue;
         if (c.matched && c.matched === geo.matched) { best = c; bestD = 0; break; }
         if (typeof c.lat !== 'number') continue;
@@ -616,6 +673,12 @@ function createStore(geocode, extractFn, opt) {
         inc.located = true; inc.precision = precision; inc.geoVia = geo.src || null;
         if (geo.town && !inc.town) inc.town = geo.town;
       }
+      /* Where inside the venue, when a later line says. The pin does not
+         move; the label does. */
+      if (venue && geo.detail && inc.venue === venue) {
+        inc.detail = geo.detail;
+        inc.location = venueLabel(venue, geo.detail); inc.matched = venue;
+      }
       if (ex.isClear) { inc.status = 'cleared'; inc.clearedAt = iso(time); releaseUnits(inc); }
       if (stop) { stop.incidentId = inc.id; inc.stopId = stop.id; }
       scoreHeat(inc);
@@ -640,7 +703,14 @@ function createStore(geocode, extractFn, opt) {
     // only opens a stop does not also open an incident. It comes back to the
     // map the moment it is more than a stop.
     const routineStop = !!stop && !stopIsNews && !escalated && ex.priority !== 'high';
-    const startable = ((geo && !weakAlone && !inherited) || dispatchNoLoc) && !routineStop;
+    /* On a venue radio every line arrives placed, so a fix alone cannot be the
+       reason to open a scene or every radio check would be a pin. A venue
+       scene opens on a call type, or on a unit being sent to a named spot,
+       "Medic 1 to Section 24", which is a call whether or not anyone said
+       what kind. Anything else is chatter until a unit or a type ties it to
+       a scene. */
+    const venueChatter = !!venue && !(ex.callType && ex.callType !== 'unclassified') && !(ex.units.length && geo.detail);
+    const startable = ((geo && !weakAlone && !inherited && !venueChatter) || dispatchNoLoc) && !routineStop;
 
     if (startable) {
       const id = 'inc-' + Date.now().toString(36) + '-' + (seq++);
@@ -654,10 +724,12 @@ function createStore(geocode, extractFn, opt) {
         // so the first real classification still takes over.
         type: ex.callType || (stop && (stop.kind === 'pedestrian' ? 'pedestrian stop' : 'traffic stop')) || 'unclassified',
         title: ex.units.length ? ex.units.join(', ') : 'Unit dispatched',
-        location: geo ? geo.matched : null, matched: geo ? geo.matched : null,
+        location: geo ? (venue ? venueLabel(venue, geo.detail) : geo.matched) : null, matched: geo ? geo.matched : null,
         lat: geo ? geo.lat : null, lon: geo ? geo.lon : null, located: !!geo,
         precision: precision || null, geoVia: geo ? (geo.src || null) : null,
         town: geo ? (geo.town || null) : null,
+        /* The building this call is inside, and where in it, for a venue feed. */
+        venue: venue || undefined, detail: (venue && geo.detail) || undefined,
         status: ex.isClear ? 'cleared' : 'active', priority: ex.priority, verified: false,
         firstHeard: iso(time), lastUpdate: iso(time), clearedAt: ex.isClear ? iso(time) : null,
         escalations: escalated ? 1 : 0,
