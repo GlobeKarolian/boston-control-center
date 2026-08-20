@@ -243,8 +243,14 @@ function sceneExpand(hits, pool, f, ix) {
   const linked = (tx, hay, dtMs, inc, anchorStreet, sc) => {
     if (inc && tx.incidentId && tx.incidentId === inc) return true;
     /* The grouper put them in one scene: same incident, or a loose line it
-       attached by unit or place, or two radios it folded together. */
-    if (sc && ix && ix.get(tx) === sc) return true;
+       attached by unit or place, or two radios it folded together. ONLY for
+       a scene the store vouched for. A loose burst is twenty minutes of a
+       channel, and riding its members in on this rule meant one weak match
+       inside a 46-line chunk dressed the whole chunk up as context: the card
+       led with five lines of overtime chatter and the line that answered the
+       question was buried under the fold. That is what "unusable" looks like
+       on screen, whatever the scoring got right. */
+    if (sc && !sc.loose && ix && ix.get(tx) === sc) return true;
     if (anchorStreet.length && anchorStreet.some(w => hay.includes(w))) return true;
     if (f.type && dtMs <= typeReach(f.type)) {
       if (vq.ownType(tx, f.type)) return true;

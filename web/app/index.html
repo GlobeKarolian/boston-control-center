@@ -3016,7 +3016,10 @@ async function arSearch(q){
        three and a night with one shows one. */
     const strong=[], weak=[];
     const top=d.results[0].score||1;
-    for(const c of d.results){ ((c.score||0)>=top*0.45&&strong.length<8?strong:weak).push(c); }
+    /* Six cards above the fold, not eight, and the bar at half the best score
+       rather than 0.45: against real radio the tail is text matches on
+       garbled words, and a reporter reads the wall or reads nothing. */
+    for(const c of d.results){ ((c.score||0)>=top*0.5&&strong.length<6?strong:weak).push(c); }
     out.innerHTML=strong.map(arCall).join('')
       +(weak.length
         ? '<details class="ar-more"><summary>'+weak.length+' weaker match'

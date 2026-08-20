@@ -242,7 +242,11 @@ function whenOf(q, now) {
  * stemming to anything that matches free words. */
 const TYPES = {
   death: /\b(body|bodies|deceased|dead|doa|fatal|fatalit(y|ies)|coroner|medical examiner|untimely|jumpers?|drownings?|drowned)\b/i,
-  shooting: /\b(shootings?|shots fired|gunshots?|gunfire|shot)\b/i,
+  /* Bare "shot" is out. On the first real slice it matched "would you have a
+     good shot to 1261 Dorchester Ave" and put an ambulance's phrasing second
+     for "shooting in dorchester". A person being shot arrives with grammar
+     around it, and that grammar is cheap to demand. */
+  shooting: /\b(shootings?|shots?\s+fired|gunshots?|gunfire|shots|(?:was|been|being|got|getting|male|female|party|person|victim|one|someone|somebody|kid|guy)\s+shot|shot\s+(?:in|to)\s+the\s+(?:leg|arm|chest|head|back|neck|face|stomach|shoulder|hand|foot|torso|hip))\b/i,
   /* "slashed" is not here on purpose: on a police channel it is nearly always
      tires, and a person who was slashed arrives with knife or stab words in
      the same breath. */
