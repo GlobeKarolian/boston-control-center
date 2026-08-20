@@ -118,7 +118,15 @@ function group(hits, ix) {
        "Harvard" outranked the Harvard Square brawl the reporter was actually
        looking for. Agreement among transmissions is a tiebreak, not a reason
        to outrank a better answer. */
-    score: g.best + Math.min(1.5, Math.log2(1 + g.tx.length)),
+    /* Substance breaks ties. A type-only question ("fires yesterday") gives
+       every card the same match score, and ties used to fall to the newest,
+       which put a chatter chunk containing the word "smoke" above a
+       six-agency structure fire from the afternoon. The peak tier anybody
+       reached and the agencies that converged are small enough that a better
+       MATCH still wins, and exactly what should separate equals. */
+    score: g.best + Math.min(1.5, Math.log2(1 + g.tx.length))
+      + Math.max(0, ...g.tx.map(t => Number(t.tier) || 0))
+      + Math.min(2, Math.max(0, new Set(g.tx.map(t => t.feed).filter(Boolean)).size - 1)),
     units: [...g.units].slice(0, 12),
     tx: g.tx.sort((a, b) => String(a.at).localeCompare(String(b.at))),
     clips: g.tx.filter(t => t.clip).map(t => ({ u: t.clip, at: t.at })).slice(0, 40),
@@ -167,7 +175,13 @@ const NOT_A_THREAD = new Set(['street', 'st', 'road', 'rd', 'avenue', 'ave', 'dr
   'court', 'ct', 'lane', 'ln', 'way', 'terrace', 'ter', 'boulevard', 'blvd', 'parkway', 'pkwy',
   'highway', 'hwy', 'route', 'rte', 'square', 'sq', 'circle', 'park', 'north', 'south', 'east', 'west',
   'the', 'and', 'house', 'building', 'apartment', 'apt', 'floor', 'unit', 'suite', 'rear', 'front',
-  'usa']);
+  'usa',
+  /* Generic building words, which this list needs more than lib/scenes.js
+     does because here ONE word is a thread. "MGM Music Hall" as an anchor
+     pulled Logan's customs hall into its card on the word "hall" alone. */
+  'hall', 'station', 'terminal', 'airport', 'plaza', 'mall', 'garage', 'school', 'church', 'market',
+  'hospital', 'hospitals', 'mgh', 'general', 'brigham', 'tufts', 'faulkner', 'clinic', 'medical',
+  'center', 'health', 'emergency', 'room', 'infirmary', 'city']);
 function streetWords(tx) {
   const src = [tx.address, tx.street, tx.landmark,
     /* the street part of a geocoded answer only, before the first comma */

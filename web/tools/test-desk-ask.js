@@ -34,8 +34,12 @@ function section(t) { console.log('\n' + t); }
 const NOW = Date.parse('2026-08-19T03:30:00Z');           // 11:30 PM Eastern, Aug 18
 const ago = (m) => new Date(NOW - m * 60000).toISOString();
 function row(min, feed, text, o) {
-  return Object.assign({ at: ago(min), feed, src: feed, text, units: [], callType: null, matched: null, address: null,
+  const r = Object.assign({ at: ago(min), feed, src: feed, text, units: [], callType: null, matched: null, address: null,
     incidentId: null, tier: 0, signals: [], clip: null, town: 'Boston', city: 'Boston', lat: null, lon: null }, o || {});
+  /* Every geocoded vault row carries a precision; the grouper trusts only
+     exact and approx pins, so a fixture with coordinates gets one too. */
+  if (Number.isFinite(r.lat) && r.lat && !r.precision) r.precision = 'exact';
+  return r;
 }
 const H = { lat: 42.3105, lon: -71.0698 };
 const ROWS = [

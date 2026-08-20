@@ -162,8 +162,16 @@ function weight(scene) {
   try { fl = severity.floor({ tx, feeds: scene.feeds, units: scene.units, spanMin: span, anomaly: { level: 'normal' } }); } catch (e) { /* a bad row is not a reason to drop a scene */ }
   let tier = 0, high = false;
   for (const t of tx) { tier = Math.max(tier, Number(t.tier) || 0); if (t.priority === 'high') high = true; }
-  return { floor: fl.score, reasons: fl.reasons, tier, high,
-           score: fl.score * 10 + tier * 3 + (high ? 4 : 0) + Math.min(3, scene.units.length / 3) };
+  /* A loose burst is twenty minutes of a channel, not a call, and the floor's
+     volume terms read a busy channel as a big scene: on the first real slice
+     a chunk of boston-police ranked third for "the biggest calls tonight"
+     because it held fifty-six lines and one tier-3 sentence. A burst ranks by
+     what was SAID in it, nothing else; a real shots-fired line that never
+     made a scene still surfaces, and ordinary busyness does not. */
+  const score = scene.loose
+    ? tier * 10 + (high ? 4 : 0)
+    : fl.score * 10 + tier * 3 + (high ? 4 : 0) + Math.min(3, scene.units.length / 3);
+  return { floor: fl.score, reasons: fl.reasons, tier, high, score };
 }
 
 /* The lines of a scene worth showing: the ones that answered the question

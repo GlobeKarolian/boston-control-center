@@ -24,8 +24,13 @@ function section(t) { console.log('\n' + t); }
 const T0 = Date.parse('2026-08-19T02:00:00Z');
 const at = (m) => new Date(T0 + m * 60000).toISOString();
 function row(min, feed, text, o) {
-  return Object.assign({ at: at(min), feed, text, units: [], callType: null, matched: null, address: null,
+  const r = Object.assign({ at: at(min), feed, text, units: [], callType: null, matched: null, address: null,
     incidentId: null, lat: null, lon: null, town: 'Boston', city: 'Boston', precision: null }, o || {});
+  /* The vault stamps a precision on every geocoded row, and the grouper now
+     trusts only exact and approx pins. A fixture with coordinates and no
+     precision would model a row the pipeline never writes. */
+  if (Number.isFinite(r.lat) && r.lat && !r.precision) r.precision = 'exact';
+  return r;
 }
 const HANCOCK = { lat: 42.3105, lon: -71.0698 };
 const ids = (scenes) => scenes.map(s => s.id);
