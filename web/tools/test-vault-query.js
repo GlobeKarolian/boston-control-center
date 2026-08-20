@@ -314,7 +314,12 @@ console.log('\ntokens');
  * Landmarks are points with a radius now, and anything the pipeline geocoded
  * inside one is in that place whatever words were spoken. */
 {
-  const f = vq.parse('Bar Fight Harvard Square');
+  /* Pinned to the night it happened. These rows are dated 17 August, and a
+     parse against the real clock puts its two-day default window past them
+     once the calendar moves on; the test then fails on the date gate and
+     looks like a landmark bug. It was one, on 18 August, for a day. */
+  const THAT_NIGHT = new Date('2026-08-17T03:00:00Z');
+  const f = vq.parse('Bar Fight Harvard Square', THAT_NIGHT);
   ok('the query still parses the landmark', f.landmark === 'harvard square', JSON.stringify(f.landmark));
 
   const brawl = {
@@ -343,7 +348,7 @@ console.log('\ntokens');
     text: 'units responding to Harvard Square for a disturbance', callType: 'disturbance',
   };
   ok('a spoken landmark with no coordinates still matches',
-     vq.score(spoken, vq.parse('disturbance harvard square')) > 0);
+     vq.score(spoken, vq.parse('disturbance harvard square', THAT_NIGHT)) > 0);
 
   /* And an unrelated call at the same moment stays out. */
   const other = {
@@ -451,6 +456,90 @@ ok('and a singular question matches a plural transmission',
 ok('but a word is not found inside a longer one',
    !vq.wordIn('the firefighter arrived', 'fire'));
 
+/* ------------------------------------------------------------------
+   THE WORDS A DESK ASKS WITH ARE NOT THE THING IT IS ASKING ABOUT.
+
+   19 August. "What were the biggest calls tonight" parsed to words:
+   ["biggest"], and a question that names a thing returns only lines that
+   carry it, so the desk searched a whole night for the literal word
+   "biggest" and found nothing. "Any shootings overnight" did the same with
+   "overnight": the when-parser had already turned it into hours, and then the
+   word went on to be required of every line. "Shots fired" became type
+   shooting and then "shots" and "fired" were demanded of every shooting,
+   including the ones labelled from "gunshot wounds". None of those words was
+   ever the question. */
+{
+  const NOW = new Date('2026-08-19T03:30:00Z');              // 11:30pm Eastern
+  const P = (q) => vq.parse(q, NOW);
+  const f1 = P('what were the biggest calls tonight');
+  ok('"biggest calls tonight" asks for nothing by name', f1.words.length === 0 && !f1.type && !f1.place, JSON.stringify(f1.words));
+  ok('but asks for the big end of it', f1.big === true);
+  ok('and tonight is a named window', f1.named === true && f1.when === 'tonight');
+  const f2 = P('any shootings overnight');
+  ok('"overnight" is hours, not a word', f2.words.length === 0 && f2.type === 'shooting' && f2.named === true, JSON.stringify(f2.words));
+  const f3 = P('shots fired dorchester');
+  ok('the words the type was recognised by are spent', f3.type === 'shooting' && f3.place === 'dorchester' && f3.words.length === 0, JSON.stringify(f3.words));
+  const f4 = P('structure fire in jp');
+  ok('"structure" does not survive "structure fire"', f4.type === 'fire' && f4.place === 'jamaica plain' && f4.words.length === 0, JSON.stringify(f4.words));
+  const f5 = P('worst thing last night');
+  ok('"worst" and "thing" are filler', f5.words.length === 0 && f5.big === true, JSON.stringify(f5.words));
+  const f6 = P('anything interesting tonight');
+  ok('"interesting" is filler', f6.words.length === 0, JSON.stringify(f6.words));
+  const f7 = P('the brawl at russell house');
+  ok('a name that is not filler survives', f7.type === 'disturbance' && f7.words.includes('russell'), JSON.stringify(f7.words));
+  const f8 = P('any arrests tonight');
+  ok('and so does a thing worth searching for', f8.words.includes('arrests'), JSON.stringify(f8.words));
+
+  /* The ways a desk names a time. */
+  const hrs = P('any stabbings in the last 6 hours');
+  ok('"last 6 hours" is six hours', hrs.named && Math.round((+hrs.to - +hrs.from) / 3600000) === 6 && hrs.words.length === 0, hrs.when);
+  const few = P('fights in the last few hours');
+  ok('"last few hours" is three', few.named && Math.round((+few.to - +few.from) / 3600000) === 3, few.when);
+  const aft = P('fights this afternoon');
+  ok('"this afternoon" is noon to six', aft.named && aft.when === 'this afternoon' && aft.words.length === 0);
+  const now = P('what is going on right now');
+  ok('"right now" is the last hour, and not two words', now.named && Math.round((+now.to - +now.from) / 60000) === 60 && now.words.length === 0, JSON.stringify(now.words));
+  const wk = P('shooting this past weekend');
+  ok('"this past weekend" is the weekend, not two words', wk.named && wk.when === 'the weekend' && wk.words.length === 0, JSON.stringify(wk.words));
+  const ya = P('stabbing yesterday afternoon');
+  ok('"yesterday afternoon" is an afternoon, not a day', ya.named && ya.when === 'yesterday afternoon' && Math.round((+ya.to - +ya.from) / 3600000) === 6);
+  const bare = P('stabbing on lancaster street');
+  ok('no time named means no time named', bare.named === false && bare.when === 'the last two days');
+  /* Tuesday 18 August at 11:30pm: "this past weekend" is Sat 15 / Sun 16. */
+  ok('and the weekend is the right one', /2026-08-15T04:00/.test(wk.from.toISOString()) && /2026-08-17T04:00/.test(wk.to.toISOString()), [wk.from.toISOString(), wk.to.toISOString()]);
+
+  /* "Last night" at any hour of the day is the night that happened. The QA
+     pass of 14 August searched for a fire "last night" at 2pm and was handed
+     a window that had not started yet. */
+  const E = (d) => new Date(d).toLocaleString('en-US', { timeZone: 'America/New_York', month: 'short', day: 'numeric', hour: 'numeric' });
+  const at11am = vq.parse('big fire last night in back bay', new Date('2026-08-19T15:00:00Z'));
+  ok('at 11am, last night is the night that ended at six', E(at11am.from) === 'Aug 18, 6 PM' && E(at11am.to) === 'Aug 19, 6 AM', [E(at11am.from), E(at11am.to)]);
+  const at2am = vq.parse('fire last night', new Date('2026-08-19T06:00:00Z'));
+  ok('at 2am, last night is the night underway', E(at2am.from) === 'Aug 18, 6 PM' && E(at2am.to) === 'Aug 19, 6 AM', [E(at2am.from), E(at2am.to)]);
+  const at11pm = vq.parse('fire last night', new Date('2026-08-20T03:30:00Z'));
+  ok('at 11:30pm, last night is the previous one', E(at11pm.from) === 'Aug 18, 6 PM' && E(at11pm.to) === 'Aug 19, 6 AM', [E(at11pm.from), E(at11pm.to)]);
+  const ton11am = vq.parse('biggest calls tonight', new Date('2026-08-19T15:00:00Z'));
+  ok('at 11am, tonight has not started, so it is last night and says so', ton11am.when === 'last night' && E(ton11am.from) === 'Aug 18, 6 PM', [ton11am.when, E(ton11am.from)]);
+  const ton8pm = vq.parse('biggest calls tonight', new Date('2026-08-20T00:00:00Z'));
+  ok('at 8pm, tonight is the night underway', ton8pm.when === 'tonight' && E(ton8pm.from) === 'Aug 19, 6 PM', [ton8pm.when, E(ton8pm.from)]);
+  ok('no window is ever in the future', [at11am, at2am, at11pm, ton11am].every(x => +x.from < Date.parse('2026-08-19T15:00:01Z')));
+
+  /* A name within one letter. Whisper hears "Boylston" as "Boylstone". */
+  const NIGHT = new Date('2026-08-19T02:30:00Z');
+  const q9 = vq.parse('disturbance on boylston', NIGHT);
+  ok('the street is a word to search for', q9.words.includes('boylston'), JSON.stringify(q9.words));
+  const heard = { at: '2026-08-19T02:00:00Z', text: 'units to boylstone for a disturbance', callType: 'disturbance', feed: 'boston-police' };
+  ok('a street one letter off is still found', vq.score(heard, q9) > 0, vq.score(heard, q9));
+  const exact = { at: '2026-08-19T02:00:00Z', text: 'units to boylston for a disturbance', callType: 'disturbance', feed: 'boston-police' };
+  ok('and scores below the one spelled right', vq.score(heard, q9) < vq.score(exact, q9));
+  ok('short words do not fuzz: shots is not shoes', vq.nearWord(vq.tokenize('new shoes'), 'shots') === false);
+  ok('harvard is not howard', vq.nearWord(vq.tokenize('howard st'), 'harvard') === false);
+
+  /* A big browse ranks the serious end first, and still returns the window. */
+  const rowAt = (o) => Object.assign({ at: '2026-08-19T02:00:00Z', text: 'x', feed: 'boston-police' }, o);
+  ok('a plain line is still in a big browse', vq.score(rowAt({}), f1) >= 1);
+  ok('a high-priority tier-3 line outranks it', vq.score(rowAt({ priority: 'high', tier: 3 }), f1) > vq.score(rowAt({}), f1));
+}
 
 console.log('\n' + pass + ' passed, ' + fail + ' failed\n');
 process.exit(fail ? 1 : 0);

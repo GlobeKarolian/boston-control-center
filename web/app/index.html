@@ -781,19 +781,21 @@
   .sc-top{display:flex;align-items:baseline;gap:16px;flex-wrap:wrap;margin-bottom:6px}
   .sc-top h1{font-family:var(--serif);font-size:24px;font-weight:700;letter-spacing:-.01em}
   .sc-win{font-family:var(--mono);font-size:12px;color:var(--text-dim)}
-  .sc-switch{margin-left:auto;display:flex;background:var(--panel-solid);border:1px solid var(--border);border-radius:8px;overflow:hidden}
-  .sc-switch button{font-family:var(--mono);font-size:11px;letter-spacing:1px;color:var(--text-dim);background:none;border:0;padding:7px 16px;cursor:pointer;text-transform:uppercase}
-  .sc-switch button.on{background:var(--scanner);color:light-dark(#fff,#05070b);font-weight:600}
-  .sc-switch button:hover:not(.on){background:light-dark(rgba(20,18,14,.04),rgba(255,255,255,.04));color:var(--text)}
+  .sc-refresh{margin-left:auto;font-family:var(--mono);font-size:11px;letter-spacing:1px;text-transform:uppercase;color:var(--text-dim);background:var(--panel-solid);border:1px solid var(--border);border-radius:8px;padding:7px 14px;cursor:pointer}
+  .sc-refresh:hover{background:light-dark(rgba(20,18,14,.04),rgba(255,255,255,.04));color:var(--text)}
+  .sc-refresh[disabled]{opacity:.5;cursor:default}
   .sc-lead{font-family:var(--serif);font-size:15px;line-height:1.6;border-left:3px solid var(--wire);padding:2px 0 2px 14px;margin:8px 0 20px;color:var(--text)}
   .sc-sect{margin-bottom:18px}
   .sc-sect-head{display:flex;align-items:baseline;gap:10px;padding-bottom:7px;border-bottom:1px solid var(--border);margin-bottom:2px}
   .sc-sect-head h2{font-family:var(--mono);font-size:11.5px;font-weight:600;letter-spacing:2px;text-transform:uppercase}
   .sc-sect-head .n{font-family:var(--mono);font-size:10.5px;color:var(--text-faint)}
-  .sc-sect-head.crit h2{color:var(--crash)} .sc-sect-head.crit{border-bottom-color:light-dark(rgba(200,16,46,.3),rgba(255,77,77,.3))}
-  .sc-sect-head.fire h2{color:var(--fire)} .sc-sect-head.fire{border-bottom-color:light-dark(rgba(194,65,12,.3),rgba(255,140,66,.3))}
-  .sc-sect-head.chase h2{color:var(--transit)} .sc-sect-head.chase{border-bottom-color:light-dark(rgba(11,82,168,.3),rgba(77,163,255,.3))}
-  .sc-sect-head.odd h2{color:var(--alert)} .sc-sect-head.odd{border-bottom-color:light-dark(rgba(106,53,160,.3),rgba(192,124,255,.3))}
+  /* Three sections, three colours: open now in the scanner green because it is
+     live, the major calls in the wire red because they are the news, the
+     compact list in ink because it is a list. */
+  .sc-sect-head.watch h2{color:var(--scanner)} .sc-sect-head.watch{border-bottom-color:light-dark(rgba(13,107,69,.3),rgba(52,211,153,.3))}
+  .sc-sect-head.major h2{color:var(--wire)} .sc-sect-head.major{border-bottom-color:light-dark(rgba(179,38,30,.3),rgba(255,59,48,.3))}
+  .sc-sect-head.notes h2{color:var(--text-dim)}
+  .sc-sect-head .when{margin-left:auto;font-family:var(--mono);font-size:10.5px;color:var(--text-faint)}
   .sc-item{padding:12px 0 14px;border-bottom:1px solid var(--border-soft)}
   .sc-item:last-child{border-bottom:0}
   .sc-item-top{display:flex;align-items:baseline;gap:9px}
@@ -811,6 +813,24 @@
   .sc-chip.play{background:light-dark(rgba(13,107,69,.12),rgba(52,211,153,.12));color:var(--scanner);border:1px solid light-dark(rgba(13,107,69,.25),rgba(52,211,153,.25));cursor:pointer}
   .sc-chip.play:hover{background:light-dark(rgba(13,107,69,.25),rgba(52,211,153,.25))}
   .sc-chip.src{background:light-dark(rgba(20,18,14,.04),rgba(255,255,255,.04));color:var(--text-dim);border:1px solid var(--border)}
+  /* A call that is still going as you sit down. The dot is the same pulse the
+     map uses for a fresh pin, so live reads as live everywhere. */
+  .sc-chip.live{background:light-dark(rgba(13,107,69,.14),rgba(52,211,153,.14));color:var(--scanner);border:1px solid light-dark(rgba(13,107,69,.35),rgba(52,211,153,.35));font-weight:700}
+  .sc-chip.live::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--scanner);margin-right:5px;vertical-align:1px;animation:scblink 1.4s ease-in-out infinite}
+  @keyframes scblink{0%,100%{opacity:1}50%{opacity:.25}}
+  .sc-chip.status{background:light-dark(rgba(20,18,14,.04),rgba(255,255,255,.04));color:var(--text-dim);border:1px solid var(--border);text-transform:uppercase}
+  .sc-chip.status.high{background:var(--wire);color:#fff;border-color:transparent;font-weight:700}
+  .sc-chip.kind{background:transparent;color:var(--text-faint);border:1px solid var(--border-soft);text-transform:uppercase}
+  /* The compact list: one line a call, clock first so the eye can walk down it. */
+  .sc-note{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 10px;padding:6px 0;border-bottom:1px solid var(--border-soft);font-size:12.5px}
+  .sc-note:last-child{border-bottom:0}
+  .sc-note .t{font-family:var(--mono);font-size:11px;color:var(--text-faint);width:64px;flex:0 0 auto}
+  .sc-note .k{color:var(--text);font-weight:600;white-space:nowrap}
+  .sc-note .p{color:var(--text-dim);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sc-note .f{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);white-space:nowrap}
+  .sc-note .sc-chip{flex:0 0 auto}
+  .sc-note details{flex-basis:100%}
+  .sc-note summary{font-family:var(--mono);font-size:10.5px;color:var(--text-faint);cursor:pointer}
   .sc-foot{margin-top:24px;padding-top:14px;border-top:2px solid var(--border);font-family:var(--mono);font-size:11px;color:var(--text-faint);line-height:1.7}
   .sc-empty{padding:40px 0;text-align:center;color:var(--text-faint);font-style:italic}
 
@@ -1272,6 +1292,9 @@
        right now from one cleared an hour ago, and it expands forever. Held near its
        widest and dimmed, it reads as a halo around the dot instead. */
     .inc-ico.pulse::before{animation:none;transform:scale(2.4);opacity:.22}
+    /* The live dot on a shift-change chip holds steady; the word LIVE beside it
+       was always doing the talking. */
+    .sc-chip.live::before{animation:none}
     /* This is the one that matters. A banner flashing its border at roughly one
        cycle a second, for as long as the call stays open, is the pattern people who
        set this preference set it to avoid. Held at the bright end of its own cycle:
@@ -1617,17 +1640,17 @@
     </div>
   </div>
 
-  <!-- Shift Change: the handoff briefing. What happened on the shift that is
-       ending, ranked by news value, with audio. -->
+  <!-- Shift Change: the handoff briefing. Always the last ten hours from the
+       moment it loads: what is open right now, the major calls of the stretch
+       with audio, and a compact list of everything else that was more than
+       routine. It used to ask day or night; see api/shift-change.js for why
+       it stopped. -->
   <div id="shiftview">
     <div class="sc-wrap">
       <div class="sc-top">
         <h1>Shift change</h1>
         <span class="sc-win" id="scWin"></span>
-        <div class="sc-switch" id="scSwitch">
-          <button class="on" data-shift="day">Day</button>
-          <button data-shift="night">Night</button>
-        </div>
+        <button class="sc-refresh" id="scRefresh" title="Read the last ten hours again">refresh</button>
       </div>
       <p class="sc-lead" id="scLead"></p>
       <div id="scOut"></div>
@@ -3086,6 +3109,7 @@ function arCall(c){
   return '<div class="ar-call"><div class="ar-head">'
     +'<span class="ar-type">'+esc(c.type||(c.loose?'unmatched':'call'))+'</span>'
     +'<span class="ar-where">'+esc(c.place||c.town||c.feed||'location unknown')+'</span>'
+    +(c.feeds&&c.feeds.length>1?'<span class="ar-units" title="every radio that carried this call">'+esc(c.feeds.join(' · '))+'</span>':'')
     +(c.units&&c.units.length?'<span class="ar-units">'+esc(c.units.join(', '))+'</span>':'')
     +'<span class="ar-when">'+span+'</span>'
     +'</div><div class="ar-sum" id="'+sumId+'"></div>'
@@ -3511,19 +3535,99 @@ document.addEventListener('click',e=>{
   clipToggle(u,b);
 });
 
-/* Shift Change. Loads the handoff briefing for the selected shift and renders
-   the sections a desk editor would ask about. */
-let SC_SHIFT='day';
+/* Shift Change. Always the last ten hours from now: what is open as you sit
+   down, the major calls of the stretch, and a compact list of everything else
+   that was more than routine. One fetch on open and on the refresh button; no
+   timer, because a briefing is read, not watched. */
+let SC_BUSY=false;
+function scAgo(iso){
+  const ms=Date.now()-+new Date(iso); if(!isFinite(ms))return '';
+  if(ms<60000)return 'just now'; const m=Math.round(ms/60000); if(m<60)return m+'m ago';
+  const h=Math.floor(m/60); return h+'h '+(m%60)+'m ago';
+}
+function scClock(iso,withMin){
+  if(!iso)return ''; const d=new Date(iso); if(isNaN(+d))return '';
+  return d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/New_York'});
+}
+function scTxTable(tx){
+  const rows=(tx||[]).map(t=>'<tr><td class="t">'+esc(scClock(t.at))+'</td><td class="f">'+esc(t.src||'')+'</td><td>'+esc(t.text||'')+'</td></tr>').join('');
+  return rows?'<table style="width:100%;margin-top:6px;font-size:12px;border-collapse:collapse">'+rows+'</table>':'';
+}
+function scPlayChip(clips){
+  const n=(clips||[]).length;
+  const label='&#9654; '+(n?n+' clip'+(n===1?'':'s'):'no audio');
+  return n?'<span class="sc-chip play" onclick="scPlay(this)" data-clips="'+esc(JSON.stringify(clips))+'">'+label+'</span>'
+          :'<span class="sc-chip play" style="opacity:.4">'+label+'</span>';
+}
+/* What is open right now. A board situation has the analyst's headline and
+   summary; a store scene has a type, a place and the last thing said on it. */
+function scWatchItem(w,i){
+  const st=String(w.status||'active').replace(/-/g,' ');
+  const pri=w.priority==='high';
+  const head=w.headline||[w.type||'call',w.place].filter(Boolean).join(' at ');
+  const chips='<span class="sc-chip status'+(pri?' high':'')+'">'+esc(pri?'high priority':st)+'</span>'
+    +(w.major?'<span class="sc-chip sev4">MAJOR</span>':'')
+    +(!w.major&&(w.severity||0)>=3?'<span class="sc-chip '+((w.severity||0)>=4?'sev4':'sev3')+'">'+((w.severity||0)>=4?'BIG STORY':'STORY')+'</span>':'')
+    +scPlayChip(w.clips)
+    +((w.feeds||[]).length?'<span class="sc-chip src">'+esc(w.feeds.join(' · '))+'</span>':'');
+  const meta=[w.since?'since '+scClock(w.since):'',w.updated?'updated '+scAgo(w.updated):''].filter(Boolean).join(' · ');
+  return '<div class="sc-item">'
+    +'<div class="sc-item-top"><span class="sc-rank">'+(i+1)+'</span>'
+    +'<span class="sc-headline">'+esc(head)+'</span>'
+    +'<span class="sc-time">'+esc(meta)+'</span></div>'
+    +(w.what?'<p class="sc-what">'+esc(w.what)+'</p>':'')
+    +(w.place&&w.headline?'<p class="sc-why">'+esc(w.place)+((w.units||[]).length?' · '+esc(w.units.join(', ')):'')+'</p>':((w.units||[]).length?'<p class="sc-why">'+esc(w.units.join(', '))+'</p>':''))
+    +'<div class="sc-meta">'+chips+'</div>'
+    +((w.why||[]).length?'<p class="sc-why">why it\'s here: '+esc(w.why.join(' · '))+'</p>':'')
+    +((w.tx||[]).length?'<details style="margin:6px 0 0 27px"><summary style="font-family:var(--mono);font-size:11px;color:var(--text-faint);cursor:pointer">last '+w.tx.length+' transmission'+(w.tx.length===1?'':'s')+'</summary>'+scTxTable(w.tx)+'</details>':'')
+    +'</div>';
+}
+function scMajorItem(it,i){
+  const sevClass=it.severity>=4?'sev4':it.severity>=3?'sev3':'sev2';
+  const sevLabel=it.severity>=4?'BIG STORY':it.severity>=3?'STORY':'NOTE';
+  const feeds=(it.feeds||[]).join(' · ');
+  const span=it.from&&it.to&&it.from!==it.to?scClock(it.from)+' to '+scClock(it.to):scClock(it.from);
+  return '<div class="sc-item">'
+    +'<div class="sc-item-top"><span class="sc-rank">'+(i+1)+'</span>'
+    +'<span class="sc-headline">'+esc(it.headline)+'</span>'
+    +'<span class="sc-time">'+esc(span)+'</span></div>'
+    +(it.what?'<p class="sc-what">'+esc(it.what)+'</p>':'')
+    +(it.unsure?'<p class="sc-unsure">Confirm before writing: '+esc(it.unsure)+'</p>':'')
+    +'<div class="sc-meta">'
+    +(it.live?'<span class="sc-chip live">LIVE</span>':'')
+    +'<span class="sc-chip '+sevClass+'">'+sevLabel+'</span>'
+    +(it.kind&&it.kind!=='other'?'<span class="sc-chip kind">'+esc(it.kind)+'</span>':'')
+    +scPlayChip(it.clips)
+    +'<span class="sc-chip src">'+esc(feeds)+'</span>'
+    +'</div>'
+    +'<p class="sc-why">why it\'s here: '+esc((it.why||[]).join(' · '))+'</p>'
+    +((it.tx||[]).length?'<details style="margin:6px 0 0 27px"><summary style="font-family:var(--mono);font-size:11px;color:var(--text-faint);cursor:pointer">'+it.n+' transmission'+(it.n===1?'':'s')+'</summary>'+scTxTable(it.tx)+'</details>':'')
+    +'</div>';
+}
+function scNoteRow(it){
+  return '<div class="sc-note">'
+    +'<span class="t">'+esc(scClock(it.from))+'</span>'
+    +'<span class="k">'+esc(it.type||'call')+'</span>'
+    +'<span class="p">'+esc(it.place||'')+'</span>'
+    +'<span class="f">'+esc((it.feeds||[]).join(' · '))+'</span>'
+    +(it.live?'<span class="sc-chip live">LIVE</span>':'')
+    +scPlayChip(it.clips)
+    +((it.tx||[]).length?'<details><summary>'+it.n+' transmission'+(it.n===1?'':'s')+' · '+esc((it.why||[]).join(' · '))+'</summary>'+scTxTable(it.tx)+'</details>':'')
+    +'</div>';
+}
 async function shiftLoad(){
   const out=document.getElementById('scOut'), lead=document.getElementById('scLead'),
-        win=document.getElementById('scWin'), foot=document.getElementById('scFoot');
-  if(!out)return;
-  if(lead)lead.textContent='Reading the archive…';
+        win=document.getElementById('scWin'), foot=document.getElementById('scFoot'),
+        btn=document.getElementById('scRefresh');
+  if(!out||SC_BUSY)return;
+  SC_BUSY=true; if(btn)btn.disabled=true;
+  if(lead)lead.textContent='Reading the last ten hours of radio…';
   let d=null;
   try{
-    const r=await fetch('./shift-change.json?shift='+SC_SHIFT,{cache:'no-store'});
+    const r=await fetch('./shift-change.json',{cache:'no-store'});
     if(r.ok)d=await r.json();
   }catch(e){}
+  SC_BUSY=false; if(btn)btn.disabled=false;
   if(!d||!d.ok){
     if(lead)lead.textContent=d&&d.why?d.why:'Could not load the shift briefing.';
     if(out)out.innerHTML='<div class="sc-empty">The archive did not answer.</div>';
@@ -3537,56 +3641,32 @@ async function shiftLoad(){
     ? cov.transmissions+' transmissions across '+cov.feeds+' feeds'
     : 'coverage unavailable';
   if(win)win.textContent=(d.window&&d.window.label)||'';
-  if(lead)lead.textContent=d.lead||'Nothing cleared the bar this shift.';
-  const sections=Array.isArray(d.sections)?d.sections:[];
-  if(!sections.length){
-    if(out)out.innerHTML='<div class="sc-empty">Nothing on this shift cleared the bar for a briefing item.</div>';
-    if(foot)foot.textContent=covLine+'.';
-    return;
+  if(lead)lead.textContent=d.lead||'Nothing cleared the bar in the last ten hours.';
+  const watch=Array.isArray(d.watch)?d.watch:[];
+  const major=Array.isArray(d.major)?d.major:(Array.isArray(d.items)?d.items:[]);
+  const notes=Array.isArray(d.notes)?d.notes:[];
+  const hrs=(d.window&&d.window.hours)?d.window.hours:10;
+  let h='';
+  h+='<div class="sc-sect"><div class="sc-sect-head watch"><h2>Things to watch</h2><span class="n">'+watch.length+'</span><span class="when">open right now</span></div>'
+    +(watch.length?watch.map(scWatchItem).join(''):'<div class="sc-empty" style="padding:18px 0">Nothing open on the board right now.</div>')+'</div>';
+  h+='<div class="sc-sect"><div class="sc-sect-head major"><h2>Major calls</h2><span class="n">'+major.length+'</span><span class="when">last '+esc(String(hrs))+' hours</span></div>'
+    +(major.length?major.map(scMajorItem).join(''):'<div class="sc-empty" style="padding:18px 0">Nothing in the last '+esc(String(hrs))+' hours cleared the bar for a write-up.</div>')+'</div>';
+  if(notes.length){
+    h+='<div class="sc-sect"><div class="sc-sect-head notes"><h2>Also heard</h2><span class="n">'+notes.length+'</span><span class="when">more than routine, less than a story</span></div>'
+      +notes.map(scNoteRow).join('')+'</div>';
   }
-  let rank=0;
-  if(out)out.innerHTML=sections.map(sec=>{
-    const items=(sec&&Array.isArray(sec.items)?sec.items:[]).map(it=>{
-      rank++;
-      const sevClass=it.severity>=4?'sev4':it.severity>=3?'sev3':'sev2';
-      const sevLabel=it.severity>=4?'BIG STORY':it.severity>=3?'STORY':'NOTE';
-      const clips=it.clips&&it.clips.length?'▶ '+it.clips.length+' clip'+(it.clips.length===1?'':'s'):'no audio';
-      const feeds=(it.feeds||[]).join(' · ');
-      const txRows=(it.tx||[]).map(t=>'<tr><td class="t">'+esc(t.at?new Date(t.at).toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',timeZone:'America/New_York'}):'')+'</td><td class="f">'+esc(t.src||'')+'</td><td>'+esc(t.text||'')+'</td></tr>').join('');
-      return '<div class="sc-item">'+
-        '<div class="sc-item-top"><span class="sc-rank">'+rank+'</span>'+
-        '<span class="sc-headline">'+esc(it.headline)+'</span>'+
-        '<span class="sc-time">'+esc(it.from?new Date(it.from).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',timeZone:'America/New_York'}):'')+'</span></div>'+
-        (it.what?'<p class="sc-what">'+esc(it.what)+'</p>':'')+
-        (it.unsure?'<p class="sc-unsure">Confirm before writing: '+esc(it.unsure)+'</p>':'')+
-        '<div class="sc-meta">'+
-        '<span class="sc-chip '+sevClass+'">'+sevLabel+'</span>'+
-        (it.clips&&it.clips.length?'<span class="sc-chip play" onclick="scPlay(this)" data-clips="'+esc(JSON.stringify(it.clips))+'">'+clips+'</span>':'<span class="sc-chip play" style="opacity:.4">'+clips+'</span>')+
-        '<span class="sc-chip src">'+esc(feeds)+'</span>'+
-        '</div>'+
-        '<p class="sc-why">why it\'s here: '+esc((it.why||[]).join(' · '))+'</p>'+
-        (txRows?'<details style="margin:6px 0 0 27px"><summary style="font-family:var(--mono);font-size:11px;color:var(--text-faint);cursor:pointer">'+it.n+' transmission'+(it.n===1?'':'s')+'</summary><table style="width:100%;margin-top:6px;font-size:12px;border-collapse:collapse">'+txRows+'</table></details>':'')+
-        '</div>';
-    }).join('');
-    return '<div class="sc-sect"><div class="sc-sect-head '+esc(sec.id||'')+'"><h2>'+esc(sec.label||'')+'</h2><span class="n">'+esc(String(sec.count!=null?sec.count:''))+'</span></div>'+items+'</div>';
-  }).join('');
-  if(foot)foot.textContent=covLine+(d.generatedAt?' · generated '+etHM(d.generatedAt):'');
+  if(out)out.innerHTML=h;
+  const off=(d.offline||[]).length?' · '+d.offline.length+' feed'+(d.offline.length===1?'':'s')+' offline: '+d.offline.join(', '):'';
+  if(foot)foot.textContent=covLine+(cov.complete===false?' (incomplete window)':'')+off+(d.generatedAt?' · generated '+etHM(d.generatedAt):'');
 }
-/* Play the clips for a shift item through the shared radio player. */
+/* Play a shift item's clips through the shared radio player, oldest first and
+   all of them: the chain, not the first clip and silence. */
 function scPlay(el){
-  const clips=JSON.parse(el.dataset.clips||'[]');
+  let clips=[]; try{clips=JSON.parse(el.dataset.clips||'[]');}catch(e){}
   if(!clips.length||!window.BCCClips)return;
-  clipPlay(clips[0]);
+  chainPlay(clips);
 }
-/* Shift toggle. */
-document.querySelectorAll('#scSwitch button').forEach(b=>{
-  b.addEventListener('click',()=>{
-    document.querySelectorAll('#scSwitch button').forEach(x=>x.classList.remove('on'));
-    b.classList.add('on');
-    SC_SHIFT=b.dataset.shift;
-    shiftLoad();
-  });
-});
+(function(){ const b=document.getElementById('scRefresh'); if(b)b.addEventListener('click',shiftLoad); })();
 
 /* Model activity for Under The Hood. Polls only while that tab is showing,
    because a debugging surface should not cost anything when nobody is
@@ -3773,9 +3853,10 @@ async function deskAsk(q){
   const go=document.getElementById('dpAskGo'), meta=document.getElementById('dpMeta');
   if(!q||!q.trim()||!ans)return;
   if(go){go.disabled=true;go.textContent='\u2026';}
-  /* Two days of radio takes real seconds to read. Saying so beats a spinner
-     that looks stuck. */
-  ans.innerHTML='<div class="a">reading the last two days of radio, this takes a few seconds&hellip;</div>';
+  /* A night of radio takes real seconds to read. Saying so beats a spinner
+     that looks stuck. The window is the question's own, two hours when it
+     names none, so the line does not promise two days any more. */
+  ans.innerHTML='<div class="a">reading the radio for that window, this takes a few seconds&hellip;</div>';
   try{
     const r=await fetch('./api/desk-ask',{method:'POST',credentials:'include',
       headers:{'content-type':'application/json'},body:JSON.stringify({q:q})});

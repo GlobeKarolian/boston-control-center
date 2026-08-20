@@ -19,6 +19,7 @@ const blob = require('../lib/blob');
 const vq = require('../lib/vault-query');
 const vaultRead = require('../lib/vault-read');
 const places = require('../lib/places');
+const sceneLib = require('../lib/scenes');
 
 /* Enough to answer a night without reading a month. A day of traffic is about
    1,500 objects, so this covers roughly two full days and says so when it
@@ -32,29 +33,36 @@ const CONCURRENCY = 64;
    ever skips objects that could not have contained an answer. */
 const BATCH_SLACK_MS = 30 * 60 * 1000;
 
-/* Loose transmissions back into the calls they belonged to.
+/* Transmissions back into the calls they belonged to.
 
-   Anything the pipeline could not tie to a scene still comes back, gathered
-   under its feed, because "we heard this and never worked out what it was"
-   is a real answer and hiding it would make the archive look tidier than the
-   night actually was. */
-/* A quarter hour of quiet ends a burst. Loose matches used to pile into one
-   card per feed, which put a 6am domestic and a 1pm homicide scene in the
-   same "call" and buried the homicide in the middle where nobody scrolls.
-   Now a loose match joins the previous one only if it is the same feed
-   within fifteen minutes, which is roughly the shape of one scene's radio. */
-const BURST_MS = 15 * 60 * 1000;
+   The grouping itself is lib/scenes.js, the same one the desk and Shift
+   Change use: seeded on the store's incidentId, loose lines attached to the
+   scene they plainly belong to, and scenes that are one event seen from two
+   radios folded together. This file used to carry its own version, which
+   knew only the incidentId and a burst per feed, and on 19 August that was
+   the first thing the newsroom named about the Archive: a fire three radios
+   worked came back as three cards, and a citywide channel's unrelated calls
+   inside fifteen minutes came back as one. Anything the pipeline could not
+   tie to a scene still comes back, gathered under its feed, because "we
+   heard this and never worked out what it was" is a real answer and hiding
+   it would make the archive look tidier than the night actually was.
 
-function group(hits) {
+   `ix` maps a row to its scene. Hits that arrived through scene expansion
+   already carry the key of the anchor that pulled them in and keep it. */
+function group(hits, ix) {
   hits = [...hits].sort((a, b) => String(a.tx.at).localeCompare(String(b.tx.at)));
   const lastLoose = new Map();
   for (const h of hits) {
     if (h.key) continue;                       // scene context: stays with its anchor
+    const sc = ix && ix.get(h.tx);
+    if (sc) { h.key = sc.id; continue; }
+    /* A row the grouper never saw (a caller that scored rows it did not
+       assemble, or a test): the old rule, so nothing is ever dropped. */
     if (h.tx.incidentId) { h.key = h.tx.incidentId; continue; }
     const feed = h.tx.feed || 'unknown';
     const at = +new Date(h.tx.at);
     const prev = lastLoose.get(feed);
-    if (prev && at - prev.at <= BURST_MS) { h.key = prev.key; }
+    if (prev && at - prev.at <= sceneLib.BURST_MS) { h.key = prev.key; }
     else { h.key = 'loose:' + feed + ':' + h.tx.at; }
     lastLoose.set(feed, { at, key: h.key });
   }
@@ -62,7 +70,7 @@ function group(hits) {
   for (const { tx, s, key } of hits) {
     let g = byInc.get(key);
     if (!g) {
-      g = { id: key, loose: !tx.incidentId, feed: tx.feed, town: tx.town || tx.city || null,
+      g = { id: key, loose: /^loose:/.test(String(key)), feed: tx.feed, town: tx.town || tx.city || null,
             type: tx.callType || null, place: tx.matched || tx.address || tx.street || null,
             from: tx.at, to: tx.at, score: 0, best: 0, units: new Set(), tx: [] };
       byInc.set(key, g);
@@ -95,6 +103,9 @@ function group(hits) {
 
   return [...byInc.values()].map(g => ({
     ...g,
+    /* Every radio that carried the call, so a card that is one event on
+       three channels says so in its header and not only line by line. */
+    feeds: [...new Set(g.tx.map(t => t.feed).filter(Boolean))],
     /* Ranked on its best transmission, nudged by how many others agreed.
 
        Summing every transmission's score, which is what this did first, ranks
@@ -191,7 +202,7 @@ const RARE_TYPE = new Set(['death', 'shooting', 'stabbing', 'hazmat', 'pursuit',
 const TYPE_LINK_MS = 12 * 60 * 1000;
 const typeReach = (type) => (RARE_TYPE.has(type) ? SCENE_MS : TYPE_LINK_MS);
 
-function sceneExpand(hits, pool, f) {
+function sceneExpand(hits, pool, f, ix) {
   if (!hits.length) return hits;
   const strong = hits.filter(h => h.s >= (hits[0] ? Math.max(...hits.map(x => x.s)) : 0) * 0.6);
   if (!strong.length) return hits;
@@ -215,8 +226,11 @@ function sceneExpand(hits, pool, f) {
      A unit number is not a thread. A8 works all night across a dozen calls,
      and "shares a unit with the anchor" pulled a Charlestown cardiac and a
      bomb squad dismissal into a Back Bay shooting card on 15 August 2026. */
-  const linked = (tx, hay, dtMs, inc, anchorStreet) => {
+  const linked = (tx, hay, dtMs, inc, anchorStreet, sc) => {
     if (inc && tx.incidentId && tx.incidentId === inc) return true;
+    /* The grouper put them in one scene: same incident, or a loose line it
+       attached by unit or place, or two radios it folded together. */
+    if (sc && ix && ix.get(tx) === sc) return true;
     if (anchorStreet.length && anchorStreet.some(w => hay.includes(w))) return true;
     if (f.type && dtMs <= typeReach(f.type)) {
       if (vq.ownType(tx, f.type)) return true;
@@ -231,8 +245,11 @@ function sceneExpand(hits, pool, f) {
     const city = String(a.tx.city || a.tx.town || '').toLowerCase();
     /* The anchor names its card now, so the scene and the anchor cannot end
        up grouped apart, which is exactly what happened on the first run of
-       the test below this feature was built against. */
-    a.key = a.key || inc || ('scene:' + (a.tx.feed || '') + ':' + a.tx.at);
+       the test below this feature was built against. The grouper's id when
+       it has one, so context and anchor land on the same card the grouper
+       would have built. */
+    const sc = ix ? ix.get(a.tx) : null;
+    a.key = a.key || (sc && sc.id) || inc || ('scene:' + (a.tx.feed || '') + ':' + a.tx.at);
     const anchorStreet = streetWords(a.tx);
     /* Nearest first, so the cap keeps the lines closest to the anchor rather
        than whichever happened to be fetched first. */
@@ -250,7 +267,7 @@ function sceneExpand(hits, pool, f) {
     for (const { tx, dt } of near) {
       if (added >= SCENE_CAP) break;
       const hay = ((tx.text || '') + ' ' + (tx.address || '') + ' ' + (tx.landmark || '') + ' ' + (tx.matched || '')).toLowerCase();
-      if (!linked(tx, hay, dt, inc, anchorStreet)) continue;
+      if (!linked(tx, hay, dt, inc, anchorStreet, sc)) continue;
       have.add(tx);
       out.push({ tx: { ...tx, ctx: true }, s: 0.01, key: a.key });
       added++;
@@ -296,13 +313,15 @@ module.exports = async (req, res) => {
      a wide search, for a field nothing reads. */
   const listed = got.listed || 0;
   const tx = read.rows;
+  /* The window, grouped into scenes once, before anything is scored. */
+  const ix = sceneLib.index(sceneLib.assemble(tx));
   let hits = [];
   for (const t of tx) {
     const s = vq.score(t, f);
     if (s > 0) hits.push({ tx: t, s });
   }
-  hits = sceneExpand(hits, tx, f);
-  const groups = group(hits).slice(0, 40);
+  hits = sceneExpand(hits, tx, f, ix);
+  const groups = group(hits, ix).slice(0, 40);
 
   /* What the archive actually holds for the window that was read.
 

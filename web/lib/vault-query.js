@@ -95,35 +95,89 @@ function whenOf(q, now) {
   };
   const endOfDay = (back) => new Date(+startOfDay(back) + dayMs);
 
-  const night = (back) => {
-    /* Before 6am, "last night" is the evening that ran into right now. */
-    const shift = (p.hh < 6 && back === 0) ? 1 : back;
-    const b = new Date(+t - shift * dayMs);
+  /* The night that STARTS on the Eastern day `back` days ago: 6pm to 6am. */
+  const nightStarting = (back) => {
+    const b = new Date(+t - back * dayMs);
     const bp = partsIn(b);
-    return {
-      from: easternAt(bp.y, bp.m, bp.d, 18, 0, b),
-      to: new Date(+easternAt(bp.y, bp.m, bp.d, 18, 0, b) + 12 * 3600000),
-      label: shift === 0 ? 'tonight' : 'last night',
-    };
+    const from = easternAt(bp.y, bp.m, bp.d, 18, 0, b);
+    return { from, to: new Date(+from + 12 * 3600000) };
+  };
+  /* "Last night" is the most recent night that has happened, whatever the
+     clock says: at 2am it is the one underway, at 11am it is the one that
+     ended at six, at 11pm it is yesterday's. That is always the night that
+     started yesterday.
+
+     This used to be "today's night unless it is before 6am", which at any
+     daytime hour is a window that has not started. The QA pass on 14 August
+     at 2pm searched "big fire last night in Back Bay", was shown a window of
+     Aug 14 6pm to Aug 15 6pm, got nothing, and wrote down that the archive was
+     new. The archive was fine; the question had been sent into the future. */
+  const night = (back) => Object.assign(nightStarting(back === 0 ? 1 : back), { label: 'last night' });
+  /* "Tonight" is the night underway, or the coming one until 6pm; before it
+     has started, the night that happened is the one a person at a desk means
+     by it, and the label says which they got. */
+  const tonight = () => {
+    if (p.hh >= 18) return Object.assign(nightStarting(0), { label: 'tonight' });
+    if (p.hh < 6) return Object.assign(nightStarting(1), { label: 'tonight' });
+    return Object.assign(nightStarting(1), { label: 'last night' });
   };
 
-  if (/\blast night\b|\byesterday night\b|\bovernight\b/i.test(q)) return night(0);
-  if (/\btonight\b|\bthis evening\b/i.test(q)) {
-    const r = night(p.hh < 6 ? 1 : 0); r.label = 'tonight'; return r;
+  /* Every return below is a window somebody NAMED; the default at the bottom
+     is not. Callers that treat "said a time" differently from "said nothing"
+     (the desk reaches two hours back for a bare question) read `named`
+     rather than keeping a second list of time words that drifts from this
+     one, which is how "overnight" and "this afternoon" came to be searched
+     for as words rather than understood as hours. */
+  const named = (r) => Object.assign(r, { named: true });
+  if (/\blast night\b|\byesterday night\b|\bovernight\b/i.test(q)) return named(night(0));
+  if (/\btonight\b|\bthis evening\b|\bearlier tonight\b/i.test(q)) return named(tonight());
+  if (/\byesterday afternoon\b/i.test(q)) {
+    const s = startOfDay(1);
+    return named({ from: new Date(+s + 12 * 3600000), to: new Date(+s + 18 * 3600000), label: 'yesterday afternoon' });
   }
-  if (/\byesterday\b/i.test(q)) return { from: startOfDay(1), to: endOfDay(1), label: 'yesterday' };
+  if (/\byesterday morning\b/i.test(q)) {
+    const s = startOfDay(1);
+    return named({ from: s, to: new Date(+s + 12 * 3600000), label: 'yesterday morning' });
+  }
+  if (/\byesterday\b/i.test(q)) return named({ from: startOfDay(1), to: endOfDay(1), label: 'yesterday' });
   if (/\bthis morning\b/i.test(q)) {
     const s = startOfDay(0);
-    return { from: s, to: new Date(+easternAt(p.y, p.m, p.d, 12, 0, t)), label: 'this morning' };
+    return named({ from: s, to: new Date(+easternAt(p.y, p.m, p.d, 12, 0, t)), label: 'this morning' });
   }
-  if (/\btoday\b/i.test(q)) return { from: startOfDay(0), to: new Date(+t), label: 'today' };
-  if (/\blast (week|7 days)\b|\bpast week\b/i.test(q)) return { from: new Date(+t - 7 * dayMs), to: new Date(+t), label: 'the last week' };
-  if (/\blast (month|30 days)\b|\bpast month\b/i.test(q)) return { from: new Date(+t - 30 * dayMs), to: new Date(+t), label: 'the last month' };
-  if (/\blast (hour|60 minutes)\b/i.test(q)) return { from: new Date(+t - 3600000), to: new Date(+t), label: 'the last hour' };
+  if (/\bthis afternoon\b/i.test(q)) {
+    const s = startOfDay(0);
+    return named({ from: new Date(+s + 12 * 3600000), to: new Date(Math.min(+t, +s + 18 * 3600000)), label: 'this afternoon' });
+  }
+  if (/\btoday\b|\bsince midnight\b|\bearlier today\b|\bso far today\b/i.test(q)) return named({ from: startOfDay(0), to: new Date(+t), label: 'today' });
+  /* "the weekend", "this past weekend", "over the weekend": the most recent
+     Saturday and Sunday that have happened, by Eastern days. Asked on a
+     Saturday night it means the one underway. */
+  if (/\b(this |this past |last |over the |the )?weekend\b/i.test(q)) {
+    const todayW = new Date(+easternAt(p.y, p.m, p.d, 12, 0, t)).getUTCDay();   // 0 Sunday .. 6 Saturday
+    const backToSat = (todayW + 1) % 7;                                           // days since the last Saturday
+    const sat = startOfDay(backToSat);
+    return named({ from: sat, to: new Date(Math.min(+t, +sat + 2 * dayMs)), label: 'the weekend' });
+  }
+  if (/\blast (week|7 days)\b|\bpast week\b/i.test(q)) return named({ from: new Date(+t - 7 * dayMs), to: new Date(+t), label: 'the last week' });
+  if (/\blast (month|30 days)\b|\bpast month\b/i.test(q)) return named({ from: new Date(+t - 30 * dayMs), to: new Date(+t), label: 'the last month' });
+  /* "last 6 hours", "past 90 minutes", "last few hours", "last couple of hours". */
+  const span = q.match(/\b(?:last|past|previous)\s+(\d{1,3}|a|an|one|two|three|four|five|six|eight|ten|twelve|few|couple(?: of)?|several)\s+(hours?|hrs?|minutes?|mins?|days?)\b/i);
+  if (span) {
+    const WORDS = { a: 1, an: 1, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, eight: 8, ten: 10, twelve: 12, few: 3, couple: 2, 'couple of': 2, several: 4 };
+    const n = /^\d/.test(span[1]) ? +span[1] : (WORDS[span[1].toLowerCase()] || 1);
+    const unit = span[2].toLowerCase();
+    const msOf = /^d/.test(unit) ? dayMs : /^h/.test(unit) ? 3600000 : 60000;
+    const len = Math.min(30 * dayMs, Math.max(60000, n * msOf));
+    return named({ from: new Date(+t - len), to: new Date(+t), label: 'the last ' + span[1] + ' ' + span[2] });
+  }
+  if (/\blast (hour|60 minutes)\b|\bpast hour\b/i.test(q)) return named({ from: new Date(+t - 3600000), to: new Date(+t), label: 'the last hour' });
+  /* "right now", "currently", "at the moment": the desk's sense of now, an
+     hour, because a call that is on the air now started recently. */
+  if (/\bright now\b|\bcurrently\b|\bat the moment\b|\bas we speak\b|\bstill going\b/i.test(q)) return named({ from: new Date(+t - 3600000), to: new Date(+t), label: 'the last hour' });
   const iso = q.match(/\b(\d{4})-(\d{2})-(\d{2})\b/);
   if (iso) {
     const from = easternAt(+iso[1], +iso[2], +iso[3], 0, 0, t);
-    return { from, to: new Date(+from + dayMs), label: iso[0] };
+    return named({ from, to: new Date(+from + dayMs), label: iso[0] });
   }
 
   /* A date the way a person names one: a weekday, a day number, or both.
@@ -158,12 +212,12 @@ function whenOf(q, now) {
     const from = easternAt(y, m, d, 0, 0, t);
     const label = DAYS[new Date(+easternAt(y, m, d, 12, 0, t)).getUTCDay()].slice(0, 3)
       + ' ' + MON[m - 1] + ' ' + d;
-    return { from, to: new Date(+from + dayMs), label };
+    return named({ from, to: new Date(+from + dayMs), label });
   }
 
   // Nothing said: the last two days, which is what "find me the thing" means
   // in a room that works in shifts.
-  return { from: new Date(+t - 2 * dayMs), to: new Date(+t), label: 'the last two days' };
+  return { from: new Date(+t - 2 * dayMs), to: new Date(+t), label: 'the last two days', named: false };
 }
 
 /* WHAT. The call types the extractor already assigns, plus the words a person
@@ -281,6 +335,40 @@ const WORD_KIN = {
   dog: ['k9', 'canine', 'pit bull'],
   water: ['harbor', 'river', 'charles', 'pond', 'lake', 'ocean'],
 };
+
+/* Within one letter of the word, for names. Whisper hears "Lansdowne" as
+   "Lansdown" and "Dorchester" as "Dorchestor", and a reporter who spells
+   the street right should still find the call. Six letters or more, the same
+   first letter, one edit: tight enough that "shots" never becomes "shoes",
+   loose enough for a dropped or doubled letter in a name. Scored below an
+   exact word by the caller, because it is a guess about a spelling. */
+function nearWord(bag, w) {
+  if (!w || w.length < 6) return false;
+  const first = w[0];
+  for (const t of bag) {
+    if (t === w || t[0] !== first) continue;
+    const d = t.length - w.length;
+    if (d < -1 || d > 1) continue;
+    if (edit1(w, t)) return true;
+  }
+  return false;
+}
+function edit1(a, b) {
+  if (a === b) return true;
+  if (a.length === b.length) {
+    let diff = 0;
+    for (let i = 0; i < a.length; i++) if (a[i] !== b[i] && ++diff > 1) return false;
+    return diff === 1;
+  }
+  const [s, l] = a.length < b.length ? [a, b] : [b, a];
+  let i = 0, j = 0, skipped = false;
+  while (i < s.length && j < l.length) {
+    if (s[i] === l[j]) { i++; j++; continue; }
+    if (skipped) return false;
+    skipped = true; j++;
+  }
+  return true;
+}
 
 /* Does the record say this word, or one a newsroom would accept for it? */
 function saysWord(bag, hay, w) {
@@ -499,7 +587,7 @@ const LANDMARKS = {
   'ted williams tunnel': ['ted williams tunnel'],
 };
 
-const BIG = /\b(big|major|serious|large|massive|bad|worst|significant|multiple alarm|second alarm|third alarm|working)\b/i;
+const BIG = /\b(big|bigger|biggest|major|serious|most serious|large|larger|largest|huge|massive|bad|worst|significant|multiple alarm|second alarm|third alarm|working)\b/i;
 
 /* Words that carry no signal for matching. Everything left after the parse is
    used as free text against the transcript, and leaving these in would match
@@ -516,7 +604,21 @@ const STOP = new Set(('the a an of in on at from to for and or all any me i we m
      every lost wallet on the radio and dilute the ranking of the ones that
      matched something real. */
   'found find located locate involving involved near around report reported ' +
-  'happening going down over out').split(/\s+/));
+  'happening going down over out ' +
+  /* THE WORDS A DESK ASKS WITH. "What were the biggest calls tonight" was
+     searched, until 19 August, for the literal word "biggest", and since a
+     question that names a thing only returns lines that carry one of the
+     named things, it returned nothing. "Anything interesting", "worst thing
+     last night", "what happened overnight" all failed the same way: the
+     filler a person puts around a question became the question. None of
+     these words is ever the thing being asked about. */
+  'thing things stuff interesting notable newsworthy news story stories ' +
+  'bigger biggest larger largest worst most more kind sort many much lot lots ' +
+  'important anyone someone somebody anybody did does do has have had hear ' +
+  'heard see seen know tell just still yet ever some also else other area city ' +
+  'right now currently happen happens recent recently latest update updates ' +
+  'overnight moment earlier ago past previous few couple several hrs mins ' +
+  'minute minutes since midnight weekend').split(/\s+/));
 
 /* Token set for a haystack, with a naive singular folded in beside every
    plural. Tokens rather than substrings because "body" is inside "somebody",
@@ -556,8 +658,10 @@ function parse(q, now) {
   const lower = ' ' + raw.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim() + ' ';
 
   let type = null;
+  let typeHit = null;
   for (const k of Object.keys(TYPES)) {
-    if (TYPES[k].test(raw)) { type = k; break; }
+    const m = TYPES[k].exec(raw);
+    if (m) { type = k; typeHit = m[0]; break; }
   }
 
   /* Landmark before neighborhood, because "the Garden" is a sharper constraint
@@ -597,6 +701,14 @@ function parse(q, now) {
     for (const w of landmark.split(' ')) consumed.add(w);
     if (landmarkHit) for (const w of landmarkHit.split(' ')) consumed.add(w);
   }
+  /* The words the type was recognised BY. "shots fired" became type shooting
+     and then "shots" and "fired" went on as free words, which every shooting
+     labelled from "gunshot wounds" then failed to carry; "structure fire"
+     left "structure" behind the same way. A phrase that named the type is
+     spent. So is the phrase that said how serious. */
+  if (typeHit) for (const w of typeHit.toLowerCase().split(/[^a-z0-9]+/)) if (w) consumed.add(w);
+  const bigHit = BIG.exec(raw);
+  if (bigHit) for (const w of bigHit[0].toLowerCase().split(/[^a-z0-9]+/)) if (w) consumed.add(w);
   /* Date words the when parser already used. "stabbing at South Station
      Wednesday the 12th" must not search for 'wednesday' or '12th' on top of
      the window it just built. */
@@ -643,7 +755,7 @@ function parse(q, now) {
     .slice(0, 8);
 
   return {
-    from: when.from, to: when.to, when: when.label,
+    from: when.from, to: when.to, when: when.label, named: when.named !== false,
     type, place, landmark, phrases, big: BIG.test(raw), words, q: raw,
   };
 }
@@ -681,8 +793,19 @@ function score(tx, f) {
   const asked = (f.type ? 1 : 0) + (f.place ? 1 : 0) + (f.landmark ? 1 : 0)
     + phrases.length + f.words.length;
   /* A question with no handle on it beyond a time range is a browse, and a
-     browse legitimately returns the window. */
-  if (asked === 0) return 1;
+     browse legitimately returns the window. One that asked for the BIG
+     things ("biggest calls tonight") is a browse that wants the serious end
+     first, so seriousness ranks it; it still returns the window. */
+  if (asked === 0) {
+    let b = 1;
+    if (f.big) {
+      if (tx.priority === 'high') b += 3;
+      if ((tx.tier || 0) >= 2) b += 2;
+      if (tx.alarm) b += 2;
+      if ((tx.tier || 0) >= 3) b += 2;
+    }
+    return b;
+  }
 
   let s = 0;
   let hit = 0;      // anything at all
@@ -722,7 +845,10 @@ function score(tx, f) {
     if (set.some(v => hay.includes(v))) { s += 8; hit++; named++; }
   }
 
-  for (const w of f.words) if (saysWord(bag, hay, w)) { s += 3; hit++; named++; }
+  for (const w of f.words) {
+    if (saysWord(bag, hay, w)) { s += 3; hit++; named++; }
+    else if (nearWord(bag, w)) { s += 2; hit++; named++; }
+  }
 
   /* A kin label alone opens no doors, and it never counts toward how much of
      the question was answered. A medical that matched the place must not
@@ -757,6 +883,6 @@ function score(tx, f) {
 }
 
 module.exports = { nearLandmark, metresApart, LANDMARK_POINTS,
-  parse, score, whenOf, dayString, tokenize, hasWord, wordIn, nearPlace, ownType, saysWord, WORD_KIN,
+  parse, score, whenOf, dayString, tokenize, hasWord, wordIn, nearPlace, ownType, saysWord, nearWord, WORD_KIN,
   TYPES, PLACES, LANDMARKS, KIN, TZ,
 };

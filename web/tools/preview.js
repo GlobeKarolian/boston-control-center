@@ -291,6 +291,56 @@ function stops() {
   ];
 }
 
+/* Shift Change, the handoff briefing: what is open right now, the major calls
+   of the last ten hours, and the compact list under them. Built from the cast
+   so the three sections agree with the board, plus one note row and one live
+   item so both of those treatments are on screen. */
+function shiftChange() {
+  var now = Date.now();
+  var c0 = CAST[0], c2 = CAST[2], c3 = CAST[3], c4 = CAST[4];
+  var tx = function (c, feed) {
+    return c.beats.map(function (t, n) { return { at: ago(c.at - n * 3), src: feed || c.feeds[0], text: t, clip: null }; });
+  };
+  var hm = function (iso) { return new Date(iso).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', timeZone: 'America/New_York' }); };
+  var watch = MOOD === 'quiet' ? [] : [
+    { kind: 'situation', id: id('sit0'), headline: c0.head, what: c0.sum, status: 'active', priority: 'high',
+      major: true, verified: true, severity: 4, label: 'big story', type: c0.type, place: c0.loc,
+      feeds: c0.feeds, units: [], since: ago(c0.at), updated: ago(c0.up), n: 3, clips: [], tx: [] },
+    { kind: 'scene', id: 'inc-pv-1', headline: 'medical at 850 Boylston St', what: 'Last heard ' + hm(ago(1)) + ': A-6 on scene, one patient, anaphylactic reaction.',
+      status: 'active', priority: 'normal', major: false, verified: false, severity: 1, label: null, heat: 34,
+      type: 'medical', place: '850 Boylston St', feeds: ['Boston EMS', 'Boston Fire'], units: ['A6', 'E7', 'L17'],
+      since: ago(9), updated: ago(1), n: 4, why: ['3 units', '2 departments'], clips: [],
+      tx: [{ at: ago(9), src: 'Boston EMS', text: 'A-6 respond to 850 Boylston, allergic reaction.' }, { at: ago(1), src: 'Boston EMS', text: 'A-6 on scene, one patient, anaphylactic reaction.' }] },
+  ];
+  var mk = function (c, sev, kind, live, head, what, unsure) {
+    return { id: 'pv-' + kind, headline: head, what: what, unsure: unsure || '', severity: sev,
+      label: sev >= 4 ? 'big story' : 'story', why: ['heard on the radio: ' + kind, c.feeds.length + ' agencies on it'],
+      kind: kind, live: !!live, feeds: c.feeds, units: [], from: ago(c.at), to: ago(c.up), place: c.loc,
+      type: c.type, n: c.beats.length, clips: [], tx: tx(c) };
+  };
+  var major = MOOD === 'quiet' ? [] : [
+    mk(c0, 4, 'fire', true, 'Second alarm on Hancock Street, companies going defensive', 'Boston Fire struck a second alarm for heavy smoke from the second floor of a three-decker at Hancock and Bowdoin. Ladder 4 on the roof; the street is shut. Still running.', 'Whether anyone was inside.'),
+    mk(CAST[1], 3, 'chase', false, 'Pursuit out of Chelsea ends on the Tobin, two in custody', 'A stolen vehicle ran from Chelsea police onto the Tobin Bridge and stopped at the toll gantry. Two out, both in custody; no injuries reported on the air.', ''),
+    mk(c4, 3, 'crash', false, 'Pedestrian struck crossing Mass Ave at Newbury', 'One pedestrian down in the roadway at the Newbury Street crossing, transported priority one. The driver stayed. Intersection reopened.', 'Condition of the pedestrian.'),
+  ];
+  var notes = MOOD === 'quiet' ? [] : [
+    { id: 'pv-n1', headline: 'water main · Centre St at Burroughs St · ' + hm(ago(34)), severity: 2, label: 'note', why: ['a tier 2 signal in the transcripts'], kind: 'other', live: false,
+      feeds: c3.feeds, units: [], from: ago(c3.at), to: ago(c3.up), place: c3.loc, type: 'water main', n: 3, clips: [], tx: tx(c3) },
+    { id: 'pv-n2', headline: 'crash · Storrow Dr eastbound at Fenway · ' + hm(ago(12)), severity: 2, label: 'note', why: ['two agencies on it'], kind: 'crash', live: true,
+      feeds: c2.feeds, units: [], from: ago(c2.at), to: ago(c2.up), place: c2.loc, type: 'crash', n: 2, clips: [], tx: tx(c2) },
+  ];
+  return {
+    ok: true,
+    window: { from: ago(600), to: ago(0), label: 'Last 10 hours · ' + hm(ago(600)) + ' to ' + hm(ago(0)), hours: 10 },
+    lead: MOOD === 'quiet' ? 'Nothing in the last 10 hours cleared the bar. 212 transmissions across 6 feeds, all of it routine.'
+      : 'Two things are open as you sit down: the Hancock Street fire is still being worked with a second alarm struck, and EMS has a medical at 850 Boylston. The stretch before it was ordinary for a weeknight, one pursuit out of Chelsea that ended without injury and a pedestrian struck on Mass Ave.',
+    watch: watch, major: major, items: major, notes: notes,
+    heard: { 'Boston Fire': 120, 'Boston Police': 311, 'Boston EMS': 88 }, offline: MOOD === 'dark' ? ['Boston Fire', 'Lowell Police'] : [],
+    coverage: { transmissions: MOOD === 'quiet' ? 212 : 2217, feeds: 6, complete: true, sampled: false },
+    generatedAt: ago(0), ms: 4100,
+  };
+}
+
 /* Everything the page asks for by a relative name, answered here. The real
    deployment routes these through vercel.json to a function apiece; the names
    have to match that list or the preview is testing a page nobody ships. */
@@ -301,6 +351,7 @@ var ROUTES = {
   '/pipeline.json': pipeline,
   '/stops.json': stops,
   '/stops-count.json': function () { return { open: stops().length }; },
+  '/shift-change.json': shiftChange,
 };
 
 function send(res, code, type, body) {

@@ -152,6 +152,54 @@ them, and says on the pin that the pin is the building's and not the call's.
 `node tools/preview.js 8787 game` puts a game night on the board.
 `tools/test-venue.js` is the contract; add a venue by adding a row.
 
+## The archive, the desk and the shift briefing
+
+Three surfaces read the vault back as calls: the Archive tab
+(`api/vault-search.js`), the ask box on the desk panel (`api/desk-ask.js`) and
+Shift Change (`api/shift-change.js`). On 19 August the editor named all three:
+the archive was bad at finding and grouping, the ask box answered poorly, and
+the briefing asked day-or-night when nobody arrives on a schedule. What
+changed, and the traps behind it:
+
+- **One grouper, `lib/scenes.js`.** Seed on the store's incidentId, attach
+  loose lines to the scene they plainly belong to (a unit, the same numbered
+  address, coordinates inside 150 m of the scene's first point, two shared
+  place words), then fold scenes that are one event on two radios: anchors
+  inside 150 m or the same numbered address, inside 40 min, same town. Never
+  by a shared unit between seeded scenes (an ambulance takes its next call in
+  ten minutes; a unit thread chains a whole night, the 117-unit card again),
+  never across towns, and two loose bursts never merge with each other. All
+  three surfaces use it. `tools/test-scenes.js` is the contract and
+  `node tools/archive-replay.js <dump> --scenes` shows it against real radio.
+- **The question parser, `lib/vault-query.js`, spends its own words.** A
+  question that names a thing returns only lines carrying one of the named
+  things, so every word left over after parsing is a requirement. "Biggest
+  calls tonight" used to search for the word "biggest"; "any shootings
+  overnight" demanded "overnight" of every shooting; "shots fired" left
+  "shots" and "fired" behind. Time phrases, the phrase the type was recognised
+  by, the seriousness words and desk filler are consumed now, and `f.named`
+  says whether a time was spoken so nothing keeps a second list of time words.
+  Also: "last night" at any daytime hour is the night that ended at six, not
+  the one that has not started (the 14 August QA searched the future and
+  blamed the archive); "tonight" before 6pm is last night and says so.
+- **The ask box reads scenes.** `desk-ask` hands the model ranked SCENES
+  (whole, with span, radios, place, units), not 150 loose lines; a bare
+  question ranks by the severity floor, a named one by the archive scorer;
+  it answers on `llm.SCENE_MODEL` with `PRIMARY` behind it (`ASK_MODEL`,
+  `ASK_MODEL2` override). `node tools/ask-replay.js <dump> "question"` shows
+  the retrieval with no network; `--model` adds the answer.
+- **Shift Change is the last ten hours from now.** Three parts: `watch` (the
+  board's open situations plus the store's active scenes, deduped by place),
+  `major` (scenes over the floor, written up, marked LIVE when still running)
+  and `notes` (the rest above routine, no prose). `?hours=` up to 24; no
+  day/night. `tools/test-shift.js`; `node tools/preview.js 8787 busy` shows it.
+- **Work against real radio.** `node tools/vault-dump.js 48` (needs the Blob
+  token and KV vars in `.env.local`, `vercel env pull`) writes a slice of the
+  vault plus the live board to `_qa/`, gitignored. Every fix above was, or is
+  meant to be, checked with `archive-replay.js` and `ask-replay.js` against
+  such a slice. A fixture written by the person who wrote the code shares its
+  blind spots.
+
 ## Open work
 
 Numbered from the previous session's queue. Nothing here is started.
