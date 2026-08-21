@@ -757,6 +757,20 @@
   /* --- audio archive (historical clip browser) --- */
   #audioview{position:fixed;inset:0;z-index:1500;background:var(--bg);display:none;flex-direction:column;padding-top:50px}
   #audioview.show{display:flex}
+  .ll-panel{margin:0 0 14px;border:1px solid var(--border);border-radius:10px;background:var(--bg-panel);padding:10px 12px}
+  .ll-head{display:flex;align-items:center;gap:10px;margin-bottom:8px}
+  .ll-title{font-size:10px;font-weight:700;letter-spacing:.12em;color:var(--text-dim)}
+  .ll-count{font-size:10px;color:var(--scanner);font-weight:700;letter-spacing:.08em}
+  .ll-stopall{margin-left:auto;font-size:10px;font-weight:700;letter-spacing:.08em;background:none;border:1px solid var(--border);border-radius:5px;color:var(--wire);padding:3px 9px;cursor:pointer}
+  .ll-rows{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:6px}
+  .ll-row{display:flex;align-items:center;gap:8px;border:1px solid var(--border);border-radius:7px;padding:7px 9px;background:var(--bg)}
+  .ll-dot{width:8px;height:8px;border-radius:50%;flex:0 0 8px}
+  .ll-name{font-size:12px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .ll-num{font-size:9.5px;color:var(--text-faint);font-family:var(--mono,monospace)}
+  .ll-btn{margin-left:auto;font-size:9.5px;font-weight:700;letter-spacing:.08em;border:none;border-radius:5px;padding:4px 9px;cursor:pointer;background:color-mix(in srgb,var(--scanner) 14%,transparent);color:var(--scanner)}
+  .ll-btn.on{background:var(--scanner);color:var(--bg)}
+  .ll-btn[disabled]{opacity:.45;cursor:default}
+  .ll-relay{margin-left:auto;font-size:9.5px;color:var(--text-faint)}
   .av-wrap{flex:1;overflow-y:auto;padding:18px 24px 34px;max-width:960px;margin:0 auto;width:100%}
   .av-wrap::-webkit-scrollbar{width:9px}.av-wrap::-webkit-scrollbar-thumb{background:light-dark(#cfc8bb,#212a3a);border-radius:8px}
   .av-bar{display:flex;gap:10px;align-items:center;margin:10px 0 16px;flex-wrap:wrap}
@@ -1623,6 +1637,20 @@
        "Play me the overnight" gets the overnight, not a matched subset. -->
   <div id="audioview">
     <div class="av-wrap">
+      <!-- The wall of scanners, raw. Broadcastify's own public streams, the
+           same ones the transcriber listens to: no delay, no transcript in the
+           way, several at once because a scanner wall was never one radio.
+           Rendered from pipeline health, so a feed added on a relay shows up
+           here with its first heartbeat. Feeds relayed as app-audio have no
+           public stream and say so instead of pretending. -->
+      <div class="ll-panel">
+        <div class="ll-head">
+          <span class="ll-title">LISTEN LIVE &middot; THE WALL</span>
+          <span id="llCount" class="ll-count"></span>
+          <button id="llStopAll" class="ll-stopall" onclick="llStopAll()" style="display:none">stop all</button>
+        </div>
+        <div id="llRows" class="ll-rows"><div class="sc-empty">Waiting for the pipeline&hellip;</div></div>
+      </div>
       <p class="st-note">
         Every clip the radio kept from a day, in order, with the transcript it came from.
         Not a search — a browse. Pick a day, pick a feed, play the whole shift.
@@ -2170,10 +2198,17 @@ function incIcon(inc,off){
    the night goes on rather than shuffling on every poll. Radius grows with the
    count so neighbours stay about a glyph apart. Returns id -> [dx,dy]. */
 function stackKey(i){return (+i.lat).toFixed(5)+','+(+i.lon).toFixed(5);}
+/* A pin is only drawn where the geocoder actually stood. 'weak' is the town
+   centroid -- City Hall, for Boston -- and thousands of unplaceable calls a day
+   land exactly there; drawn, they fan into rings of dots that read as a mass
+   incident at Court Street. The call keeps its card in the EVERYTHING list;
+   the map just declines to state a place nobody said. Same whitelist as
+   lib/scenes.js pointOf. */
+function pinnable(i){return !!i&&i.lat!=null&&i.lon!=null&&i.precision!=='weak'&&i.precision!=='wide';}
 function ringRadius(n){return n<2?0:Math.min(40,Math.max(13,Math.round(3.4*n)));}
 function stackOffsets(list){
   const at={};
-  list.forEach(i=>{ if(i.lat==null||i.lon==null)return; const k=stackKey(i); (at[k]=at[k]||[]).push(i); });
+  list.forEach(i=>{ if(!pinnable(i))return; const k=stackKey(i); (at[k]=at[k]||[]).push(i); });
   const out={};
   Object.values(at).forEach(g=>{
     if(g.length<2)return;
@@ -2215,7 +2250,7 @@ async function pollScanner(){
   const nowIds=new Set(); scan.byId={};
   // Only rebuild the dot layer when something actually changed, so an open popup
   // (tap a dot to read the call right there) does not blink shut on every poll.
-  const mSig=JSON.stringify(scanner.filter(i=>i.lat!=null&&i.lon!=null).map(i=>[i.id,i.status,i.lat,i.lon,i.priority,(i.timeline||[]).length]));
+  const mSig=JSON.stringify(scanner.filter(pinnable).map(i=>[i.id,i.status,i.lat,i.lon,i.priority,(i.timeline||[]).length]));
   const rebuild=(mSig!==scan._mSig);
   /* Both of these are read before clearLayers rather than after, and that ordering is the
      whole point. clearLayers is the call that destroys the open popup, and asked after it
@@ -2235,7 +2270,7 @@ async function pollScanner(){
     nowIds.add(inc.id); scan.byId[inc.id]=inc;
     const isNew=!(inc.id in scan.known);
     if(isNew) scan.firstSeen[inc.id]=Date.now();
-    if(rebuild&&inc.lat!=null&&inc.lon!=null){
+    if(rebuild&&pinnable(inc)){
       const mk=L.marker([inc.lat,inc.lon],{icon:incIcon(inc,nudge[inc.id]),keyboard:false,zIndexOffset:inc.status==='active'?1000:0});
       mk.bindPopup(incPopupHTML(inc),{maxWidth:320,minWidth:230,className:'inc-pop',autoPanPadding:[24,24]});
       mk.on('popupopen',()=>{scan.popupOpen=inc.id;});
@@ -3485,7 +3520,55 @@ async function pollPipeline(){
 /* Audio archive: every clip from a day, playable. Not a search — a browse.
    The vault records carry clip URLs on every transmission that produced one. */
 let AV_DAY='';
+/* ---- The live wall: raw per-feed streams in the AUDIO tab. ----
+   One <audio> per switched-on feed, keyed by Broadcastify number, mixed by
+   the browser. Deliberately separate from the clip radio at the bottom of
+   the map: a clip is the room choosing to hear one thing; the wall is
+   ambient. Rows re-render on every pipeline poll, players survive it. */
+const LL={players:{}};
+function llUrl(n){return 'https://broadcastify.cdnstream1.com/'+n;}
+function llDotColor(st){
+  return (st==='live'||st==='connected')?'var(--scanner)'
+    :(st==='connecting'||st==='reconnecting')?'var(--road,orange)'
+    :(st==='offline')?'var(--wire)':'var(--text-faint)';
+}
+function llToggle(n,label){
+  const k=String(n);
+  if(LL.players[k]){ try{LL.players[k].pause();}catch(e){} delete LL.players[k]; }
+  else{
+    const a=new Audio(llUrl(n));
+    a.preload='none';
+    a.play().catch(()=>{});
+    LL.players[k]={pause:()=>{a.pause();a.src='';},label:label};
+    LL.players[k].pause=()=>{try{a.pause();a.removeAttribute('src');a.load();}catch(e){}};
+  }
+  renderLiveWall();
+}
+function llStopAll(){
+  Object.values(LL.players).forEach(p=>{try{p.pause();}catch(e){}});
+  LL.players={};
+  renderLiveWall();
+}
+function renderLiveWall(){
+  const box=document.getElementById('llRows'); if(!box)return;
+  const feeds=(PIPE&&PIPE.feeds)||[];
+  if(!feeds.length){box.innerHTML='<div class="sc-empty">Waiting for the pipeline&hellip;</div>';return;}
+  const withNum=feeds.filter(f=>f.feed), without=feeds.filter(f=>!f.feed);
+  box.innerHTML=withNum.map(f=>{
+    const on=!!LL.players[String(f.feed)];
+    return '<div class="ll-row"><span class="ll-dot" style="background:'+llDotColor(f.status)+'"></span>'
+      +'<span class="ll-name">'+esc(f.label||f.src||f.id)+'</span>'
+      +'<span class="ll-num">#'+esc(String(f.feed))+'</span>'
+      +'<button class="ll-btn'+(on?' on':'')+'" onclick="llToggle('+(+f.feed)+',\''+esc(String(f.label||f.src||'')).replace(/'/g,'')+'\')">'+(on?'ON AIR':'LISTEN')+'</button></div>';
+  }).join('')
+  +without.map(f=>'<div class="ll-row"><span class="ll-dot" style="background:'+llDotColor(f.status)+'"></span>'
+      +'<span class="ll-name">'+esc(f.label||f.src||f.id)+'</span><span class="ll-relay">relay only &middot; no public stream</span></div>').join('');
+  const n=Object.keys(LL.players).length;
+  const c=document.getElementById('llCount'); if(c)c.textContent=n?(n+' ON AIR'):'';
+  const sa=document.getElementById('llStopAll'); if(sa)sa.style.display=n?'':'none';
+}
 async function audioLoad(){
+  renderLiveWall(); if(!PIPE)pullPipeline().then(renderLiveWall);
   const out=document.getElementById('avOut'), dayEl=document.getElementById('avDay'), feedEl=document.getElementById('avFeed');
   if(!out)return;
   const day=dayEl?dayEl.value:'';
@@ -4655,6 +4738,7 @@ function setStatus(results){
   paintHealth();
 }
 function paintHealth(){
+  renderLiveWall();
   const el=document.getElementById('status'), up=document.getElementById('updated');
   const now=Date.now(), F=window.BCCFresh;
   const v=(F&&PIPE)?F.verdict(PIPE,now):null;
