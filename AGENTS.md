@@ -309,3 +309,22 @@ radio. The dashboard says "Unverified, not for publication" in the header for a
 reason. Anything that makes an inferred value look confirmed, or that drops the
 provenance of a geolocation, is a correctness bug in the product sense even when
 the code is right.
+
+---
+
+## Correction, 22 August 2026
+
+Read `HANDOFF.md` beside this file first. It supersedes the parts of this one
+that have gone stale, and the stale parts are worth naming here so nobody
+follows them:
+
+- **Auth is not "never deployed" any more**, and the "Open work" list above is
+  from an earlier queue. `HANDOFF.md` carries the current one.
+- **`app/index.html` is about 6,100 lines**, not 1,700, and has nine tabs
+  rather than three. Everything under "the landmines" is still true; only the
+  size has moved.
+- **`agent/` is superseded.** The live relay is `scanner/`, a native macOS app
+  built with `scanner/build.sh`, and it now takes a physical input as a fourth
+  kind of source. "The relay app" means that one.
+- **`LAUNCH.md` describes bringing up a system that has been up for weeks.**
+  Its part zero, on rotating two leaked credentials, still matters.
