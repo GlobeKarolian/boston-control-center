@@ -72,22 +72,91 @@ function forFeed(feedSrc, declared) {
 
 /* Where inside the venue, as the radio said it, or null. Best effort and never
    used to move the pin: a section number that came out garbled costs a wrong
-   label, not a wrong place. Kept short because it is rendered after the name. */
-const DETAIL_RES = [
-  /\b(?:section|sec\.?|sect\.?)\s*(\d{1,3}[a-z]?)\b/i,
-  /\b(?:gate)\s*([a-k]|\d{1,2})\b/i,
-  /\b(?:box|suite|loge)\s*(\d{1,3}[a-z]?)\b/i,
-  /\b(bleachers?|grandstand|pavilion|roof\s?deck|green monster|monster seats?|dugout|home plate|first base|third base|left field|right field|center ?field|outfield|concourse|press box|club(?:house)?|parking (?:lot|garage)|players'? lot)\b/i,
-  /\b(lansdowne|jersey street|van ness|ipswich|brookline ave(?:nue)?|yawkey|kenmore)\b/i,
+   label, not a wrong place. Kept short because it is rendered after the name.
+
+   Each rule carries its own normaliser, because what a person says and what a
+   map needs are not the same string. Fenway's gates are called over the air by
+   the phonetic alphabet at least as often as by the letter, so "Gate Bravo"
+   and "Gate B" are one place and have to come out of here as one label or the
+   ballpark view draws the same gate twice. Everything here was read off the
+   feed's own transcripts rather than imagined: the vocabulary list is what the
+   security radio actually said over a night of baseball. */
+const DETAIL_RULES = [
+  /* A section with a row is the most precise thing this radio ever says, and
+     it says it in one breath: "section 30, row 5". Taken as a pair when the
+     pair is there, so the label carries everything that was offered. */
+  { re: /\b(?:section|sec\.?|sect\.?)\s*(\d{1,3}[a-z]?)(?:\s*,?\s*row\s*([a-z]|\d{1,3})\b)?/i,
+    norm: m => 'Section ' + m[1].toUpperCase() + (m[2] ? ' \u00b7 Row ' + m[2].toUpperCase() : '') },
+
+  /* Gates, spoken either way. The phonetic list is deliberately only the
+     letters Fenway has gates for; a stray "delta" elsewhere in a sentence
+     needs the word "gate" in front of it to mean anything here. */
+  { re: /\bgate\s*(alpha|bravo|charlie|delta|echo|kilo)\b/i,
+    norm: m => 'Gate ' + m[1][0].toUpperCase() },
+  { re: /\bgate\s*([a-k])\b/i, norm: m => 'Gate ' + m[1].toUpperCase() },
+  { re: /\bgate\s*(\d{1,2})\b/i, norm: m => 'Gate ' + m[1] },
+
+  /* The bowl's own vocabulary, from the club's seating chart. Fenway numbers
+     its field level in three concentric rings, and the ring a number belongs
+     to is decided by the number itself: Right Field Box 1 to 8 and 87 to 97,
+     Field Box 9 to 82, Loge Box 98 to 165. So "box 41" and "box 132" are two
+     different tiers and the label has to say which, or the drawing puts them
+     in the same place. A number spoken with its tier is taken at its word. */
+  { re: /\b(right ?field box|field box|loge box|pavilion box|pavilion club|roof deck box|dugout box|grandstand)\s*(\d{1,3})\b/i,
+    norm: m => title(m[1]) + ' ' + m[2] },
+  { re: /\b(?:box|suite|loge)\s*(\d{1,3}[a-z]?)\b/i,
+    norm: m => m[0].replace(/\s+/g, ' ').replace(/^./, c => c.toUpperCase()) },
+  /* The Monster's own seats are lettered M1 to M10 on the chart and called
+     "monster seats" on the radio; both land in the same place. */
+  { re: /\bm\s?(\d{1,2})\b(?=[^.]{0,24}\bmonster\b)|\bmonster\s*(?:seat\s*)?m?\s?(\d{1,2})\b/i,
+    norm: m => 'Monster ' + (m[1] || m[2]) },
+
+  /* The named parts of the park. Longest phrases first so "right field box"
+     does not come back as "right field". */
+  { re: /\b(state street pavilion|right ?field box(?:es)?|left ?field box(?:es)?|field box(?:es)?|loge box(?:es)?|pavilion club|pavilion reserved|pavilion box|right ?field cantina|right ?field roof|roof ?deck|budweiser deck|dell club|dell tech|emc club|press box|green monster|monster seats?|home plate|first base|third base|left ?field|right ?field|cent(?:er|re) ?field|outfield|bleachers?|grandstand|pavilion|terrace|dugout|concourse|club ?house|bullpen|players'? lot|parking (?:lot|garage))\b/i,
+    norm: m => title(m[1]) },
+
+  /* "Sam Deck" reaches the transcriber as "sand deck" more often than not.
+     There is no sand at Fenway; there is a Sam Adams deck in right field. */
+  { re: /\b(?:sam|sand)\s*deck\b/i, norm: () => 'Sam Deck' },
+
+  /* Which floor, when nothing better was said. Weak, so it sits below the
+     named places and above the streets. */
+  { re: /\b(ground level|street level|level\s*[1-9])\b/i, norm: m => title(m[1]) },
+
+  /* The perimeter. A call on Jersey Street is outside the park and still at
+     the ballpark, which is exactly the distinction this label is for. */
+  { re: /\b(lansdowne|jersey street|van ness|ipswich|brookline ave(?:nue)?|yawkey|kenmore)\b/i,
+    norm: m => title(m[1]) },
 ];
+
+/* One spelling per place. The radio says "bleacher" and "bleachers" and
+   "monster seats" and "the green monster" in the same inning, and a view that
+   groups by this label has to see one place, not four. */
+const CANON = {
+  'Bleacher': 'Bleachers',
+  'Monster Seat': 'Green Monster', 'Monster Seats': 'Green Monster',
+  'Centre Field': 'Center Field', 'Centrefield': 'Center Field', 'Centerfield': 'Center Field',
+  'Leftfield': 'Left Field', 'Rightfield': 'Right Field',
+  'Club House': 'Clubhouse',
+  'Right Field Boxes': 'Right Field Box', 'Left Field Boxes': 'Left Field Box',
+  'Field Boxes': 'Field Box',
+  'Roofdeck': 'Roof Deck',
+  'Brookline Ave': 'Brookline Avenue',
+};
+const title = s => {
+  const t = String(s).toLowerCase().replace(/\s+/g, ' ')
+    .replace(/\b([a-z])/g, c => c.toUpperCase());
+  return CANON[t] || t;
+};
+
 function detail(text) {
   const t = String(text || '');
-  for (const re of DETAIL_RES) {
-    const m = re.exec(t);
+  for (const rule of DETAIL_RULES) {
+    const m = rule.re.exec(t);
     if (!m) continue;
-    const word = m[0].trim();
-    /* "Section 24", "Gate E", "Bleachers": title case the phrase, keep the number. */
-    return word.replace(/\b([a-z])/gi, (c) => c.toUpperCase()).replace(/\bSec\.?\b/i, 'Section').replace(/\bSect\.?\b/i, 'Section').slice(0, 40);
+    const out = String(rule.norm(m) || '').trim();
+    if (out) return out.slice(0, 40);
   }
   return null;
 }
