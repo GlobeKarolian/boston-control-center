@@ -74,6 +74,17 @@ struct LoginView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    HStack {
+                        Spacer()
+                        VStack(spacing: 10) {
+                            LogoMark(size: 68)
+                            Unverified()
+                        }
+                        Spacer()
+                    }
+                    .listRowBackground(Color.clear)
+                }
                 Section("Server") {
                     TextField("https://www.scan.boston", text: $settings.server)
                         .keyboardType(.URL).autocorrectionDisabled().textInputAutocapitalization(.never)

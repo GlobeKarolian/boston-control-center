@@ -42,7 +42,7 @@ Picture in Picture** is ticked.
 
 | File | What it holds |
 | --- | --- |
-| `BCC/BCCApp.swift` | The five tabs, the login sheet, the radio bar |
+| `BCC/BCCApp.swift` | The six tabs, the login sheet, the radio bar |
 | `BCC/Models.swift` | The server's JSON shapes, all fields optional, Eastern-time formatting |
 | `BCC/API.swift` | Server address + Keychain, Basic auth, one function per route |
 | `BCC/Store.swift` | The board: incidents, situations, wire, pipeline, 15-second poll |

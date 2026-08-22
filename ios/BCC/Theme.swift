@@ -108,24 +108,57 @@ struct Unverified: View {
     }
 }
 
+
+/* The Reflection, drawn in code so it ships no asset and stays crisp at any
+   size: the city above the waterline, its voice below. Same mark as the
+   favicon and the home-screen icon. */
+struct LogoMark: View {
+    var size: CGFloat = 30
+    private let slate = Color(red: 0x23/255, green: 0x30/255, blue: 0x43/255)
+    private let mastc = Color(red: 0x3A/255, green: 0x4A/255, blue: 0x63/255)
+    private let water = Color(red: 0x2B/255, green: 0x38/255, blue: 0x50/255)
+
+    var body: some View {
+        Canvas { ctx, sz in
+            let u = sz.width / 100
+            func box(_ x: CGFloat, _ y: CGFloat, _ w: CGFloat, _ h: CGFloat, _ c: Color) {
+                ctx.fill(Path(CGRect(x: x * u, y: y * u, width: w * u, height: h * u)), with: .color(c))
+            }
+            box(11, 44, 7, 12, slate); box(20, 26, 12, 30, slate)
+            box(34, 40, 7, 16, slate); box(43, 31, 11, 25, slate)
+            box(57, 36, 5, 20, slate); box(65, 41, 9, 15, slate)
+            var tip = Path()
+            tip.move(to: CGPoint(x: 65 * u, y: 41 * u))
+            tip.addLine(to: CGPoint(x: 74 * u, y: 41 * u))
+            tip.addLine(to: CGPoint(x: 69.5 * u, y: 33 * u))
+            tip.closeSubpath()
+            ctx.fill(tip, with: .color(slate))
+            box(77, 47, 8, 9, slate)
+            box(47.7, 22, 1.8, 9, mastc)
+            ctx.fill(Path(ellipseIn: CGRect(x: 46.4 * u, y: 17.4 * u, width: 4.4 * u, height: 4.4 * u)), with: .color(Pal.road))
+            box(8, 57.2, 81, 1.8, water)
+            let bars: [(CGFloat, CGFloat)] = [(19, 77), (25, 86), (31, 72), (43, 80), (49, 90), (55, 71), (61, 75), (67, 83), (77, 72)]
+            for (x, yEnd) in bars {
+                let r = Path(roundedRect: CGRect(x: (x - 2.2) * u, y: 64 * u, width: 4.4 * u, height: (yEnd - 64) * u), cornerRadius: 2.2 * u)
+                ctx.fill(r, with: .color(Pal.scanner))
+            }
+        }
+        .frame(width: size, height: size)
+        .accessibilityHidden(true)
+    }
+}
+
 /* The masthead. One strip over every tab, the same identity the wall leads
    with: the live dot, the name in the masthead's serif, the legal line, and
    the newsroom clock in Eastern. This is most of what makes the app read as
    the product rather than as a template with pins on it. */
 struct Masthead: View {
     @ObservedObject var board = Board.shared
-    @State private var pulse = false
 
     var body: some View {
         VStack(spacing: 0) {
-            HStack(spacing: 9) {
-                Circle()
-                    .fill(board.problem == nil ? Pal.scanner : Pal.road)
-                    .frame(width: 8, height: 8)
-                    .opacity(pulse ? 1 : 0.35)
-                    .onAppear {
-                        withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) { pulse = true }
-                    }
+            HStack(spacing: 10) {
+                LogoMark(size: 30)
                 VStack(alignment: .leading, spacing: 0) {
                     Text("Boston Control Center")
                         .font(.system(size: 15, weight: .semibold, design: .serif))
@@ -135,10 +168,12 @@ struct Masthead: View {
                 }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
+                    /* The clock is the live indicator now: green while the
+                       board answers, amber while it does not. */
                     TimelineView(.periodic(from: .now, by: 1)) { ctx in
                         Text(ETime.clockNow(ctx.date))
                             .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                            .foregroundStyle(Pal.scanner)
+                            .foregroundStyle(board.problem == nil ? Pal.scanner : Pal.road)
                     }
                     Text(feedsLine)
                         .font(.system(size: 9, weight: .bold, design: .monospaced))
