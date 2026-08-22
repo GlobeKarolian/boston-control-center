@@ -41,6 +41,7 @@ SOURCES=(
   "$HERE/src/Opus.swift"
   "$HERE/src/RapidSOS.swift"
   "$HERE/src/SystemAudio.swift"
+  "$HERE/src/AuxInput.swift"
   "$HERE/src/Capture.swift"
   "$HERE/src/Relay.swift"
   "$HERE/src/Controller.swift"
@@ -266,6 +267,8 @@ cat > "$APP/Contents/Info.plist" <<PLISTEOF
   <key>NSHumanReadableCopyright</key>  <string>Boston Globe Media</string>
   <key>NSScreenCaptureUsageDescription</key>
   <string>Scanner Relay reads the sound one application is playing, so a police feed that only exists in a web player can be transcribed. No picture is captured and nothing is saved to disk.</string>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Scanner Relay reads an audio input you choose, like the line-in or a USB dongle with a scanner plugged into it, so a radio on your desk can be transcribed. Nothing is recorded beyond the transcription pipeline.</string>
 </dict>
 </plist>
 PLISTEOF

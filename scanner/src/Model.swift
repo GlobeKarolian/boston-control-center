@@ -63,6 +63,13 @@ struct Source: Identifiable, Codable, Equatable {
 
     var isAppAudio: Bool { kind == "app" }
 
+    /* A physical input on this Mac: line-in, a USB codec, the receiver on the
+       desk. The device is remembered by its uniqueID so it survives reboots
+       and replugs; the name rides along for the menu. */
+    var isAuxIn: Bool { kind == "device" }
+    var deviceUID: String = ""
+    var deviceName: String = ""
+
     /* Boston Police, straight off the city's own radio socket. It reuses the
        url field to hold the channel id, so a feed is still one row with one
        address in it, and the app tap it replaces needed a browser left open
@@ -78,9 +85,9 @@ struct Source: Identifiable, Codable, Equatable {
 
     /// A half typed row is not a feed, and should not start or be reported.
     var isConfigured: Bool {
-        isAppAudio
-            ? !bundleID.trimmingCharacters(in: .whitespaces).isEmpty
-            : !url.trimmingCharacters(in: .whitespaces).isEmpty
+        if isAppAudio { return !bundleID.trimmingCharacters(in: .whitespaces).isEmpty }
+        if isAuxIn { return !deviceUID.trimmingCharacters(in: .whitespaces).isEmpty }
+        return !url.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /* Accepts whatever a person actually has in their clipboard: the listen page,
@@ -133,7 +140,7 @@ struct Source: Identifiable, Codable, Equatable {
    extension keeps the memberwise initializer, which the rest of the app uses. */
 extension Source {
     enum CodingKeys: String, CodingKey {
-        case id, label, url, city, enabled, kind, bundleID, scope
+        case id, label, url, city, enabled, kind, bundleID, scope, deviceUID, deviceName
     }
 
     init(from decoder: Decoder) throws {
@@ -147,6 +154,8 @@ extension Source {
         kind = try c.decodeIfPresent(String.self, forKey: .kind) ?? "stream"
         bundleID = try c.decodeIfPresent(String.self, forKey: .bundleID) ?? ""
         scope = try c.decodeIfPresent(String.self, forKey: .scope) ?? ""
+        deviceUID = try c.decodeIfPresent(String.self, forKey: .deviceUID) ?? ""
+        deviceName = try c.decodeIfPresent(String.self, forKey: .deviceName) ?? ""
     }
 }
 
@@ -224,6 +233,12 @@ final class Store: ObservableObject {
     /// Applications this Mac could tap sound from, refreshed on demand.
     @Published var audioApps: [AudioApp] = []
     @Published var audioAppsProblem: String?
+    @Published var audioInputs: [AudioInputDevice] = []
+
+    /// Aux sources currently playing aloud on this Mac. An ear, not a
+    /// setting: deliberately never persisted, so a relaunch cannot surprise
+    /// a quiet room with a police radio at volume.
+    @Published var auxListening: Set<String> = []
 
     @Published var ingestToken = "" { didSet { Secrets.set(ingestToken, for: "ingest") } }
     @Published var bfUser = ""      { didSet { Secrets.set(bfUser, for: "bf-user") } }
@@ -343,6 +358,12 @@ final class Store: ObservableObject {
 
     /// Ask the system which applications are making sound. This is also what
     /// raises the one time screen recording prompt, so it runs on demand.
+    /// The audio inputs this Mac can hear right now. Cheap, no permission
+    /// prompt of its own; the prompt belongs to the moment capture starts.
+    func refreshAudioInputs() {
+        audioInputs = AudioInputDevice.all()
+    }
+
     func refreshAudioApps() {
         SystemAudio.running { [weak self] apps, problem in
             guard let self else { return }

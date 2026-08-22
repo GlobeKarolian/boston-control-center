@@ -36,6 +36,12 @@ final class Controller: ObservableObject {
     var loadTimer: Timer?
     var runningSince: Date?
 
+    /* Monitor-only taps for hearing an aux port while capture is stopped.
+       While capture runs, listening rides the capture's own tap instead, so
+       these exist only in the stopped state and are folded into the real
+       taps at every start. */
+    private var previews: [String: AuxInputTap] = [:]
+
     init(store: Store) {
         self.store = store
         relay.healthProvider = { [health] in health.get() }
@@ -84,6 +90,11 @@ final class Controller: ObservableObject {
             ollama.refresh()
         }
 
+        /* Any ear that was on the port through a preview tap moves onto the
+           capture's own tap now; two sessions must never hold one device. */
+        for (_, t) in previews { t.stop() }
+        previews.removeAll()
+
         var o = Capture.Options()
         o.sources = store.sources
         o.bfUser = store.bfUser.trimmingCharacters(in: .whitespaces)
@@ -92,6 +103,7 @@ final class Controller: ObservableObject {
         o.silenceGate = store.silenceGate
         o.modelID = store.modelID
         capture.start(o)
+        for id in store.auxListening { capture.setAuxMonitor(true, id: id) }
 
         for s in store.sources {
             store.statuses[s.id] = SourceStatus(state: s.enabled ? "connecting" : "off")
@@ -119,9 +131,58 @@ final class Controller: ObservableObject {
         for s in store.sources { store.statuses[s.id]?.state = "idle" }
         store.relayState = "idle"
         store.note("capture stopped")
+
+        /* Stopping capture should not stop the operator's ear. Any port that
+           was playing aloud keeps playing, through a bare monitor tap. */
+        for s in store.sources
+        where s.isAuxIn && store.auxListening.contains(s.id) && !s.deviceUID.isEmpty {
+            spawnPreview(s)
+        }
     }
 
     func toggle() { store.running ? stop() : start() }
+
+    /* ---------------------------------------------------------- aux listen --- */
+
+    /* Hearing the port through this Mac's speakers. While capture runs the
+       sound comes off the same tap whisper reads, so what you hear is what
+       the transcriber hears. While capture is stopped a bare tap is opened
+       for the ear alone: no segments, no whisper, just the cable made
+       audible so the level can be set before going live. */
+    func setAuxListen(_ on: Bool, for s: Source) {
+        if on { store.auxListening.insert(s.id) } else { store.auxListening.remove(s.id) }
+        if store.running {
+            capture.setAuxMonitor(on, id: s.id)
+            return
+        }
+        if on {
+            guard !s.deviceUID.isEmpty else { return }
+            spawnPreview(s)
+        } else {
+            previews[s.id]?.stop()
+            previews[s.id] = nil
+        }
+    }
+
+    private func spawnPreview(_ s: Source) {
+        previews[s.id]?.stop()
+        let tap = AuxInputTap()
+        tap.setMonitor(true)
+        tap.onNotice = { [weak self] line in
+            DispatchQueue.main.async { self?.store.note("[\(s.slug)] \(line)") }
+        }
+        tap.onFailure = { [weak self] why in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.store.note("[\(s.slug)] listen: \(why)")
+                self.store.auxListening.remove(s.id)
+                self.previews[s.id]?.stop()
+                self.previews[s.id] = nil
+            }
+        }
+        previews[s.id] = tap
+        tap.start(deviceUID: s.deviceUID)
+    }
 
     func testConnection() {
         testResult = "checking ..."

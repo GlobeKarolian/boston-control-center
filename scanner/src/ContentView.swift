@@ -90,7 +90,8 @@ struct ContentView: View {
                 ForEach($store.sources) { $s in
                     FeedRow(source: $s, store: store, status: store.status(s), now: now,
                             running: store.running,
-                            onDelete: { store.remove(s) })
+                            onDelete: { ctl.setAuxListen(false, for: s); store.remove(s) },
+                            onListen: { on in ctl.setAuxListen(on, for: s) })
                 }
             }
         }
@@ -489,6 +490,9 @@ struct FeedRow: View {
     let now: Date
     let running: Bool
     let onDelete: () -> Void
+    let onListen: (Bool) -> Void
+
+    private var listening: Bool { store.auxListening.contains(source.id) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 7) {
@@ -501,6 +505,7 @@ struct FeedRow: View {
                 Picker("", selection: $source.kind) {
                     Text("Stream").tag("stream")
                     Text("App audio").tag("app")
+                    Text("Aux In").tag("device")
                     Text("Boston Police").tag("rapidsos")
                 }
                 .labelsHidden()
@@ -509,6 +514,8 @@ struct FeedRow: View {
 
                 if source.isAppAudio {
                     appPicker
+                } else if source.isAuxIn {
+                    auxPicker
                 } else if source.isRapidSOS {
                     bostonPolicePicker
                 } else {
@@ -544,10 +551,30 @@ struct FeedRow: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
 
+            if source.isAuxIn {
+                Text("A physical input on this Mac: the line-in jack, a USB capture dongle, "
+                     + "a receiver's headphone out. Set the radio's volume to about half and "
+                     + "leave it; Listen plays the input through this Mac's speakers so the "
+                     + "level can be checked by ear. macOS asks once for microphone permission "
+                     + "the first time the input is used.")
+                    .font(.system(size: 10)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             HStack(spacing: 7) {
                 Circle().fill(dotColor).frame(width: 7, height: 7)
                 Text(statusLine).font(.system(size: 11)).foregroundStyle(.secondary)
                 Spacer()
+                if source.isAuxIn, !source.deviceUID.isEmpty {
+                    Button { onListen(!listening) } label: {
+                        Label(listening ? "Listening" : "Listen",
+                              systemImage: listening ? "speaker.wave.2.fill" : "speaker.wave.2")
+                            .font(.system(size: 11))
+                    }
+                    .buttonStyle(.borderless)
+                    .foregroundStyle(listening ? Color.accentColor : Color.secondary)
+                    .help("Play this input through this Mac's speakers, capture running or not")
+                }
             }
 
             if let e = status.lastError, !e.isEmpty {
@@ -581,6 +608,38 @@ struct FeedRow: View {
         }
         .labelsHidden()
         .pickerStyle(.menu)
+    }
+
+    /* The inputs this Mac can hear, by the names System Settings uses. The
+       uniqueID is what gets stored, so the pick survives replugs and reboots;
+       a device that is unplugged right now still shows, by its saved name,
+       for the same reason a closed application stays in the app menu. */
+    private var auxPicker: some View {
+        HStack(spacing: 6) {
+            Picker("", selection: $source.deviceUID) {
+                Text("Pick an input").tag("")
+                ForEach(store.audioInputs) { d in Text(d.name).tag(d.id) }
+                if !source.deviceUID.isEmpty,
+                   !store.audioInputs.contains(where: { $0.id == source.deviceUID }) {
+                    Text(source.deviceName.isEmpty ? source.deviceUID : source.deviceName)
+                        .tag(source.deviceUID)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .onChange(of: source.deviceUID) { _, uid in
+                if let d = store.audioInputs.first(where: { $0.id == uid }) {
+                    source.deviceName = d.name
+                }
+            }
+
+            Button { store.refreshAudioInputs() } label: {
+                Image(systemName: "arrow.clockwise")
+            }
+            .buttonStyle(.borderless)
+            .help("List the audio inputs on this Mac")
+        }
+        .onAppear { if store.audioInputs.isEmpty { store.refreshAudioInputs() } }
     }
 
     private var appPicker: some View {

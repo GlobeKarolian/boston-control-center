@@ -36,6 +36,7 @@ final class Capture {
     private var stopping = true
     private var raws: [String: RawStream] = [:]
     private var taps: [String: SystemAudioTap] = [:]
+    private var auxes: [String: AuxInputTap] = [:]
     let work = OperationQueue()
 
     var onEvent: ((CaptureEvent) -> Void)?
@@ -97,6 +98,9 @@ final class Capture {
                own. It is armed once and then feeds the same work queue every
                other source does. */
             if s.isAppAudio { arm(s); continue }
+            /* An aux input is event driven too: the session calls back with
+               samples, so it needs no polling thread either. */
+            if s.isAuxIn { armAux(s); continue }
             let t = Thread { [weak self] in self?.loop(s) }
             t.name = "relay.\(s.slug)"
             t.qualityOfService = .utility
@@ -133,16 +137,51 @@ final class Capture {
         tap.start(bundleID: s.bundleID)
     }
 
+    /* ------------------------------------------------------- aux-in device --- */
+
+    private func armAux(_ s: Source) {
+        let tap = AuxInputTap()
+        tap.segmentSeconds = options.segmentSeconds
+        tap.onState = { [weak self] state in self?.emit(.state(s.id, state)) }
+        tap.onFailure = { [weak self] why in
+            self?.emit(.failed(s.id, why))
+            self?.emit(.state(s.id, "error"))
+        }
+        tap.onNotice = { [weak self] why in
+            self?.emit(.log("[\(s.slug)] \(why)"))
+        }
+        tap.onSegment = { [weak self] wav in
+            guard let self, !self.isStopping else { return }
+            self.emit(.segment(s.id))
+            self.work.addOperation { [weak self] in self?.runWhisper(wav, source: s) }
+        }
+        lock.lock(); auxes[s.id] = tap; lock.unlock()
+        emit(.state(s.id, "connecting"))
+        emit(.log("[\(s.slug)] reading input device \(s.deviceName.isEmpty ? s.deviceUID : s.deviceName)"))
+        tap.start(deviceUID: s.deviceUID)
+    }
+
+    /* The operator's ear on an aux source while capture runs: flips playback
+       on the live tap itself, so what plays aloud is exactly what whisper is
+       being handed. A no-op for ids that are not armed aux inputs. */
+    func setAuxMonitor(_ on: Bool, id: String) {
+        lock.lock(); let tap = auxes[id]; lock.unlock()
+        tap?.setMonitor(on)
+    }
+
     func stop() {
         lock.lock()
         stopping = true
         let open = raws
         let live = taps
+        let aux = auxes
         raws.removeAll()
         taps.removeAll()
+        auxes.removeAll()
         lock.unlock()
         for (_, r) in open { r.stop() }
         for (_, t) in live { t.stop() }
+        for (_, a) in aux { a.stop() }
         work.cancelAllOperations()
         Wakefulness.release()
         Broadcastify.shared.forgetLogin()
