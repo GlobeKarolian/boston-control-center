@@ -37,6 +37,13 @@ const els = {
 };
 let rang = [];
 global.document = { getElementById: (id) => els[id] || null };
+/* paintHealth now repaints the LISTEN LIVE wall too, but renderLiveWall lives
+   in the audio section of the page, far above the block sliced out here
+   (a70a3b0 moved the call into the header without moving the function).
+   Stubbing it keeps this file testing the pill rather than the whole audio
+   tab, while the counter below still proves the header really calls it. */
+let wallPaints = 0;
+global.renderLiveWall = () => { wallPaints++; };
 global.window = {
   BCCFresh: F,
   BCCAlert: {

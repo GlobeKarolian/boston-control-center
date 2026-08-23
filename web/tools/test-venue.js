@@ -71,7 +71,7 @@ ok('and still files a Boston feed under Boston', townFromFeed('boston-police', [
 /* --- where inside the building ---------------------------------------- */
 
 const D = venues.detail;
-ok('a section number', D('medical at section 24, row 5') === 'Section 24', D('medical at section 24, row 5'));
+ok('a section number', D('medical at section 24, row 5') === 'Section 24 · Row 5', D('medical at section 24, row 5'));
 ok('sec, abbreviated', D('sec 12 ejection') === 'Section 12', D('sec 12 ejection'));
 ok('a gate letter', D('lost child at gate e, blue shirt') === 'Gate E', D('lost child at gate e, blue shirt'));
 ok('a stand', D('intox in the bleachers') === 'Bleachers', D('intox in the bleachers'));
