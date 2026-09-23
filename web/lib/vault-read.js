@@ -187,8 +187,13 @@ function rollupOf(path) {
    pathname, uploadedAt }. One small listing per day. */
 async function rollupsFor(days, cache) {
   const out = new Map();
-  const results = await pool(days, (day) => cachedList(cache, rollupPrefix(day), { max: 500 }), LIST_CONCURRENCY);
-  for (const r of results) {
+  out.errors = [];
+  out.truncated = false;
+  const results = await pool(days, (day) => cachedList(cache, rollupPrefix(day),
+    { max: 400000, maxPages: 400, keepNewest: true }), LIST_CONCURRENCY);
+  for (const [i, r] of results.entries()) {
+    out.errors.push(...listingErrors(r, rollupPrefix(days[i])));
+    if (r && r.truncated) out.truncated = true;
     for (const b of ((r && r.blobs) || [])) {
       const info = rollupOf(b.pathname || b.url);
       if (!info) continue;
@@ -200,6 +205,13 @@ async function rollupsFor(days, cache) {
     }
   }
   return out;
+}
+
+function listingErrors(r, prefix) {
+  if (!r || r.ok === false) return [{ stage: 'list', prefix, code: 'list_failed',
+    why: r && r.why || 'archive prefix could not be listed' }];
+  if (r.truncated) return [{ stage: 'list', prefix, code: 'listing_truncated', why: 'archive prefix listing was truncated' }];
+  return [];
 }
 
 /* A listing, once per run when the caller hands over a cache. The compactor
@@ -264,10 +276,18 @@ function hourWindow(day, hh) {
   return out;
 }
 
-/* One row's identity, for deduping a row that arrived both in a rollup and in
-   a piece at an hour boundary, or twice from a relay retry. */
+/* Only identical archived records are duplicates. Timestamp/feed/text is not
+   a recording identity: another clip, relay sequence or machine can share all
+   three. Even the last character can be a correction. Keep every stored field
+   and sort object keys so a rollup's JSON serialization does not change the
+   identity; arrays retain their order. No delimiter or text-prefix collisions. */
 function rowKey(t) {
-  return String(t.at || '') + '|' + String(t.feed || t.src || '') + '|' + String(t.text || '').slice(0, 96);
+  const canonical = value => {
+    if (Array.isArray(value)) return value.map(canonical);
+    if (!value || typeof value !== 'object') return value;
+    return Object.fromEntries(Object.keys(value).sort().map(k => [k, canonical(value[k])]));
+  };
+  return JSON.stringify(canonical(t));
 }
 
 /* How many listings run at once. Enough to collapse a shift's worth of hour
@@ -335,21 +355,24 @@ async function listWindow(fromMs, toMs, opts) {
   const hi = toMs + slack;
   const cache = o.cache || null;
 
-  if (!blob.enabled()) return { ok: false, why: blob.reason(), urls: [], listed: 0, truncated: false };
+  if (!blob.enabled()) return { ok: false, why: blob.reason(), urls: [], listed: 0, truncated: false,
+    complete: false, incomplete: true, errors: [{ stage: 'list', code: 'storage_unavailable', why: blob.reason() }] };
 
   const seen = new Set();
   const found = [];       // raw pieces
   const rolled = [];      // rollups, always kept whole
   let listed = 0, scanned = 0, pages = 0, truncated = false, why = null;
+  const errors = [];
 
-  const take = (r) => {
+  const take = (r, prefix) => {
+    errors.push(...listingErrors(r, prefix));
     pages += (r && r.pages) || 0;
     scanned += (r && r.seen) || 0;
     if (r && r.truncated) truncated = true;
     if (r && r.ok === false && r.why && !why) why = r.why;
     for (const b of ((r && r.blobs) || [])) {
       listed++;
-      const key = String(b.pathname || b.url).split('/').pop();
+      const key = String(b.pathname || b.url || '');
       if (!key || seen.has(key)) continue;
       const at = stampOf(b.pathname || b.url);
       /* An object whose name we cannot read is kept rather than dropped:
@@ -380,6 +403,8 @@ async function listWindow(fromMs, toMs, opts) {
 
   /* Which hours already exist as one object. */
   const rollups = (o.rollups === false) ? new Map() : await rollupsFor(plan.map(g => g.day), cache);
+  errors.push(...(rollups.errors || []));
+  truncated = truncated || !!rollups.truncated;
 
   let stoppedEarly = false;
   for (const group of plan) {
@@ -415,12 +440,14 @@ async function listWindow(fromMs, toMs, opts) {
     const results = await pool(entries,
       (e) => cachedList(cache, e.prefix, { max: 8000, keepNewest: true, folded: e.folded, keep: inWindow }),
       LIST_CONCURRENCY);
-    for (const r of results) take(r);
+    for (const [i, r] of results.entries()) take(r, entries[i].prefix);
     /* Every prefix left is an older day, and the cap below would drop all of
        it. Stopping here is the difference between answering last night and
        paging last week to discard it. Never when the caller asked for even
        coverage: for them the older days ARE the answer. */
-    if (!evenly && found.length >= max) { stoppedEarly = true; truncated = true; break; }
+    if (!evenly && found.length >= max && group !== plan[plan.length - 1]) {
+      stoppedEarly = true; truncated = true; break;
+    }
   }
 
   found.sort((a, b) => b.at - a.at);           // newest first
@@ -437,56 +464,82 @@ async function listWindow(fromMs, toMs, opts) {
      one drops the hour. They ride along whole, newest first with the rest. */
   const all = kept.concat(rolled).sort((a, b) => b.at - a.at);
   const urls = all.map(x => x.url);
-  return { ok: true, urls, objects: all, listed, scanned, pages, truncated, sampled, stoppedEarly,
-           found: found.length, rollups: rolled.length, why };
+  const incomplete = truncated || errors.length > 0;
+  return { ok: !errors.some(e => e.code !== 'listing_truncated'), urls, objects: all, listed, scanned, pages,
+    truncated, sampled, stoppedEarly, found: found.length, rollups: rolled.length,
+    complete: !incomplete, incomplete, errors, why: why || (errors[0] && errors[0].why) || null };
 }
 
-/* Fetch what a listing found. Every object is { tx: [...] }, rollup or piece,
-   so the shape is one shape. One unreadable object is not a failed read. */
+/* Fetch what a listing found. Good objects still answer during a partial
+   outage, but a missing or malformed object must never certify an empty hour.
+   Results keep listing order, independent of which request finishes first. */
 let FETCH = (u) => fetch(u);
 async function fetchAll(urls, width) {
-  const out = [];
-  let i = 0, failed = 0;
+  const batches = new Array(urls.length);
+  const failures = new Array(urls.length);
+  let i = 0;
   const w = Math.min(width || 48, urls.length || 1);
   const worker = async () => {
     for (;;) {
       const n = i++;
       if (n >= urls.length) return;
-      try {
-        const r = await FETCH(urls[n]);
-        if (!r || !r.ok) { failed++; continue; }
-        const j = await r.json();
-        if (j && Array.isArray(j.tx)) for (const t of j.tx) out.push(t);
-      } catch (e) { failed++; }
+      const fail = (code, why, extra) => {
+        if (!failures[n]) failures[n] = [];
+        failures[n].push({ stage: 'fetch', url: urls[n], code, why, ...extra });
+      };
+      let r, j;
+      try { r = await FETCH(urls[n]); }
+      catch (e) { fail('fetch_failed', 'archive object could not be fetched'); continue; }
+      if (!r || !r.ok) {
+        fail('http_error', 'archive object returned an unsuccessful response', { status: r && r.status || null });
+        continue;
+      }
+      try { j = await r.json(); }
+      catch (e) { fail('invalid_json', 'archive object is not readable JSON'); continue; }
+      if (!j || !Array.isArray(j.tx)) { fail('invalid_object', 'archive object has no tx array'); continue; }
+      const valid = j.tx.filter(t => t && typeof t === 'object' && !Array.isArray(t) &&
+        (typeof t.at === 'string' || typeof t.at === 'number') && Number.isFinite(+new Date(t.at)));
+      if (valid.length !== j.tx.length) fail('invalid_rows', 'archive object contains rows without a usable timestamp',
+        { invalidRows: j.tx.length - valid.length });
+      if (j.count !== undefined && j.count !== j.tx.length) fail('count_mismatch', 'archive object count does not match its tx array');
+      batches[n] = valid;
     }
   };
   await Promise.all(Array.from({ length: w }, worker));
-  return { rows: out, failed };
+  const errors = failures.flat();
+  return { rows: batches.flat(), failed: failures.filter(Boolean).length, errors };
 }
 
 /* THE ROWS IN A WINDOW. The one read everything above this file should use.
  *
  * Lists (rollups first, pieces for the hours that have none), fetches, dedupes
  * a row that arrived both ways, keeps only rows inside [fromMs, toMs], and
- * returns them oldest first. Every option of listWindow applies. */
+ * returns them oldest first. Every option of listWindow applies.
+ * `ok` excludes upstream failures, not intentional caps; `complete` excludes
+ * both. Completeness describes this read plan, not proof that the relay wrote
+ * every original or that an old rollup contains later-arriving pieces. */
 async function readWindow(fromMs, toMs, opts) {
   const o = opts || {};
   const got = await listWindow(fromMs, toMs, o);
-  if (!got.ok) return { ok: false, why: got.why, rows: [], listing: got, failed: 0 };
   const fetched = await fetchAll(got.urls, o.concurrency);
   const seen = new Set();
   const rows = [];
+  let deduped = 0, outOfWindow = 0;
   for (const t of fetched.rows) {
     if (!t) continue;
     const at = +new Date(t.at);
-    if (!Number.isFinite(at) || at < fromMs || at > toMs) continue;
+    if (!Number.isFinite(at) || at < fromMs || at > toMs) { outOfWindow++; continue; }
     const k = rowKey(t);
-    if (seen.has(k)) continue;
+    if (seen.has(k)) { deduped++; continue; }
     seen.add(k);
     rows.push(t);
   }
-  rows.sort((a, b) => String(a.at).localeCompare(String(b.at)));
-  return { ok: true, rows, listing: got, failed: fetched.failed, deduped: fetched.rows.length - rows.length };
+  rows.sort((a, b) => +new Date(a.at) - +new Date(b.at));
+  const errors = (got.errors || []).concat(fetched.errors);
+  const incomplete = !!got.truncated || errors.length > 0;
+  return { ok: got.ok && fetched.failed === 0, rows, listing: got, failed: fetched.failed,
+    deduped, outOfWindow, complete: !incomplete, incomplete,
+    truncated: !!got.truncated, errors, why: errors.length ? errors[0].why : got.why };
 }
 
 module.exports = {

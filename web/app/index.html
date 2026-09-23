@@ -30,6 +30,15 @@
 <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
 <link rel="apple-touch-icon" href="./favicon.svg" />
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" />
+<script src="https://cdn.apple-mapkit.com/ck/mapkit.js"></script>
+<style>
+  /* MapKit JS renders smoothly into Leaflet's leading edge. When it activated
+     we transparent the CARTO tiles; if MapKit fails, Leaflet's basemap is still
+     intact. */
+  .leaflet-transparent .leaflet-tile-pane { opacity: 0 !important; }
+  #map { position: relative; background: transparent !important; }
+  #appleBasemap { position: absolute; inset: 0; pointer-events: none; z-index: -1; }
+</style>
 <style>
   :root{
     --bg:light-dark(#f5f3ef,#05070b);--panel:light-dark(rgba(255,253,250,.88),rgba(14,18,26,.86));--panel-solid:light-dark(#fffdfa,#0e121a);--border:light-dark(#dbd5ca,#232c3b);--border-soft:light-dark(#e9e4db,#1a2230);
@@ -1588,7 +1597,8 @@
 <link rel="stylesheet" href="./deskviews.css">
 </head>
 <body>
-  <div id="map"></div>
+  <div id="appleBasemap"></div>
+<div id="map"></div>
 
   <div class="hud-top">
     <div style="display:flex;align-items:center;gap:11px">
@@ -2228,16 +2238,42 @@ function parseFeedXML(x){const d=new DOMParser().parseFromString(x,'text/xml');c
 const map=L.map('map',{zoomControl:false,attributionControl:true,worldCopyJump:true}).setView(CONFIG.center,CONFIG.zoom);
 window.map=map;
 L.control.zoom({position:'bottomright'}).addTo(map);
-/* The basemap had no name because nothing ever needed to speak to it. The Desk
-   and the Story are light, and a light sheet with a dark map in the hole in the
-   middle of it reads as a rendering fault, so the tiles follow the view. Same
-   layer object either way: swapping the URL template keeps the pane, the zoom
-   and every marker on top of it exactly where they were. */
+const wrapperEl=document.getElementById('map');
+const appleHolder=document.getElementById('appleBasemap');
+/* Apple Maps via MapKit JS, when the token endpoint answers; Leaflet CARTO
+   tiles = the fallback, and the fallback should be the exception, not the rule. */
 const BASE_TILES={
   dark:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
   light:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
 };
 const baseLayer=L.tileLayer(BASE_TILES[themeNow()],{subdomains:'abcd',maxZoom:19,attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+let appleMap=null;
+let appleActive=false;
+function syncAppleToLeaflet(){
+  if(!appleMap)return;
+  appleMap.region={center:map.getCenter(),regionLatitude:1e-4,regionLongitude:1e-4};
+}
+
+function tryApple(){
+  try{
+    if(typeof mapkit==='undefined')return;
+    mapkit.init({
+      authorizationCallback(cb){
+        fetch('./api/maps-token?purpose=basemap-basemap').then(r=>r.ok?r.json():{}).then(j=>cb(j.token||null)).catch(()=>cb(null));
+      }
+    });
+    appleMap=new mapkit.Map('appleBasemap',{
+      center:{latitude:CONFIG.center[0],longitude:CONFIG.center[1]},
+      showsZoomControl:false,showsCompass:false,showsMapTypeControl:false,showsPointsOfInterest:false
+    });
+    if(appleMap&&appleMap.rect){appleActive=true;wrapperEl.classList.add('leaflet-transparent');
+      map.on('movestart',syncAppleToLeaflet);map.on('moveend',syncAppleToLeaflet);
+      try{baseLayer.remove();}catch(e){}
+      wrapperEl.parentNode.insertBefore(appleHolder,wrapperEl);}
+  }catch(e){appleActive=false;}
+}
+tryApple();
+
 let baseTheme=themeNow();
 window.baseMapTheme=function(t){
   const want=(t==='light')?'light':'dark';

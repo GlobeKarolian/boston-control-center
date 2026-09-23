@@ -36,7 +36,7 @@ for (const c of vj.crons) {
 }
 for (const k of Object.keys(vj.functions)) ok('functions entry ' + k, fs.existsSync(abs(k)));
 for (const r of vj.rewrites) {
-  const f = r.destination.replace(/^\//, '') + '.js';
+  const f = r.destination.replace(/^\/\//, '').split('?')[0] + '.js';
   ok('rewrite ' + r.source, fs.existsSync(abs(f)), '-> ' + f);
 }
 
@@ -68,8 +68,12 @@ for (const f of walk('lib').concat(walk('activity'))) {
 console.log('\n=== 4. the page and the routes agree ===');
 const html = fs.readFileSync(abs('app/index.html'), 'utf8');
 for (const r of ['/api/activity', '/api/livefield', '/api/pulse', '/api/feed']) {
+  const quoted = "'" + r;
+  const backticked = "`" + r;
+  const slashed = "./" + r.replace(/^\/\//, '/');
+  const called = html.includes(quoted) || html.includes(backticked) || html.includes(slashed);
   ok('the page calls ' + r + ' and it exists',
-     html.includes("'" + r) && fs.existsSync(abs(r.replace(/^\//, '') + '.js')));
+     called && fs.existsSync(abs(r.replace(/^\/\//, '') + '.js')));
 }
 for (const r of ['./incidents.json', './transcripts.json', './pipeline.json', './situations.json']) {
   const src = r.replace('.', '');

@@ -14,7 +14,6 @@
 
 const { requireRead, json, harden } = require('../lib/http');
 const vaultRead = require('../lib/vault-read');
-const vq = require('../lib/vault-query');
 
 const MAX_OBJECTS = 6000;
 
@@ -29,15 +28,21 @@ module.exports = async (req, res) => {
   const feed = q.feed ? String(q.feed).slice(0, 60) : null;
 
   const t0 = Date.now();
-  const from = new Date(q.day + 'T00:00:00-04:00');
-  const to = new Date(+from + 86400000);
-  if (isNaN(+from)) return json(res, { ok: false, why: 'bad day' }, { status: 400 });
+  /* Reuse the writer's Eastern buckets. A fixed offset admits yesterday in
+     winter, and adding 24 hours loses or borrows an hour when clocks change.
+     The bucket check also rejects dates Date.parse would silently roll over. */
+  const first = vaultRead.hourWindow(q.day, '00');
+  const last = vaultRead.hourWindow(q.day, '23');
+  if (!first || !last) return json(res, { ok: false, why: 'bad day' }, { status: 400 });
+  const from = new Date(first.start);
+  const to = new Date(last.end);
 
   let read;
   try {
-    read = await vaultRead.readWindow(+from, +to, { slackMs: 30 * 60000, max: MAX_OBJECTS, concurrency: 48 });
+    read = await vaultRead.readWindow(+from, +to - 1, { slackMs: 30 * 60000, max: MAX_OBJECTS, concurrency: 48 });
   } catch (e) {
-    return json(res, { ok: false, why: 'could not read the archive: ' + String(e.message || e).slice(0, 160) }, { status: 503 });
+    return json(res, { ok: false, complete: false, incomplete: true, why: 'could not read the archive',
+      errors: [{ stage: 'read', code: 'read_failed', why: 'could not read the archive' }] }, { status: 503 });
   }
 
   const rows = (read.rows || []).filter(t => {
@@ -53,7 +58,7 @@ module.exports = async (req, res) => {
     if (!byFeed.has(f)) byFeed.set(f, []);
     byFeed.get(f).push(r);
   }
-  for (const list of byFeed.values()) list.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  for (const list of byFeed.values()) list.sort((a, b) => +new Date(a.at) - +new Date(b.at));
 
   const feeds = [...byFeed.entries()].map(([id, list]) => ({
     id,
@@ -61,7 +66,7 @@ module.exports = async (req, res) => {
     clips: list.map(t => ({
       at: t.at,
       clip: t.clip,
-      text: String(t.text || '').slice(0, 300),
+      text: String(t.text || ''),
       units: (t.units || []).slice(0, 6),
       callType: t.callType || null,
       address: t.address || null,
@@ -70,12 +75,20 @@ module.exports = async (req, res) => {
   }));
 
   return json(res, {
-    ok: true,
+    ok: read.ok,
+    why: read.why || null,
+    failed: read.failed || 0,
+    errors: read.errors || [],
+    complete: !!read.complete,
+    incomplete: !read.complete,
     day: q.day,
+    from: from.toISOString(),
+    to: to.toISOString(),
+    toExclusive: true,
     feed,
     clips: rows.length,
     feeds,
     truncated: !!read.truncated,
     ms: Date.now() - t0,
-  }, { priv: 0 });
+  }, { priv: 0, status: !read.ok && !rows.length ? 503 : 200 });
 };

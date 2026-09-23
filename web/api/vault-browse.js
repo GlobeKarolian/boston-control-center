@@ -19,7 +19,6 @@
 // wearing browse clothes. The error says so rather than half-answering.
 
 const { requireRead, json, harden } = require('../lib/http');
-const blob = require('../lib/blob');
 const vaultRead = require('../lib/vault-read');
 
 const MAX_WINDOW_MS = 6 * 3600000;
@@ -42,8 +41,17 @@ module.exports = async (req, res) => {
   const from = new Date(String(qq.from || ''));
   const to = new Date(String(qq.to || ''));
 
-  if (isNaN(+from) || isNaN(+to)) {
-    return json(res, { ok: false, why: 'from and to must be timestamps' }, { status: 400 });
+  /* Date parses February 30 as March 2. Check the written ISO calendar date
+     before accepting that normalization; keep other valid legacy timestamp
+     forms working rather than changing the endpoint's input contract. */
+  const badCalendar = value => {
+    const m = /^(\d{4}-\d{2}-\d{2})(?:T|\s|$)/.exec(String(value || ''));
+    if (!m) return false;
+    const day = new Date(m[1] + 'T00:00:00Z');
+    return !Number.isFinite(+day) || day.toISOString().slice(0, 10) !== m[1];
+  };
+  if (isNaN(+from) || isNaN(+to) || badCalendar(qq.from) || badCalendar(qq.to)) {
+    return json(res, { ok: false, why: 'from and to must be timestamps with valid calendar dates' }, { status: 400 });
   }
   if (+to <= +from) {
     return json(res, { ok: false, why: 'that window ends before it starts' }, { status: 400 });
@@ -51,7 +59,6 @@ module.exports = async (req, res) => {
   if (+to - +from > MAX_WINDOW_MS) {
     return json(res, { ok: false, why: 'browse covers up to six hours at a time; for more, search' }, { status: 400 });
   }
-  if (!blob.enabled()) return json(res, { ok: false, why: blob.reason() }, { status: 503 });
 
   /* WHICH OBJECTS COVER THE WINDOW.
 
@@ -66,7 +73,13 @@ module.exports = async (req, res) => {
      window touches rather than the whole day, runs them concurrently, and
      returns newest first so the cap drops the oldest edge instead of the
      newest. */
-  const read = await vaultRead.readWindow(+from, +to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS, concurrency: CONCURRENCY });
+  let read;
+  try {
+    read = await vaultRead.readWindow(+from, +to, { slackMs: BATCH_SLACK_MS, max: MAX_OBJECTS, concurrency: CONCURRENCY });
+  } catch (e) {
+    return json(res, { ok: false, complete: false, incomplete: true, why: 'could not read the archive',
+      errors: [{ stage: 'read', code: 'read_failed', why: 'could not read the archive' }] }, { status: 503 });
+  }
   const got = read.listing || {};
   const truncated = !!got.truncated;
 
@@ -83,16 +96,22 @@ module.exports = async (req, res) => {
     heard[t.feed || 'unknown'] = (heard[t.feed || 'unknown'] || 0) + 1;
   }
 
-  /* What was actually read, which is not always what was asked for. A window
-     too busy to fetch whole keeps its newest end, so saying the span that came
-     back turns a short playback into something a reporter can reason about
-     instead of a silent hole. */
-  const covered = rows.length
+  /* The object cap keeps the newest end; the response cap then keeps the first
+     500 of those rows. Report each span separately so a discarded tail is not
+     advertised as playable. Neither span proves there are no interior gaps. */
+  const matchedCovered = rows.length
     ? { from: String(rows[0].at), to: String(rows[rows.length - 1].at) }
     : null;
+  const tx = rows.slice(0, 500);
+  const clipped = rows.length > tx.length;
+  const covered = tx.length ? { from: String(tx[0].at), to: String(tx[tx.length - 1].at) } : null;
+  const incomplete = !read.ok || !!read.incomplete || truncated || clipped;
 
   return json(res, {
-    ok: true,
+    ok: read.ok,
+    why: read.why || null,
+    failed: read.failed || 0,
+    errors: read.errors || [],
     feed: feed || null,
     from: from.toISOString(),
     to: to.toISOString(),
@@ -100,8 +119,12 @@ module.exports = async (req, res) => {
     heard,
     truncated,
     covered,
-    tx: rows.slice(0, 500),
-    clipped: rows.length > 500,
+    matchedCovered,
+    returned: tx.length,
+    tx,
+    clipped,
+    complete: !incomplete,
+    incomplete,
     ms: Date.now() - t0,
-  }, { priv: 0 });
+  }, { priv: 0, status: !read.ok && !rows.length ? 503 : 200 });
 };

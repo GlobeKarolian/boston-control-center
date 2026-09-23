@@ -47,6 +47,10 @@
       "destination": "/api/app?asset=track.js"
     },
     {
+      "source": "/api/maps-token",
+      "destination": "/api/maps-token"
+    },
+    {
       "source": "/webcams.js",
       "destination": "/api/app?asset=webcams.js"
     },
