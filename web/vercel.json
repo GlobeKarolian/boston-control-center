@@ -11,6 +11,10 @@
       "destination": "/api/app"
     },
     {
+      "source": "/about",
+      "destination": "/api/about"
+    },
+    {
       "source": "/favicon.svg",
       "destination": "/api/app?asset=favicon.svg"
     },
@@ -108,6 +112,10 @@
     }
   ],
   "functions": {
+    "api/about.js": {
+      "maxDuration": 10,
+      "includeFiles": "landing/**"
+    },
     "api/app.js": {
       "maxDuration": 10,
       "includeFiles": "app/**"

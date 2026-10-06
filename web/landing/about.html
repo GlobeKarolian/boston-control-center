@@ -1,0 +1,136 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>scan(1) | scan.boston</title>
+<meta name="description" content="scan.boston listens to Boston's public safety radio around the clock, transcribes it, places it on a map and keeps the audio. A newsroom tool.">
+<meta name="theme-color" content="#050805">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%23050805'/%3E%3Ctext x='6' y='23' font-family='monospace' font-size='20' fill='%2339ff88'%3E%3E_%3C/text%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=VT323&family=IBM+Plex+Mono:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#050805; --panel:#0a120c; --rule:#145c33; --dim:#1f9e55;
+  --fg:#39ff88; --soft:#8affb8; --hi:#b6ffd3; --warn:#ffb020; --warn-soft:#ffcf73;
+}
+*{box-sizing:border-box}
+html{background:var(--bg)}
+body{
+  margin:0; background:var(--bg); color:var(--fg);
+  font-family:'IBM Plex Mono',ui-monospace,Menlo,monospace; font-size:15px; line-height:1.65;
+  -webkit-font-smoothing:antialiased;
+}
+body::before{ /* scanlines */
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:10;
+  background:repeating-linear-gradient(0deg,rgba(0,0,0,.22) 0 1px,transparent 1px 3px);
+}
+body::after{ /* vignette */
+  content:""; position:fixed; inset:0; pointer-events:none; z-index:11;
+  background:radial-gradient(ellipse at center,transparent 55%,rgba(0,0,0,.55) 100%);
+}
+::selection{background:var(--fg);color:var(--bg)}
+a{color:var(--fg)} a:hover{color:var(--hi)}
+.wrap{max-width:1040px;margin:0 auto;padding:28px 32px 64px}
+.bar{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;color:var(--dim);font-size:13px}
+header.bar{border-bottom:1px dashed var(--rule);padding-bottom:12px}
+footer.bar{border-top:1px dashed var(--rule);padding-top:12px;margin-top:8px}
+pre.banner{
+  font-family:inherit;font-size:15px;line-height:1.15;color:var(--fg);margin:40px 0 8px;
+  overflow-x:auto;text-shadow:0 0 6px rgba(57,255,136,.55);
+}
+.shell{margin:28px 0 40px;background:var(--panel);border:1px solid var(--rule);padding:18px 20px;overflow-x:auto}
+.shell div{white-space:pre-wrap}
+.ps1{color:var(--dim)}
+.ok{color:var(--soft)} .wn{color:var(--warn)}
+.cursor{display:inline-block;width:.6em;background:var(--fg);color:var(--bg);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+h2{font-family:'VT323',monospace;font-weight:400;font-size:30px;margin:0;color:var(--hi);letter-spacing:.5px}
+h2.warn{color:var(--warn)}
+.sec{margin:4px 0 30px 40px;max-width:760px}
+.sec p{margin:0 0 12px;color:var(--soft)}
+.opts{display:flex;flex-direction:column;gap:18px}
+.opt .d{margin-left:32px;color:var(--soft)}
+b{color:var(--fg);font-weight:600}
+i{color:var(--hi)}
+.caveat p{color:var(--warn-soft)}
+.cmd{
+  display:inline-block;background:var(--fg);color:var(--bg);padding:10px 16px;font-weight:600;
+  margin:6px 0 0;white-space:pre-wrap;
+}
+.see a{margin-right:18px}
+@media (max-width:640px){
+  .wrap{padding:20px 16px 48px}
+  .sec{margin-left:16px}
+  .opt .d{margin-left:16px}
+  pre.banner{font-size:9px}
+  h2{font-size:26px}
+}
+@media (prefers-reduced-motion:reduce){.cursor{animation:none}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="bar"><span>SCAN(1)</span><span>Boston Public Safety Radio</span><span>SCAN(1)</span></header>
+
+<pre class="banner" aria-label="scan.boston"> ___  ___   _   _  _     ___  ___  ___ _____ ___  _  _
+/ __|/ __| /_\ | \| |   | _ )/ _ \/ __|_   _/ _ \| \| |
+\__ \ (__ / _ \| .` | _ | _ \ (_) \__ \ | || (_) | .` |
+|___/\___/_/ \_\_|\_|(_)|___/\___/|___/ |_| \___/|_|\_|</pre>
+
+  <div class="shell" id="shell" aria-label="Example session">
+    <div><span class="ps1">newsroom:~$</span> scan --listen --city boston --keep-audio</div>
+    <div class="ok">[ok] relay up, feeds streaming</div>
+    <div class="ok">[ok] transcribing, geolocating, threading incidents</div>
+    <div class="ok">[ok] archiving audio for every transmission</div>
+    <div class="wn">[warn] output is UNVERIFIED and NOT FOR PUBLICATION</div>
+    <div><span class="ps1">newsroom:~$</span> <span class="cursor">&#160;</span></div>
+  </div>
+
+  <h2>NAME</h2>
+  <div class="sec"><p>scan.boston - the city's radio, written down</p></div>
+
+  <h2>SYNOPSIS</h2>
+  <div class="sec"><p style="color:var(--fg)"><b>scan</b> [<b>--hear</b>] [<b>--ask</b> <i>question</i>] [<b>--brief</b> <i>hours</i>] [<b>--map</b>]</p></div>
+
+  <h2>DESCRIPTION</h2>
+  <div class="sec">
+    <p>Listens to Boston's police, fire, EMS and transit radio around the clock. Transcribes every transmission, works out where it happened, threads it into incidents and keeps the audio, so a newsroom can find out what the scanner said while nobody was listening.</p>
+    <p>Built for the night desk, the 3am page, and whoever walks in at 6 wondering what they missed.</p>
+  </div>
+
+  <h2>OPTIONS</h2>
+  <div class="sec opts">
+    <div class="opt"><b>--hear</b><div class="d">Every transcript line carries its audio. Misheard a street? Play the four seconds it came from and decide for yourself.</div></div>
+    <div class="opt"><b>--ask</b> <i>"what happened on storrow last night"</i><div class="d">Query the archive in plain English. Returns whole scenes with timelines, sources and audio, rather than a pile of loose lines.</div></div>
+    <div class="opt"><b>--brief</b> <i>10</i><div class="d">Shift Change: what is still open, what was major, everything above routine. A handoff for whoever is next.</div></div>
+    <div class="opt"><b>--map</b><div class="d">Live calls on a map, each one carrying how sure the system is about where it happened. Refuses to draw a pin it cannot actually place.</div></div>
+  </div>
+
+  <h2 class="warn">CAVEATS</h2>
+  <div class="sec caveat">
+    <p>Machine-transcribed, machine-located, unverified. A lead, never a fact. Reporters confirm with the department before anything runs.</p>
+    <p>Not for publication. Not a public service. Newsroom only.</p>
+  </div>
+
+  <h2>BUGS</h2>
+  <div class="sec">
+    <p>Mishears street names, unit numbers and anything said over a siren. Cannot hear encrypted channels, so some incidents go quiet partway through. Both are reasons the audio is kept.</p>
+  </div>
+
+  <h2>ACCESS</h2>
+  <div class="sec">
+    <p>Accounts are handed out one at a time. To get one:</p>
+    <div class="cmd">$ slack @matt-karolian "add me to scan.boston"</div>
+    <p style="margin-top:14px">In plain terms: send Matt Karolian a Slack message.</p>
+  </div>
+
+  <h2>SEE ALSO</h2>
+  <div class="sec see"><p><a href="/">scan.boston</a> (sign-in required)</p></div>
+
+  <footer class="bar"><span>scan.boston</span><span>Built in Boston</span><span>SCAN(1)</span></footer>
+</div>
+</body>
+</html>
