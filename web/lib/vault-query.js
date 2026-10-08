@@ -180,6 +180,31 @@ function whenOf(q, now) {
     return named({ from, to: new Date(+from + dayMs), label: iso[0] });
   }
 
+  /* A month and a day, the way a reporter writes a date in an email: "Oct. 3",
+     "October 3rd", "oct 3", "10/3". Until 8 October 2026 none of the
+     month-name forms without a suffix parsed, so "Myopia Hunt Club Oct. 3"
+     searched the default last two days, found nothing, and looked like the
+     archive only reached back to today. The month is honoured, unlike the
+     bare day number below, because the reporter said which month. A date
+     later in the year than today is last year's. */
+  const MONTHS = { jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6, jul: 7, aug: 8, sep: 9, sept: 9, oct: 10, nov: 11, dec: 12 };
+  const mdName = q.match(/\b(jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})(?:st|nd|rd|th)?\b/i);
+  const mdNum = mdName ? null : q.match(/(?:^|[^\d/])(\d{1,2})\/(\d{1,2})(?![\d/])/);
+  if (mdName || mdNum) {
+    const mm = mdName ? MONTHS[mdName[1].toLowerCase()] : +mdNum[1];
+    const dd = mdName ? +mdName[2] : +mdNum[2];
+    if (mm >= 1 && mm <= 12 && dd >= 1 && dd <= 31) {
+      const pN = partsIn(t);
+      let y = pN.y;
+      if (mm > pN.m || (mm === pN.m && dd > pN.d)) y -= 1;
+      const from = easternAt(y, mm, dd, 0, 0, t);
+      const MON3 = ['jan', 'feb', 'mar', 'apr', 'may', 'jun', 'jul', 'aug', 'sep', 'oct', 'nov', 'dec'];
+      const label = ['sun', 'mon', 'tue', 'wed', 'thu', 'fri', 'sat'][new Date(+easternAt(y, mm, dd, 12, 0, t)).getUTCDay()]
+        + ' ' + MON3[mm - 1] + ' ' + dd;
+      return named({ from, to: new Date(+from + dayMs), label });
+    }
+  }
+
   /* A date the way a person names one: a weekday, a day number, or both.
      "Wednesday the 12th", "on the 12th", "wednesday". Until 15 August 2026
      none of these parsed, so "stabbing at South Station Wednesday the 12th"
@@ -718,6 +743,12 @@ function parse(q, now) {
      the window it just built. */
   for (const w of ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday',
                    'st', 'nd', 'rd', 'th', 'the']) consumed.add(w);
+  /* Month names and the day beside them, for the same reason. */
+  for (const w of ['jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april', 'may', 'jun', 'june',
+                   'jul', 'july', 'aug', 'august', 'sep', 'sept', 'september', 'oct', 'october',
+                   'nov', 'november', 'dec', 'december']) consumed.add(w);
+  const mdCons = raw.match(/\b(?:jan|feb|mar|apr|may|jun|jul|aug|sept?|oct|nov|dec)[a-z]*\.?\s+(\d{1,2})\b/i);
+  if (mdCons) consumed.add(mdCons[1]);
   const dnCons = raw.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/i);
   if (dnCons) { consumed.add(dnCons[1]); consumed.add(dnCons[0].toLowerCase()); }
 
