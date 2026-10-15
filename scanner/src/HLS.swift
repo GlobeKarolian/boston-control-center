@@ -49,11 +49,13 @@ enum HTTP {
     }
 
     static func post(_ url: URL, form: [String: String], session: URLSession,
-                     referer: String? = nil, timeout: TimeInterval = 25) -> HTTPResult {
+                     referer: String? = nil, headers: [String: String] = [:],
+                     timeout: TimeInterval = 25) -> HTTPResult {
         var r = URLRequest(url: url)
         r.httpMethod = "POST"
         r.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         if let ref = referer { r.setValue(ref, forHTTPHeaderField: "Referer") }
+        for (k, v) in headers { r.setValue(v, forHTTPHeaderField: k) }
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
         let body = form.map { k, v -> String in
@@ -233,18 +235,77 @@ final class Broadcastify {
               let html = String(data: d, encoding: .utf8) else {
             return .failure(Fault("the feed page would not load (HTTP \(r.status))"))
         }
-        guard let raw = Self.jsString(html, key: "hlsUrl"), !raw.isEmpty,
-              let playlist = URL(string: raw) else {
+        /* The old page carried the playlist inline as hlsUrl. In October 2026
+           Broadcastify started shipping hlsUrl empty and an hlsSessionUrl beside
+           it, an endpoint that hands the playlist out to a signed-in POST. Every
+           feed then failed with "the sign in may have expired" while the sign in
+           was fine, which sent the operator to the wrong fix. Inline first, so a
+           page that still has it costs nothing; the session endpoint second. */
+        if let raw = Self.jsString(html, key: "hlsUrl"), !raw.isEmpty,
+           let playlist = URL(string: raw) {
+            return .success(Self.stream(playlist, token: Self.jsString(html, key: "sessionId") ?? ""))
+        }
+        guard let rel = Self.jsString(html, key: "hlsSessionUrl"), !rel.isEmpty,
+              let endpoint = URL(string: rel, relativeTo: page)?.absoluteURL else {
             forgetLogin()
             return .failure(Fault("no stream on the feed page, the sign in may have expired"))
         }
-        let token = Self.jsString(html, key: "sessionId") ?? ""
+        var form = ["feedId": feedID]
+        if let sid = Self.jsString(html, key: "sessionId"), !sid.isEmpty { form["sessionId"] = sid }
+        let s = HTTP.post(endpoint, form: form, session: session, referer: page.absoluteString,
+                          headers: ["X-Requested-With": "XMLHttpRequest",
+                                    "Accept": "application/json, text/javascript, */*"])
+        guard s.status == 200, let sd = s.data,
+              let obj = try? JSONSerialization.jsonObject(with: sd) else {
+            return .failure(Fault("the stream session endpoint answered HTTP \(s.status)"))
+        }
+        if let d = obj as? [String: Any], let err = d["error"] as? String {
+            if err == "auth" {
+                forgetLogin()
+                return .failure(Fault("Broadcastify says this Mac is not signed in (stream session refused: auth)"))
+            }
+            return .failure(Fault("the stream session endpoint refused: \(err)"))
+        }
+        guard let raw = Self.find(obj, where: { _, v in v.contains(".m3u8") }),
+              let playlist = URL(string: raw, relativeTo: page)?.absoluteURL else {
+            let keys = (obj as? [String: Any]).map { $0.keys.sorted().joined(separator: ", ") } ?? "?"
+            return .failure(Fault("the stream session answered without a playlist (keys: \(keys))"))
+        }
+        /* If the playlist already carries its own query string it is signed as
+           is, and the poller must not replace that query with a token. */
+        var token = ""
+        if playlist.query == nil {
+            token = Self.find(obj, where: { k, _ in
+                ["s", "sessionid", "session", "token"].contains(k.lowercased()) })
+                ?? form["sessionId"] ?? ""
+        }
+        var st = Self.stream(playlist, token: token)
+        if st.expires == nil, let d = obj as? [String: Any] {
+            for k in ["expires", "expiry", "exp", "expiresAt"] {
+                if let n = d[k] as? Double { st.expires = Date(timeIntervalSince1970: n > 1e12 ? n / 1000 : n); break }
+                if let t = d[k] as? String, let n = Double(t) { st.expires = Date(timeIntervalSince1970: n > 1e12 ? n / 1000 : n); break }
+            }
+        }
+        return .success(st)
+    }
+
+    /// The first string anywhere in a JSON value whose key and value pass.
+    static func find(_ v: Any, key: String = "", where ok: (String, String) -> Bool) -> String? {
+        if let s = v as? String { return ok(key, s) ? s.replacingOccurrences(of: "\\/", with: "/") : nil }
+        if let d = v as? [String: Any] {
+            for k in d.keys.sorted() { if let hit = find(d[k]!, key: k, where: ok) { return hit } }
+        }
+        if let a = v as? [Any] { for x in a { if let hit = find(x, key: key, where: ok) { return hit } } }
+        return nil
+    }
+
+    static func stream(_ playlist: URL, token: String) -> Stream {
         var expires: Date?
         let parts = token.split(separator: ".")
         if parts.count >= 2, let epoch = Double(parts[1]) {
             expires = Date(timeIntervalSince1970: epoch)
         }
-        return .success(Stream(playlist: playlist, token: token, expires: expires))
+        return Stream(playlist: playlist, token: token, expires: expires)
     }
 
     /// Pulls one `key: "value"` out of the page's inline player config.
