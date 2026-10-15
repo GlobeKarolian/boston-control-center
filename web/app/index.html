@@ -2242,11 +2242,17 @@ const wrapperEl=document.getElementById('map');
 const appleHolder=document.getElementById('appleBasemap');
 /* Apple Maps via MapKit JS, when the token endpoint answers; Leaflet CARTO
    tiles = the fallback, and the fallback should be the exception, not the rule. */
+/* Esri's gray canvas, not CARTO. In October 2026 CARTO's basemaps started
+   answering every keyless request with a 200 and a tile that says API KEY
+   REQUIRED, so the map drew a grid of watermarks over nothing and no error
+   reached the console: the HTTP status was fine, the picture was the error.
+   Esri's canvas needs no key. Its native zoom stops at 16, so Leaflet
+   upscales past that rather than requesting tiles that do not exist. */
 const BASE_TILES={
-  dark:'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-  light:'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png'
+  dark:'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  light:'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}'
 };
-const baseLayer=L.tileLayer(BASE_TILES[themeNow()],{subdomains:'abcd',maxZoom:19,attribution:'&copy; OpenStreetMap &copy; CARTO'}).addTo(map);
+const baseLayer=L.tileLayer(BASE_TILES[themeNow()],{maxZoom:19,maxNativeZoom:16,attribution:'Tiles &copy; Esri, HERE, Garmin, &copy; OpenStreetMap contributors'}).addTo(map);
 let appleMap=null;
 let appleActive=false;
 function syncAppleToLeaflet(){
